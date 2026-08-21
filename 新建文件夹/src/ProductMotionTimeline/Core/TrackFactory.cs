@@ -92,7 +92,7 @@ namespace ProductMotionTimeline.Core
       for (var i = 1; i < 10000; i++)
       {
         var name = "ProductMotionPart_" + i.ToString("000");
-        if (doc.InstanceDefinitions.Find(name） == null)
+        if (doc.InstanceDefinitions.Find(name) == null)
           return name;
       }
       return "ProductMotionPart_" + Guid.NewGuid().ToString("N");
