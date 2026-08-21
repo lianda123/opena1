@@ -232,7 +232,7 @@ namespace ProductMotionTimeline.UI
     private static int XToFrame(float x, TimelineDocument model, float width)
     {
       var t = (x - HeaderWidth) / TimelineWidth(width);
-      t = Math.Max(0.0, Math.Min(1.0, t));
+      t = Math.Max(0f, Math.Min(1f, t));
       return (int)Math.Round(model.StartFrame + t * (model.EndFrame - model.StartFrame));
     }
 
