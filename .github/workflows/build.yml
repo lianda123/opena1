@@ -1,0 +1,34 @@
+name: Build Rhino 7 and 8 plug-in
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 7.0.x
+
+      - name: Build Rhino plug-ins
+        shell: pwsh
+        working-directory: 新建文件夹
+        run: ./build.ps1 -Configuration Release
+
+      - name: Upload compiled plug-ins
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductMotionTimeline-0.1.0
+          path: 新建文件夹/dist/ProductMotionTimeline-0.1.0-release.zip
+          if-no-files-found: error
