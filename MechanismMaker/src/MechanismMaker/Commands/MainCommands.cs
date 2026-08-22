@@ -74,9 +74,9 @@ namespace MechanismMaker.Commands
       current.PressureAngleDegrees = pressure;
       current.BacklashMm = backlash;
       current.SlotClearanceMm = slotClearance;
-      RhinoApp.WriteLine(
+      RhinoApp.WriteLine(string.Format(
         "MechanismMaker 参数：板厚 {0:0.###}mm，固定孔 Ø{1:0.###}，活动孔 Ø{2:0.###}，导向孔 Ø{3:0.###}。",
-        board, fixedHole, rotatingHole, guideHole);
+        board, fixedHole, rotatingHole, guideHole));
       return Result.Success;
     }
   }

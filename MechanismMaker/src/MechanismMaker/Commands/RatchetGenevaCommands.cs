@@ -64,9 +64,9 @@ namespace MechanismMaker.Commands
           settings.FixedHoleMm,
           toleranceMm);
         var ids = OutputBuilder.AddAssembly(doc, assembly, plane, settings);
-        RhinoApp.WriteLine(
+        RhinoApp.WriteLine(string.Format(
           "日内瓦机构每次分度 {0:0.###}°；槽宽 {1:0.###}mm（驱动销 {2:0.###} + 间隙 {3:0.###}）。",
-          360.0 / slots, slotWidth, pinDiameter, settings.SlotClearanceMm);
+          360.0 / slots, slotWidth, pinDiameter, settings.SlotClearanceMm));
         return ids.Count > 0 ? Result.Success : Result.Failure;
       }
       catch (Exception exception)
