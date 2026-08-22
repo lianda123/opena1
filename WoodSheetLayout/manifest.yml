@@ -1,0 +1,12 @@
+name: WoodSheetLayout
+version: 1.0.0
+authors:
+  - Lianda Design Tools
+description: One-click flattening, thickness sorting and A3/A4 layout for laser-cut wooden assembly products.
+url: https://github.com/lianda123/opena1
+keywords:
+  - wood
+  - laser-cut
+  - layout
+  - flatten
+  - nesting
