@@ -1,0 +1,12 @@
+name: MechanismMaker
+version: 1.0.0
+authors:
+  - Lianda Design Tools
+description: Parametric gear, rack, cam, crank, four-bar, ratchet and Geneva generators for wooden products.
+url: https://github.com/lianda123/opena1
+keywords:
+  - mechanism
+  - gear
+  - automata
+  - wood
+  - laser-cut
