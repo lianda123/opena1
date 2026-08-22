@@ -1,0 +1,12 @@
+name: WoodCheck
+version: 1.0.0
+authors:
+  - Lianda Design Tools
+description: Assembly, collision, shaft alignment and laser-cut manufacturability checks for wooden products.
+url: https://github.com/lianda123/opena1
+keywords:
+  - wood
+  - laser-cut
+  - assembly
+  - collision
+  - manufacturability
