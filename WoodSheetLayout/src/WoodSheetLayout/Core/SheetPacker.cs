@@ -18,32 +18,28 @@ namespace WoodSheetLayout.Core
 
       foreach (var bucket in buckets)
       {
-        var thicknessSheetIndex = 0;
-        ShelfState shelf = null;
-        PackedSheet sheet = null;
-        foreach (var part in bucket.Parts
-          .OrderByDescending(item => Math.Max(item.FlatBounds.Diagonal.X, item.FlatBounds.Diagonal.Y))
-          .ThenByDescending(item => item.FlatBounds.Diagonal.X * item.FlatBounds.Diagonal.Y))
+        var validParts = new List<BoardPart>();
+        foreach (var part in bucket.Parts)
         {
-          PartPlacement placement;
-          if (sheet == null || !shelf.TryPlace(part, out placement))
-          {
-            shelf = new ShelfState(settings.SheetWidth, settings.SheetHeight, settings.Spacing);
-            if (!shelf.TryPlace(part, out placement))
-            {
-              result.OversizedParts.Add(part);
-              continue;
-            }
+          if (FitsEmptySheet(part, settings))
+            validParts.Add(part);
+          else
+            result.OversizedParts.Add(part);
+        }
+        if (validParts.Count == 0)
+          continue;
 
-            sheet = new PackedSheet
-            {
-              GlobalIndex = ++globalSheetIndex,
-              IndexWithinThickness = ++thicknessSheetIndex,
-              ThicknessMillimeters = bucket.RepresentativeThickness
-            };
-            result.Sheets.Add(sheet);
-          }
-          sheet.Placements.Add(placement);
+        var attempt = FindBestAttempt(validParts, settings);
+        for (var index = 0; index < attempt.Sheets.Count; index++)
+        {
+          var packed = new PackedSheet
+          {
+            GlobalIndex = ++globalSheetIndex,
+            IndexWithinThickness = index + 1,
+            ThicknessMillimeters = bucket.RepresentativeThickness
+          };
+          packed.Placements.AddRange(attempt.Sheets[index].Placements);
+          result.Sheets.Add(packed);
         }
       }
 
@@ -54,6 +50,109 @@ namespace WoodSheetLayout.Core
         cursorX += settings.SheetWidth + settings.SheetGap;
       }
       return result;
+    }
+
+    private static PackAttempt FindBestAttempt(IList<BoardPart> parts, LayoutSettings settings)
+    {
+      PackAttempt best = null;
+      foreach (SortStrategy sort in Enum.GetValues(typeof(SortStrategy)))
+      {
+        foreach (PackingHeuristic heuristic in Enum.GetValues(typeof(PackingHeuristic)))
+        {
+          var attempt = RunAttempt(parts, settings, sort, heuristic);
+          if (best == null || IsBetter(attempt, best))
+            best = attempt;
+        }
+      }
+      return best;
+    }
+
+    private static PackAttempt RunAttempt(
+      IEnumerable<BoardPart> parts,
+      LayoutSettings settings,
+      SortStrategy sort,
+      PackingHeuristic heuristic)
+    {
+      var ordered = SortParts(parts, sort).ToList();
+      var attempt = new PackAttempt();
+      foreach (var part in ordered)
+      {
+        MaxRectsSheet destination = null;
+        PackCandidate selected = null;
+
+        // 优先填充前面的板框，只有放不下才开新板框。
+        foreach (var sheet in attempt.Sheets)
+        {
+          PackCandidate candidate;
+          if (!sheet.TryFindBest(part, heuristic, out candidate))
+            continue;
+          destination = sheet;
+          selected = candidate;
+          break;
+        }
+
+        if (destination == null)
+        {
+          destination = new MaxRectsSheet(settings.SheetWidth, settings.SheetHeight, settings.Spacing);
+          attempt.Sheets.Add(destination);
+          if (!destination.TryFindBest(part, heuristic, out selected))
+            throw new InvalidOperationException("板件在空白边界框中仍无法放置。");
+        }
+        destination.Place(selected);
+      }
+      return attempt;
+    }
+
+    private static bool IsBetter(PackAttempt candidate, PackAttempt current)
+    {
+      if (candidate.Sheets.Count != current.Sheets.Count)
+        return candidate.Sheets.Count < current.Sheets.Count;
+
+      var candidateLast = candidate.Sheets.Last().UsedArea;
+      var currentLast = current.Sheets.Last().UsedArea;
+      if (Math.Abs(candidateLast - currentLast) > 1e-8)
+        return candidateLast < currentLast;
+
+      return candidate.Sheets.Sum(sheet => sheet.OccupiedBoundingArea) <
+             current.Sheets.Sum(sheet => sheet.OccupiedBoundingArea);
+    }
+
+    private static IEnumerable<BoardPart> SortParts(IEnumerable<BoardPart> parts, SortStrategy strategy)
+    {
+      switch (strategy)
+      {
+        case SortStrategy.Area:
+          return parts.OrderByDescending(Area).ThenByDescending(MaxSide);
+        case SortStrategy.Width:
+          return parts.OrderByDescending(item => item.FlatBounds.Diagonal.X).ThenByDescending(Area);
+        case SortStrategy.Height:
+          return parts.OrderByDescending(item => item.FlatBounds.Diagonal.Y).ThenByDescending(Area);
+        default:
+          return parts.OrderByDescending(MaxSide).ThenByDescending(Area);
+      }
+    }
+
+    private static bool FitsEmptySheet(BoardPart part, LayoutSettings settings)
+    {
+      var usableWidth = settings.SheetWidth - 2.0 * settings.Spacing;
+      var usableHeight = settings.SheetHeight - 2.0 * settings.Spacing;
+      var width = part.FlatBounds.Max.X - part.FlatBounds.Min.X;
+      var height = part.FlatBounds.Max.Y - part.FlatBounds.Min.Y;
+      return (width <= usableWidth && height <= usableHeight) ||
+             (height <= usableWidth && width <= usableHeight);
+    }
+
+    private static double Area(BoardPart part)
+    {
+      return Math.Abs((part.FlatBounds.Max.X - part.FlatBounds.Min.X) *
+                      (part.FlatBounds.Max.Y - part.FlatBounds.Min.Y));
+    }
+
+    private static double MaxSide(BoardPart part)
+    {
+      return Math.Max(
+        Math.Abs(part.FlatBounds.Max.X - part.FlatBounds.Min.X),
+        Math.Abs(part.FlatBounds.Max.Y - part.FlatBounds.Min.Y));
     }
 
     private static List<ThicknessBucket> BuildThicknessBuckets(
@@ -76,108 +175,229 @@ namespace WoodSheetLayout.Core
       return buckets;
     }
 
+    private static BoundingBox OrientedBounds(BoundingBox bounds, bool rotated)
+    {
+      if (!rotated)
+        return bounds;
+      var rotation = Transform.Rotation(Math.PI * 0.5, Vector3d.ZAxis, Point3d.Origin);
+      var result = BoundingBox.Unset;
+      foreach (var corner in bounds.GetCorners())
+      {
+        var point = corner;
+        point.Transform(rotation);
+        result = result.IsValid ? BoundingBox.Union(result, point) : new BoundingBox(point, point);
+      }
+      return result;
+    }
+
+    private enum SortStrategy
+    {
+      Area,
+      MaxSide,
+      Width,
+      Height
+    }
+
+    private enum PackingHeuristic
+    {
+      BestShortSide,
+      BestArea,
+      BottomLeft
+    }
+
     private sealed class ThicknessBucket
     {
       public double RepresentativeThickness { get; set; }
       public List<BoardPart> Parts { get; } = new List<BoardPart>();
     }
 
-    private sealed class ShelfState
+    private sealed class PackAttempt
     {
-      private readonly double _sheetWidth;
-      private readonly double _sheetHeight;
+      public List<MaxRectsSheet> Sheets { get; } = new List<MaxRectsSheet>();
+    }
+
+    private sealed class PackCandidate
+    {
+      public BoardPart Part { get; set; }
+      public bool Rotated { get; set; }
+      public BoundingBox Bounds { get; set; }
+      public RectD Rectangle { get; set; }
+      public double ScoreA { get; set; }
+      public double ScoreB { get; set; }
+    }
+
+    private sealed class MaxRectsSheet
+    {
       private readonly double _gap;
-      private double _cursorX;
-      private double _cursorY;
-      private double _rowHeight;
+      private readonly List<RectD> _free = new List<RectD>();
 
-      public ShelfState(double sheetWidth, double sheetHeight, double gap)
+      public MaxRectsSheet(double width, double height, double gap)
       {
-        _sheetWidth = sheetWidth;
-        _sheetHeight = sheetHeight;
         _gap = gap;
-        _cursorX = gap;
-        _cursorY = gap;
+        _free.Add(new RectD(gap, gap, width - 2.0 * gap, height - 2.0 * gap));
       }
 
-      public bool TryPlace(BoardPart part, out PartPlacement placement)
+      public List<PartPlacement> Placements { get; } = new List<PartPlacement>();
+      public double UsedArea { get; private set; }
+
+      public double OccupiedBoundingArea
       {
-        placement = ChoosePlacement(part, _cursorX, _cursorY, _rowHeight);
-        if (placement != null)
+        get
         {
-          Accept(placement);
-          return true;
+          if (Placements.Count == 0)
+            return 0.0;
+          var right = Placements.Max(item => item.LocalX + item.OrientedBounds.Max.X - item.OrientedBounds.Min.X);
+          var top = Placements.Max(item => item.LocalY + item.OrientedBounds.Max.Y - item.OrientedBounds.Min.Y);
+          return right * top;
         }
-
-        if (_cursorX <= _gap + 1e-9)
-          return false;
-        var nextRowY = _cursorY + _rowHeight + _gap;
-        placement = ChoosePlacement(part, _gap, nextRowY, 0.0);
-        if (placement == null)
-          return false;
-        _cursorX = _gap;
-        _cursorY = nextRowY;
-        _rowHeight = 0.0;
-        Accept(placement);
-        return true;
       }
 
-      private PartPlacement ChoosePlacement(BoardPart part, double x, double y, double currentRowHeight)
+      public bool TryFindBest(BoardPart part, PackingHeuristic heuristic, out PackCandidate best)
       {
-        var candidates = new List<PartPlacement>();
-        foreach (var rotated in new[] { false, true })
+        best = null;
+        foreach (var free in _free)
         {
-          var bounds = OrientedBounds(part.FlatBounds, rotated);
-          var width = bounds.Max.X - bounds.Min.X;
-          var height = bounds.Max.Y - bounds.Min.Y;
-          if (x + width > _sheetWidth - _gap + 1e-9 ||
-              y + height > _sheetHeight - _gap + 1e-9)
-            continue;
-          candidates.Add(new PartPlacement
+          foreach (var rotated in new[] { false, true })
           {
-            Part = part,
-            RotatedNinetyDegrees = rotated,
-            LocalX = x,
-            LocalY = y,
-            OrientedBounds = bounds
-          });
+            var bounds = OrientedBounds(part.FlatBounds, rotated);
+            var width = bounds.Max.X - bounds.Min.X;
+            var height = bounds.Max.Y - bounds.Min.Y;
+            if (width > free.Width + 1e-9 || height > free.Height + 1e-9)
+              continue;
+
+            var candidate = new PackCandidate
+            {
+              Part = part,
+              Rotated = rotated,
+              Bounds = bounds,
+              Rectangle = new RectD(free.X, free.Y, width, height)
+            };
+            Score(candidate, free, heuristic);
+            if (best == null || candidate.ScoreA < best.ScoreA - 1e-9 ||
+                (Math.Abs(candidate.ScoreA - best.ScoreA) <= 1e-9 && candidate.ScoreB < best.ScoreB))
+              best = candidate;
+
+            if (Math.Abs(width - height) <= 1e-9)
+              break;
+          }
         }
-
-        return candidates
-          .OrderBy(item => Math.Max(currentRowHeight, Height(item)))
-          .ThenBy(item => _sheetWidth - item.LocalX - Width(item))
-          .FirstOrDefault();
+        return best != null;
       }
 
-      private void Accept(PartPlacement placement)
+      public void Place(PackCandidate candidate)
       {
-        _cursorX = placement.LocalX + Width(placement) + _gap;
-        _rowHeight = Math.Max(_rowHeight, Height(placement));
-      }
-
-      private static double Width(PartPlacement placement)
-      {
-        return placement.OrientedBounds.Max.X - placement.OrientedBounds.Min.X;
-      }
-
-      private static double Height(PartPlacement placement)
-      {
-        return placement.OrientedBounds.Max.Y - placement.OrientedBounds.Min.Y;
-      }
-
-      private static BoundingBox OrientedBounds(BoundingBox bounds, bool rotated)
-      {
-        if (!rotated)
-          return bounds;
-        var rotation = Transform.Rotation(Math.PI * 0.5, Vector3d.ZAxis, Point3d.Origin);
-        var result = BoundingBox.Unset;
-        foreach (var corner in bounds.GetCorners())
+        var occupied = candidate.Rectangle;
+        SplitFreeRectangles(occupied);
+        PruneFreeRectangles();
+        Placements.Add(new PartPlacement
         {
-          var point = corner;
-          point.Transform(rotation);
-          result = result.IsValid ? BoundingBox.Union(result, new BoundingBox(point, point)) : new BoundingBox(point, point);
+          Part = candidate.Part,
+          RotatedNinetyDegrees = candidate.Rotated,
+          LocalX = occupied.X,
+          LocalY = occupied.Y,
+          OrientedBounds = candidate.Bounds
+        });
+        UsedArea += occupied.Width * occupied.Height;
+      }
+
+      private static void Score(PackCandidate candidate, RectD free, PackingHeuristic heuristic)
+      {
+        var horizontal = free.Width - candidate.Rectangle.Width;
+        var vertical = free.Height - candidate.Rectangle.Height;
+        switch (heuristic)
+        {
+          case PackingHeuristic.BestArea:
+            candidate.ScoreA = free.Width * free.Height - candidate.Rectangle.Width * candidate.Rectangle.Height;
+            candidate.ScoreB = Math.Min(horizontal, vertical);
+            break;
+          case PackingHeuristic.BottomLeft:
+            candidate.ScoreA = candidate.Rectangle.Top;
+            candidate.ScoreB = candidate.Rectangle.X;
+            break;
+          default:
+            candidate.ScoreA = Math.Min(horizontal, vertical);
+            candidate.ScoreB = Math.Max(horizontal, vertical);
+            break;
         }
-        return result;
+      }
+
+      private void SplitFreeRectangles(RectD occupied)
+      {
+        var next = new List<RectD>();
+        foreach (var free in _free)
+        {
+          if (!free.Intersects(occupied))
+          {
+            next.Add(free);
+            continue;
+          }
+
+          var leftRight = occupied.X - _gap;
+          if (leftRight > free.X)
+            next.Add(RectD.FromEdges(free.X, free.Y, leftRight, free.Top));
+
+          var rightLeft = occupied.Right + _gap;
+          if (rightLeft < free.Right)
+            next.Add(RectD.FromEdges(rightLeft, free.Y, free.Right, free.Top));
+
+          var bottomTop = occupied.Y - _gap;
+          if (bottomTop > free.Y)
+            next.Add(RectD.FromEdges(free.X, free.Y, free.Right, bottomTop));
+
+          var topBottom = occupied.Top + _gap;
+          if (topBottom < free.Top)
+            next.Add(RectD.FromEdges(free.X, topBottom, free.Right, free.Top));
+        }
+        _free.Clear();
+        _free.AddRange(next.Where(item => item.Width > 1e-9 && item.Height > 1e-9));
+      }
+
+      private void PruneFreeRectangles()
+      {
+        for (var left = _free.Count - 1; left >= 0; left--)
+        {
+          for (var right = _free.Count - 1; right >= 0; right--)
+          {
+            if (left == right || !_free[right].Contains(_free[left]))
+              continue;
+            _free.RemoveAt(left);
+            break;
+          }
+        }
+      }
+    }
+
+    private struct RectD
+    {
+      public RectD(double x, double y, double width, double height)
+      {
+        X = x;
+        Y = y;
+        Width = width;
+        Height = height;
+      }
+
+      public double X { get; }
+      public double Y { get; }
+      public double Width { get; }
+      public double Height { get; }
+      public double Right => X + Width;
+      public double Top => Y + Height;
+
+      public static RectD FromEdges(double left, double bottom, double right, double top)
+      {
+        return new RectD(left, bottom, right - left, top - bottom);
+      }
+
+      public bool Intersects(RectD other)
+      {
+        return X < other.Right && Right > other.X && Y < other.Top && Top > other.Y;
+      }
+
+      public bool Contains(RectD other)
+      {
+        return other.X >= X - 1e-9 && other.Y >= Y - 1e-9 &&
+               other.Right <= Right + 1e-9 && other.Top <= Top + 1e-9;
       }
     }
   }

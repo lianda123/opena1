@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical checks for Wood Sheet Layout 1.0."""
+"""Static and mathematical checks for Wood Sheet Layout 1.1."""
 
 from pathlib import Path
 import re
@@ -54,25 +54,25 @@ def main():
 
     for token in ["420.0", "297.0", "210.0", "SpacingMillimeters", "ThicknessToleranceMillimeters"]:
         assert token in models, token
-    for token in ["GetGroupList", "TryGetPlane", "GetBoundingBox", "ThicknessMillimeters"]:
+    for token in ["GetGroupList", "TryGetPlane", "GetBoundingBox", "ThicknessMillimeters", "SampleGroupedCurves", "OrientBoardBehindPlane"]:
         assert token in analyzer, token
-    for token in ["RemoveFromAllGroups", "AddToGroup", "LayerIndex", "ObjectColor"]:
-        assert token in engine or token == "ObjectColor", token
-    for token in ["RotatedNinetyDegrees", "BuildThicknessBuckets", "OversizedParts"]:
+    for token in ["RemoveFromAllGroups", "AddToGroup", "LayerIndex", "Duplicate", "PlainText", "FormatThickness"]:
+        assert token in engine, token
+    for token in ["RotatedNinetyDegrees", "BuildThicknessBuckets", "OversizedParts", "MaxRectsSheet", "PackingHeuristic"]:
         assert token in packer, token
     for command in ["WoodSheetLayout", "WSLayFlatA3", "WSLayFlatA4"]:
         assert command in commands, command
     assert "net48;net8.0" in project
-    assert "<Version>1.0.0</Version>" in project
+    assert "<Version>1.1.0</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
         assert stripped.count("{") == stripped.count("}"), f"unbalanced braces: {path}"
 
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
-    for phrase in ["4 mm", "A3", "A4", "图层颜色", "同一个 Rhino Group"]:
+    for phrase in ["4 mm", "A3", "A4", "图层颜色", "同一个 Rhino Group", "曲线所在面", "MaxRects"]:
         assert phrase in readme, phrase
-    print("Wood Sheet Layout 1.0 static/mathematical checks passed.")
+    print("Wood Sheet Layout 1.1 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

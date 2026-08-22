@@ -41,20 +41,20 @@ jobs:
       - name: Upload Rhino 7 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: WoodSheetLayout-1.0.0-rhino7
-          path: WoodSheetLayout/dist/WoodSheetLayout-1.0.0-rhino7.zip
+          name: WoodSheetLayout-1.1.0-rhino7
+          path: WoodSheetLayout/dist/WoodSheetLayout-1.1.0-rhino7.zip
           if-no-files-found: error
 
       - name: Upload Rhino 8 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: WoodSheetLayout-1.0.0-rhino8
-          path: WoodSheetLayout/dist/WoodSheetLayout-1.0.0-rhino8.zip
+          name: WoodSheetLayout-1.1.0-rhino8
+          path: WoodSheetLayout/dist/WoodSheetLayout-1.1.0-rhino8.zip
           if-no-files-found: error
 
       - name: Upload combined package
         uses: actions/upload-artifact@v4
         with:
-          name: WoodSheetLayout-1.0.0-rhino7-rhino8
-          path: WoodSheetLayout/dist/WoodSheetLayout-1.0.0-rhino7-rhino8.zip
+          name: WoodSheetLayout-1.1.0-rhino7-rhino8
+          path: WoodSheetLayout/dist/WoodSheetLayout-1.1.0-rhino7-rhino8.zip
           if-no-files-found: error

@@ -193,6 +193,33 @@ namespace WoodSheetLayout.Core
           sheet.IndexWithinThickness)
       };
       doc.Objects.AddCurve(new PolylineCurve(points), attributes);
+
+      var labelHeight = 6.0 * settings.ModelUnitsPerMillimeter;
+      var labelOffset = 2.0 * settings.ModelUnitsPerMillimeter;
+      var labelPlane = new Plane(
+        new Point3d(x, y + settings.SheetHeight + labelOffset, 0.0),
+        Vector3d.ZAxis);
+      var label = new TextEntity
+      {
+        Plane = labelPlane,
+        PlainText = FormatThickness(sheet.ThicknessMillimeters),
+        TextHeight = labelHeight,
+        Justification = TextJustification.BottomLeft
+      };
+      var labelAttributes = new ObjectAttributes
+      {
+        LayerIndex = layerIndex,
+        Name = "板厚_" + FormatThickness(sheet.ThicknessMillimeters)
+      };
+      doc.Objects.AddText(label, labelAttributes);
+    }
+
+    private static string FormatThickness(double thicknessMillimeters)
+    {
+      var roundedInteger = Math.Round(thicknessMillimeters);
+      return Math.Abs(thicknessMillimeters - roundedInteger) <= 0.05
+        ? roundedInteger.ToString("0") + "mm"
+        : thicknessMillimeters.ToString("0.##") + "mm";
     }
 
     private static int FindOrCreateBoundaryLayer(RhinoDoc doc, double thicknessMillimeters, Color color)

@@ -53,6 +53,7 @@ namespace WoodSheetLayout.Core
         return false;
 
       var tolerance = Math.Max(doc.ModelAbsoluteTolerance, modelUnitsPerMillimeter * 0.001);
+      var curveSamples = SampleGroupedCurves(objects);
       RhinoObject bestObject = null;
       var bestPlane = Plane.Unset;
       var bestThickness = double.MaxValue;
@@ -66,6 +67,7 @@ namespace WoodSheetLayout.Core
         if (!TryFindBoardPlane(
           rhinoObject.Geometry,
           tolerance,
+          curveSamples,
           out candidatePlane,
           out candidateThickness,
           out candidateFootprint))
@@ -129,6 +131,7 @@ namespace WoodSheetLayout.Core
     private static bool TryFindBoardPlane(
       GeometryBase geometry,
       double tolerance,
+      IList<Point3d> curveSamples,
       out Plane plane,
       out double thickness,
       out double footprint)
@@ -145,17 +148,18 @@ namespace WoodSheetLayout.Core
       if (brep == null && surface != null)
         brep = surface.ToBrep();
       if (brep != null)
-        return TryFindBrepPlane(brep, tolerance, out plane, out thickness, out footprint);
+        return TryFindBrepPlane(brep, tolerance, curveSamples, out plane, out thickness, out footprint);
 
       var mesh = geometry as Mesh;
       if (mesh != null)
-        return TryFindMeshPlane(mesh, tolerance, out plane, out thickness, out footprint);
+        return TryFindMeshPlane(mesh, tolerance, curveSamples, out plane, out thickness, out footprint);
       return false;
     }
 
     private static bool TryFindBrepPlane(
       Brep brep,
       double tolerance,
+      IList<Point3d> curveSamples,
       out Plane bestPlane,
       out double bestThickness,
       out double bestFootprint)
@@ -163,6 +167,7 @@ namespace WoodSheetLayout.Core
       bestPlane = Plane.Unset;
       bestThickness = double.MaxValue;
       bestFootprint = 0.0;
+      var bestCurveDistance = double.MaxValue;
       foreach (var face in brep.Faces)
       {
         Plane facePlane;
@@ -175,22 +180,29 @@ namespace WoodSheetLayout.Core
         var height = Math.Abs(box.Max.Y - box.Min.Y);
         var depth = Math.Abs(box.Max.Z - box.Min.Z);
         var area = width * height;
+        var curveDistance = AverageCurveDistance(facePlane, curveSamples);
         if (width <= tolerance || height <= tolerance || depth <= tolerance)
           continue;
         if (depth < bestThickness - tolerance ||
-            (Math.Abs(depth - bestThickness) <= tolerance && area > bestFootprint))
+            (Math.Abs(depth - bestThickness) <= tolerance && curveDistance < bestCurveDistance - tolerance) ||
+            (Math.Abs(depth - bestThickness) <= tolerance &&
+             Math.Abs(curveDistance - bestCurveDistance) <= tolerance && area > bestFootprint))
         {
           bestPlane = facePlane;
           bestThickness = depth;
           bestFootprint = area;
+          bestCurveDistance = curveDistance;
         }
       }
+      if (bestPlane.IsValid)
+        bestPlane = OrientBoardBehindPlane(bestPlane, brep.GetBoundingBox(bestPlane));
       return bestPlane.IsValid && bestThickness < double.MaxValue;
     }
 
     private static bool TryFindMeshPlane(
       Mesh mesh,
       double tolerance,
+      IList<Point3d> curveSamples,
       out Plane plane,
       out double thickness,
       out double footprint)
@@ -201,6 +213,8 @@ namespace WoodSheetLayout.Core
       if (mesh.Faces.Count == 0)
         return false;
 
+      var bestDepth = double.MaxValue;
+      var bestCurveDistance = double.MaxValue;
       var bestArea = 0.0;
       for (var index = 0; index < mesh.Faces.Count; index++)
       {
@@ -215,18 +229,74 @@ namespace WoodSheetLayout.Core
           var d = (Point3d)mesh.Vertices[face.D];
           area += 0.5 * Vector3d.CrossProduct(c - a, d - a).Length;
         }
-        if (area <= bestArea || !normal.Unitize())
+        if (!normal.Unitize())
           continue;
-        bestArea = area;
-        plane = new Plane(a, normal);
+        var candidatePlane = new Plane(a, normal);
+        var candidateBox = mesh.GetBoundingBox(candidatePlane);
+        var candidateDepth = Math.Abs(candidateBox.Max.Z - candidateBox.Min.Z);
+        var candidateFootprint = Math.Abs(candidateBox.Max.X - candidateBox.Min.X) *
+                                 Math.Abs(candidateBox.Max.Y - candidateBox.Min.Y);
+        var curveDistance = AverageCurveDistance(candidatePlane, curveSamples);
+        if (candidateDepth <= tolerance || candidateFootprint <= tolerance * tolerance)
+          continue;
+        if (candidateDepth < bestDepth - tolerance ||
+            (Math.Abs(candidateDepth - bestDepth) <= tolerance && curveDistance < bestCurveDistance - tolerance) ||
+            (Math.Abs(candidateDepth - bestDepth) <= tolerance &&
+             Math.Abs(curveDistance - bestCurveDistance) <= tolerance && area > bestArea))
+        {
+          bestDepth = candidateDepth;
+          bestCurveDistance = curveDistance;
+          bestArea = area;
+          plane = candidatePlane;
+          thickness = candidateDepth;
+          footprint = candidateFootprint;
+        }
       }
 
       if (!plane.IsValid)
         return false;
-      var box = mesh.GetBoundingBox(plane);
-      thickness = Math.Abs(box.Max.Z - box.Min.Z);
-      footprint = Math.Abs(box.Max.X - box.Min.X) * Math.Abs(box.Max.Y - box.Min.Y);
+      plane = OrientBoardBehindPlane(plane, mesh.GetBoundingBox(plane));
       return thickness > tolerance && footprint > tolerance * tolerance;
+    }
+
+    private static List<Point3d> SampleGroupedCurves(IEnumerable<RhinoObject> objects)
+    {
+      var points = new List<Point3d>();
+      foreach (var rhinoObject in objects)
+      {
+        var curve = rhinoObject.Geometry as Curve;
+        if (curve == null || !curve.IsValid)
+          continue;
+        foreach (var normalizedLength in new[] { 0.0, 0.2, 0.4, 0.6, 0.8, 1.0 })
+        {
+          try
+          {
+            points.Add(curve.PointAtNormalizedLength(normalizedLength));
+          }
+          catch
+          {
+            points.Add(curve.PointAt(curve.Domain.ParameterAt(normalizedLength)));
+          }
+        }
+      }
+      return points;
+    }
+
+    private static double AverageCurveDistance(Plane plane, IList<Point3d> curveSamples)
+    {
+      if (curveSamples == null || curveSamples.Count == 0)
+        return 0.0;
+      return curveSamples.Average(point => Math.Abs(plane.DistanceTo(point)));
+    }
+
+    private static Plane OrientBoardBehindPlane(Plane plane, BoundingBox planeAlignedBounds)
+    {
+      if (!planeAlignedBounds.IsValid)
+        return plane;
+      var centerZ = (planeAlignedBounds.Min.Z + planeAlignedBounds.Max.Z) * 0.5;
+      return centerZ <= 0.0
+        ? plane
+        : new Plane(plane.Origin, plane.XAxis, -plane.YAxis);
     }
 
     private static int Find(int[] parent, int index)
