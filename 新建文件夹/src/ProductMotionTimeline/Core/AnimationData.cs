@@ -19,6 +19,39 @@ namespace ProductMotionTimeline.Core
     Z = 2
   }
 
+  internal enum MechanicalConstraintType
+  {
+    ExternalGear = 0,
+    InternalGear = 1,
+    Belt = 2
+  }
+
+  internal sealed class MechanicalConstraint
+  {
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid DriverTrackId { get; set; }
+    public Guid DrivenTrackId { get; set; }
+    public MechanicalConstraintType Type { get; set; } = MechanicalConstraintType.ExternalGear;
+    public int DriverTeeth { get; set; } = 20;
+    public int DrivenTeeth { get; set; } = 20;
+    public double PhaseOffsetDegrees { get; set; }
+    public bool Enabled { get; set; } = true;
+
+    public double SignedRatio
+    {
+      get
+      {
+        var ratio = Math.Max(1, DriverTeeth) / (double)Math.Max(1, DrivenTeeth);
+        return Type == MechanicalConstraintType.ExternalGear ? -ratio : ratio;
+      }
+    }
+
+    public double EvaluateDrivenAngle(double driverAngleDegrees)
+    {
+      return PhaseOffsetDegrees + driverAngleDegrees * SignedRatio;
+    }
+  }
+
   internal sealed class Pose
   {
     public Vector3d Translation { get; set; }
@@ -80,6 +113,8 @@ namespace ProductMotionTimeline.Core
     public Guid ObjectId { get; set; }
     public string Name { get; set; } = "动画部件";
     public bool Enabled { get; set; } = true;
+    public Guid ParentTrackId { get; set; } = Guid.Empty;
+    public Transform ParentBindTransform { get; set; } = Transform.Identity;
     public RotationAxis RotationAxis { get; set; } = RotationAxis.Z;
     public Transform BaseTransform { get; set; } = Transform.Identity;
     public Transform PivotTransform { get; set; } = Transform.Identity;
@@ -155,10 +190,15 @@ namespace ProductMotionTimeline.Core
 
     public Transform TargetTransform(double frame)
     {
+      return TargetTransform(Evaluate(frame));
+    }
+
+    public Transform TargetTransform(Pose pose)
+    {
       var pivotInverse = Transform.Identity;
       if (!PivotTransform.TryGetInverse(out pivotInverse))
         return BaseTransform;
-      return PivotTransform * AnimationMath.Compose(Evaluate(frame), RotationAxis) * pivotInverse * BaseTransform;
+      return PivotTransform * AnimationMath.Compose(pose, RotationAxis) * pivotInverse * BaseTransform;
     }
 
     public bool TryCapturePose(Transform currentObjectTransform, double axisAngleDegrees, out Pose pose)
@@ -215,7 +255,7 @@ namespace ProductMotionTimeline.Core
 
   internal sealed class TimelineDocument
   {
-    public const int DataVersion = 2;
+    public const int DataVersion = 3;
 
     public int StartFrame { get; set; } = 0;
     public int EndFrame { get; set; } = 250;
@@ -224,6 +264,7 @@ namespace ProductMotionTimeline.Core
     public bool LoopPlayback { get; set; } = true;
     public Guid SelectedTrackId { get; set; } = Guid.Empty;
     public List<AnimationTrack> Tracks { get; } = new List<AnimationTrack>();
+    public List<MechanicalConstraint> Constraints { get; } = new List<MechanicalConstraint>();
 
     public AnimationTrack SelectedTrack
     {
@@ -242,6 +283,104 @@ namespace ProductMotionTimeline.Core
       CurrentFrame = Math.Max(StartFrame, Math.Min(EndFrame, CurrentFrame));
       if (SelectedTrack == null)
         SelectedTrackId = Guid.Empty;
+
+      var trackIds = new HashSet<Guid>(Tracks.Select(track => track.Id));
+      foreach (var track in Tracks)
+      {
+        if (track.ParentTrackId == track.Id || !trackIds.Contains(track.ParentTrackId))
+        {
+          track.ParentTrackId = Guid.Empty;
+          track.ParentBindTransform = Transform.Identity;
+        }
+      }
+      Constraints.RemoveAll(constraint =>
+        constraint.DriverTrackId == constraint.DrivenTrackId ||
+        !trackIds.Contains(constraint.DriverTrackId) ||
+        !trackIds.Contains(constraint.DrivenTrackId));
+    }
+
+    public AnimationTrack FindTrack(Guid id)
+    {
+      return Tracks.FirstOrDefault(track => track.Id == id);
+    }
+
+    public MechanicalConstraint ConstraintForDriven(Guid trackId)
+    {
+      return Constraints.FirstOrDefault(constraint => constraint.Enabled && constraint.DrivenTrackId == trackId);
+    }
+
+    public bool WouldCreateParentCycle(Guid childTrackId, Guid parentTrackId)
+    {
+      if (childTrackId == Guid.Empty || parentTrackId == Guid.Empty)
+        return false;
+      if (childTrackId == parentTrackId)
+        return true;
+
+      var visited = new HashSet<Guid>();
+      var current = FindTrack(parentTrackId);
+      while (current != null && current.ParentTrackId != Guid.Empty && visited.Add(current.Id))
+      {
+        if (current.ParentTrackId == childTrackId)
+          return true;
+        current = FindTrack(current.ParentTrackId);
+      }
+      return false;
+    }
+
+    public bool WouldCreateConstraintCycle(Guid driverTrackId, Guid drivenTrackId)
+    {
+      if (driverTrackId == Guid.Empty || drivenTrackId == Guid.Empty)
+        return false;
+      if (driverTrackId == drivenTrackId)
+        return true;
+
+      var visited = new HashSet<Guid>();
+      var current = driverTrackId;
+      while (current != Guid.Empty && visited.Add(current))
+      {
+        if (current == drivenTrackId)
+          return true;
+        var upstream = ConstraintForDriven(current);
+        current = upstream?.DriverTrackId ?? Guid.Empty;
+      }
+      return false;
+    }
+
+    public List<AnimationTrack> OrderedTracks()
+    {
+      var result = new List<AnimationTrack>();
+      var visited = new HashSet<Guid>();
+      foreach (var root in Tracks.Where(track => track.ParentTrackId == Guid.Empty))
+        AppendTrackTree(root, result, visited);
+      foreach (var track in Tracks)
+        AppendTrackTree(track, result, visited);
+      return result;
+    }
+
+    public int TrackDepth(AnimationTrack track)
+    {
+      if (track == null)
+        return 0;
+      var depth = 0;
+      var visited = new HashSet<Guid>();
+      var current = track;
+      while (current.ParentTrackId != Guid.Empty && visited.Add(current.Id))
+      {
+        current = FindTrack(current.ParentTrackId);
+        if (current == null)
+          break;
+        depth++;
+      }
+      return depth;
+    }
+
+    private void AppendTrackTree(AnimationTrack track, List<AnimationTrack> result, HashSet<Guid> visited)
+    {
+      if (track == null || !visited.Add(track.Id))
+        return;
+      result.Add(track);
+      foreach (var child in Tracks.Where(item => item.ParentTrackId == track.Id))
+        AppendTrackTree(child, result, visited);
     }
   }
 }

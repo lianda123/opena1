@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Rhino;
 using Rhino.Commands;
 using Rhino.DocObjects;
@@ -13,9 +14,21 @@ namespace ProductMotionTimeline.Core
   {
     public static InstanceObject GetOrCreateAnimationPart(RhinoDoc doc)
     {
+      return GetOrCreateAnimationPart(doc, false);
+    }
+
+    public static InstanceObject GetOrCreateGroupPart(RhinoDoc doc)
+    {
+      return GetOrCreateAnimationPart(doc, true);
+    }
+
+    private static InstanceObject GetOrCreateAnimationPart(RhinoDoc doc, bool selectInsideGroup)
+    {
       var getter = new GetObject();
-      getter.SetCommandPrompt("选择一个完整运动部件（可多选，插件会合并为动画块）");
-      getter.GroupSelect = true;
+      getter.SetCommandPrompt(selectInsideGroup
+        ? "选择组内需要单独运动的零件（不会自动选中整组，可多选）"
+        : "选择一个完整运动部件（可多选，插件会合并为动画块）");
+      getter.GroupSelect = !selectInsideGroup;
       getter.SubObjectSelect = false;
       getter.GeometryFilter = ObjectType.AnyObject;
       getter.GetMultiple(1, 0);
@@ -32,6 +45,8 @@ namespace ProductMotionTimeline.Core
       var geometries = new List<GeometryBase>();
       var attributes = new List<ObjectAttributes>();
       var originalIds = new List<Guid>();
+      HashSet<int> sharedGroupIndices = null;
+      string selectedName = null;
       for (var i = 0; i < getter.ObjectCount; i++)
       {
         var rhinoObject = getter.Object(i).Object();
@@ -44,6 +59,14 @@ namespace ProductMotionTimeline.Core
         geometries.Add(geometry);
         attributes.Add(objectAttributes);
         originalIds.Add(rhinoObject.Id);
+        if (string.IsNullOrWhiteSpace(selectedName) && !string.IsNullOrWhiteSpace(rhinoObject.Attributes.Name))
+          selectedName = rhinoObject.Attributes.Name;
+
+        var groups = rhinoObject.Attributes.GetGroupList() ?? new int[0];
+        if (sharedGroupIndices == null)
+          sharedGroupIndices = new HashSet<int>(groups);
+        else
+          sharedGroupIndices.IntersectWith(groups);
       }
 
       if (geometries.Count == 0)
@@ -71,6 +94,17 @@ namespace ProductMotionTimeline.Core
 
         foreach (var id in originalIds)
           doc.Objects.Delete(id, true);
+
+        var instanceAttributes = new ObjectAttributes
+        {
+          Name = string.IsNullOrWhiteSpace(selectedName) ? definitionName : selectedName
+        };
+        if (sharedGroupIndices != null)
+        {
+          foreach (var groupIndex in sharedGroupIndices.Where(index => index >= 0))
+            instanceAttributes.AddToGroup(groupIndex);
+        }
+        doc.Objects.ModifyAttributes(instanceId, instanceAttributes, true);
 
         var instance = doc.Objects.FindId(instanceId) as InstanceObject;
         if (instance != null)

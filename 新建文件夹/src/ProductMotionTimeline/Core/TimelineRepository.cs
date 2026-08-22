@@ -71,6 +71,8 @@ namespace ProductMotionTimeline.Core
             writer.Write((int)track.RotationAxis);
             WriteTransform(writer, track.BaseTransform);
             WriteTransform(writer, track.PivotTransform);
+            WriteGuid(writer, track.ParentTrackId);
+            WriteTransform(writer, track.ParentBindTransform);
             writer.Write(track.Keys.Count);
             foreach (var key in track.Keys)
             {
@@ -78,6 +80,19 @@ namespace ProductMotionTimeline.Core
               writer.Write((int)key.Interpolation);
               WritePose(writer, key.Pose);
             }
+          }
+
+          writer.Write(model.Constraints.Count);
+          foreach (var constraint in model.Constraints)
+          {
+            WriteGuid(writer, constraint.Id);
+            WriteGuid(writer, constraint.DriverTrackId);
+            WriteGuid(writer, constraint.DrivenTrackId);
+            writer.Write((int)constraint.Type);
+            writer.Write(constraint.DriverTeeth);
+            writer.Write(constraint.DrivenTeeth);
+            writer.Write(constraint.PhaseOffsetDegrees);
+            writer.Write(constraint.Enabled);
           }
 
           writer.Flush();
@@ -104,7 +119,7 @@ namespace ProductMotionTimeline.Core
           if (reader.ReadString() != Magic)
             return null;
           var version = reader.ReadInt32();
-          if (version != TimelineDocument.DataVersion)
+          if (version < 2 || version > TimelineDocument.DataVersion)
             return null;
 
           var model = new TimelineDocument
@@ -130,6 +145,11 @@ namespace ProductMotionTimeline.Core
               BaseTransform = ReadTransform(reader),
               PivotTransform = ReadTransform(reader)
             };
+            if (version >= 3)
+            {
+              track.ParentTrackId = ReadGuid(reader);
+              track.ParentBindTransform = ReadTransform(reader);
+            }
             var keyCount = reader.ReadInt32();
             for (var keyIndex = 0; keyIndex < keyCount; keyIndex++)
             {
@@ -143,6 +163,26 @@ namespace ProductMotionTimeline.Core
             track.SortKeys();
             model.Tracks.Add(track);
           }
+
+          if (version >= 3)
+          {
+            var constraintCount = reader.ReadInt32();
+            for (var i = 0; i < constraintCount; i++)
+            {
+              model.Constraints.Add(new MechanicalConstraint
+              {
+                Id = ReadGuid(reader),
+                DriverTrackId = ReadGuid(reader),
+                DrivenTrackId = ReadGuid(reader),
+                Type = (MechanicalConstraintType)reader.ReadInt32(),
+                DriverTeeth = reader.ReadInt32(),
+                DrivenTeeth = reader.ReadInt32(),
+                PhaseOffsetDegrees = reader.ReadDouble(),
+                Enabled = reader.ReadBoolean()
+              });
+            }
+          }
+          model.ClampSettings();
           return model;
         }
       }

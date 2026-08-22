@@ -9,7 +9,7 @@ namespace ProductMotionTimeline.UI
 {
   internal sealed class TimelineCanvas : Drawable
   {
-    private const float HeaderWidth = 145f;
+    private const float HeaderWidth = 190f;
     private const float RulerHeight = 30f;
     private const float RowHeight = 25f;
     private readonly Font _font = new Font(SystemFont.Default, 9f);
@@ -85,13 +85,21 @@ namespace ProductMotionTimeline.UI
 
     private void DrawTracks(Graphics graphics, TimelineDocument model, float width)
     {
-      for (var index = 0; index < model.Tracks.Count; index++)
+      var tracks = model.OrderedTracks();
+      for (var index = 0; index < tracks.Count; index++)
       {
-        var track = model.Tracks[index];
+        var track = tracks[index];
         var y = RulerHeight + index * RowHeight;
         var selected = model.SelectedTrack?.Id == track.Id;
         graphics.FillRectangle(selected ? _selectedRow : _row, new RectangleF(0, y, width, RowHeight - 1));
-        graphics.DrawText(_font, track.Enabled ? _text : _mutedText, new PointF(10, y + 6), TrimName(track.Name));
+        var depth = model.TrackDepth(track);
+        var driven = model.ConstraintForDriven(track.Id) != null;
+        var prefix = (depth > 0 ? "↳ " : string.Empty) + (driven ? "[传] " : string.Empty);
+        graphics.DrawText(
+          _font,
+          track.Enabled ? _text : _mutedText,
+          new PointF(10 + depth * 13, y + 6),
+          prefix + TrimName(track.Name, depth, driven));
 
         foreach (var key in track.Keys)
         {
@@ -135,9 +143,10 @@ namespace ProductMotionTimeline.UI
         return;
 
       var row = RowFromY(e.Location.Y);
-      if (row >= 0 && row < model.Tracks.Count)
+      var tracks = model.OrderedTracks();
+      if (row >= 0 && row < tracks.Count)
       {
-        var track = model.Tracks[row];
+        var track = tracks[row];
         TimelineEngine.SelectTrack(doc, track.Id);
         if (e.Location.X < HeaderWidth)
           return;
@@ -242,11 +251,12 @@ namespace ProductMotionTimeline.UI
       return candidates.First(step => step * pixelsPerFrame >= 55f || step == 500);
     }
 
-    private static string TrimName(string value)
+    private static string TrimName(string value, int depth, bool driven)
     {
       if (string.IsNullOrWhiteSpace(value))
         return "动画部件";
-      return value.Length <= 16 ? value : value.Substring(0, 14) + "…";
+      var limit = Math.Max(7, 18 - depth * 2 - (driven ? 3 : 0));
+      return value.Length <= limit ? value : value.Substring(0, limit - 1) + "…";
     }
   }
 }

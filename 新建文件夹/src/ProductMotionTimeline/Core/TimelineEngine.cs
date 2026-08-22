@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Rhino;
 using Rhino.DocObjects;
@@ -82,9 +83,28 @@ namespace ProductMotionTimeline.Core
         return false;
       }
 
+      var poseCache = new Dictionary<Guid, Pose>();
+      var evaluatedAngle = EvaluateEffectivePose(model, track, model.CurrentFrame, poseCache, new HashSet<Guid>()).AxisAngleDegrees;
+      var independentTransform = instance.InstanceXform;
+      if (track.ParentTrackId != Guid.Empty)
+      {
+        var parent = model.FindTrack(track.ParentTrackId);
+        if (parent != null)
+        {
+          var worldCache = new Dictionary<Guid, Transform>();
+          var parentWorld = EvaluateWorldTarget(model, parent, model.CurrentFrame, poseCache, worldCache, new HashSet<Guid>());
+          Transform bindInverse;
+          var parentDelta = Transform.Identity;
+          if (track.ParentBindTransform.TryGetInverse(out bindInverse))
+            parentDelta = parentWorld * bindInverse;
+          Transform parentDeltaInverse;
+          if (parentDelta.TryGetInverse(out parentDeltaInverse))
+            independentTransform = parentDeltaInverse * independentTransform;
+        }
+      }
+
       Pose pose;
-      var evaluatedAngle = track.Evaluate(model.CurrentFrame).AxisAngleDegrees;
-      if (!track.TryCapturePose(instance.InstanceXform, evaluatedAngle, out pose))
+      if (!track.TryCapturePose(independentTransform, evaluatedAngle, out pose))
       {
         RhinoApp.WriteLine("ProductMotion：无法分解当前变换；请避免剪切或零缩放后再卡帧。");
         return false;
@@ -196,9 +216,109 @@ namespace ProductMotionTimeline.Core
       var instance = ResolveInstance(doc, track);
       if (instance != null)
         SetTrackTag(doc, instance.Id, Guid.Empty);
+      foreach (var child in model.Tracks.Where(item => item.ParentTrackId == track.Id))
+      {
+        child.ParentTrackId = Guid.Empty;
+        child.ParentBindTransform = Transform.Identity;
+      }
+      model.Constraints.RemoveAll(constraint =>
+        constraint.DriverTrackId == track.Id || constraint.DrivenTrackId == track.Id);
       model.Tracks.Remove(track);
       model.SelectedTrackId = model.Tracks.Count > 0 ? model.Tracks[0].Id : Guid.Empty;
+      TimelineRepository.Save(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
+      return true;
+    }
+
+    public static bool SetParent(RhinoDoc doc, Guid childTrackId, Guid parentTrackId)
+    {
+      var model = Model(doc);
+      var child = model.FindTrack(childTrackId);
+      var parent = model.FindTrack(parentTrackId);
+      if (child == null || parent == null || model.WouldCreateParentCycle(childTrackId, parentTrackId))
+      {
+        RhinoApp.WriteLine("ProductMotion：不能建立该父子关系，请检查是否选择了自身或形成循环层级。");
+        return false;
+      }
+
+      var poseCache = new Dictionary<Guid, Pose>();
+      var worldCache = new Dictionary<Guid, Transform>();
+      child.ParentTrackId = parent.Id;
+      child.ParentBindTransform = EvaluateWorldTarget(
+        model,
+        parent,
+        model.CurrentFrame,
+        poseCache,
+        worldCache,
+        new HashSet<Guid>());
       SaveAndNotify(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
+      RhinoApp.WriteLine("ProductMotion：已将“{0}”设为“{1}”的父级。", parent.Name, child.Name);
+      return true;
+    }
+
+    public static bool ClearParent(RhinoDoc doc, Guid childTrackId)
+    {
+      var model = Model(doc);
+      var child = model.FindTrack(childTrackId);
+      if (child == null || child.ParentTrackId == Guid.Empty)
+        return false;
+      child.ParentTrackId = Guid.Empty;
+      child.ParentBindTransform = Transform.Identity;
+      SaveAndNotify(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
+      return true;
+    }
+
+    public static bool AddMechanicalConstraint(
+      RhinoDoc doc,
+      Guid driverTrackId,
+      Guid drivenTrackId,
+      MechanicalConstraintType type,
+      int driverTeeth,
+      int drivenTeeth,
+      double phaseOffsetDegrees)
+    {
+      var model = Model(doc);
+      var driver = model.FindTrack(driverTrackId);
+      var driven = model.FindTrack(drivenTrackId);
+      if (driver == null || driven == null || driverTeeth < 1 || drivenTeeth < 1)
+        return false;
+      if (model.WouldCreateConstraintCycle(driverTrackId, drivenTrackId))
+      {
+        RhinoApp.WriteLine("ProductMotion：不能建立该传动关系，驱动链会形成循环。");
+        return false;
+      }
+
+      model.Constraints.RemoveAll(item => item.DrivenTrackId == drivenTrackId);
+      model.Constraints.Add(new MechanicalConstraint
+      {
+        DriverTrackId = driverTrackId,
+        DrivenTrackId = drivenTrackId,
+        Type = type,
+        DriverTeeth = driverTeeth,
+        DrivenTeeth = drivenTeeth,
+        PhaseOffsetDegrees = phaseOffsetDegrees,
+        Enabled = true
+      });
+      SaveAndNotify(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
+      RhinoApp.WriteLine(
+        "ProductMotion：已建立“{0}”→“{1}”传动，角速度比 {2:0.###}。",
+        driver.Name,
+        driven.Name,
+        model.ConstraintForDriven(drivenTrackId).SignedRatio);
+      return true;
+    }
+
+    public static bool DeleteConstraintForDriven(RhinoDoc doc, Guid drivenTrackId)
+    {
+      var model = Model(doc);
+      var removed = model.Constraints.RemoveAll(item => item.DrivenTrackId == drivenTrackId) > 0;
+      if (!removed)
+        return false;
+      SaveAndNotify(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
       return true;
     }
 
@@ -209,8 +329,19 @@ namespace ProductMotionTimeline.Core
       var model = Model(doc);
       model.CurrentFrame = Math.Max(model.StartFrame, Math.Min(model.EndFrame, frame));
 
-      foreach (var track in model.Tracks.Where(item => item.Enabled))
-        ApplyAbsolute(doc, track, track.TargetTransform(model.CurrentFrame));
+      var poseCache = new Dictionary<Guid, Pose>();
+      var worldCache = new Dictionary<Guid, Transform>();
+      foreach (var track in model.OrderedTracks().Where(item => item.Enabled))
+      {
+        var target = EvaluateWorldTarget(
+          model,
+          track,
+          model.CurrentFrame,
+          poseCache,
+          worldCache,
+          new HashSet<Guid>());
+        ApplyAbsolute(doc, track, target);
+      }
 
       doc.Views.Redraw();
       if (persist)
@@ -248,6 +379,22 @@ namespace ProductMotionTimeline.Core
       return true;
     }
 
+    public static AnimationTrack FindTrackForInstance(RhinoDoc doc, InstanceObject instance)
+    {
+      if (doc == null || instance == null)
+        return null;
+      var model = Model(doc);
+      var tag = instance.Attributes.GetUserString(TrackUserStringKey);
+      return model.Tracks.FirstOrDefault(track =>
+        track.ObjectId == instance.Id || track.Id.ToString("D") == tag);
+    }
+
+    public static Pose EffectivePose(RhinoDoc doc, AnimationTrack track, double frame)
+    {
+      var model = Model(doc);
+      return EvaluateEffectivePose(model, track, frame, new Dictionary<Guid, Pose>(), new HashSet<Guid>());
+    }
+
     public static InstanceObject ResolveInstance(RhinoDoc doc, AnimationTrack track)
     {
       if (doc == null || track == null)
@@ -270,6 +417,73 @@ namespace ProductMotionTimeline.Core
         return instance;
       }
       return null;
+    }
+
+    private static Pose EvaluateEffectivePose(
+      TimelineDocument model,
+      AnimationTrack track,
+      double frame,
+      Dictionary<Guid, Pose> cache,
+      HashSet<Guid> visiting)
+    {
+      if (track == null)
+        return Pose.Identity;
+      Pose cached;
+      if (cache.TryGetValue(track.Id, out cached))
+        return cached.Clone();
+
+      var pose = track.Evaluate(frame);
+      if (!visiting.Add(track.Id))
+        return pose;
+
+      var constraint = model.ConstraintForDriven(track.Id);
+      if (constraint != null)
+      {
+        var driver = model.FindTrack(constraint.DriverTrackId);
+        if (driver != null)
+        {
+          var driverPose = EvaluateEffectivePose(model, driver, frame, cache, visiting);
+          pose.AxisAngleDegrees = constraint.EvaluateDrivenAngle(driverPose.AxisAngleDegrees);
+        }
+      }
+
+      visiting.Remove(track.Id);
+      cache[track.Id] = pose.Clone();
+      return pose;
+    }
+
+    private static Transform EvaluateWorldTarget(
+      TimelineDocument model,
+      AnimationTrack track,
+      double frame,
+      Dictionary<Guid, Pose> poseCache,
+      Dictionary<Guid, Transform> worldCache,
+      HashSet<Guid> visiting)
+    {
+      Transform cached;
+      if (worldCache.TryGetValue(track.Id, out cached))
+        return cached;
+
+      var ownTarget = track.TargetTransform(
+        EvaluateEffectivePose(model, track, frame, poseCache, new HashSet<Guid>()));
+      if (!visiting.Add(track.Id))
+        return ownTarget;
+
+      var target = ownTarget;
+      var parent = model.FindTrack(track.ParentTrackId);
+      if (parent != null)
+      {
+        Transform bindInverse;
+        if (track.ParentBindTransform.TryGetInverse(out bindInverse))
+        {
+          var parentWorld = EvaluateWorldTarget(model, parent, frame, poseCache, worldCache, visiting);
+          target = parentWorld * bindInverse * ownTarget;
+        }
+      }
+
+      visiting.Remove(track.Id);
+      worldCache[track.Id] = target;
+      return target;
     }
 
     private static void ApplyAbsolute(RhinoDoc doc, AnimationTrack track, Transform target)

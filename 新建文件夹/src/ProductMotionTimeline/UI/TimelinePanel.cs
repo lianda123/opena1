@@ -23,6 +23,7 @@ namespace ProductMotionTimeline.UI
     private readonly DropDown _rotationAxis = new DropDown();
     private readonly NumericStepper _axisAngle = IntegerStepper(-100000, 100000, 0);
     private readonly TextBox _trackName = new TextBox { Width = 150 };
+    private readonly Label _relationship = new Label { TextColor = Color.FromArgb(255, 190, 92) };
     private readonly Label _status = new Label { TextColor = Color.FromArgb(180, 185, 194) };
     private readonly Button _play = new Button { Text = "▶ 播放" };
     private readonly UITimer _timer = new UITimer();
@@ -57,6 +58,7 @@ namespace ProductMotionTimeline.UI
 
       var keyTools = Horizontal(
         Button("＋ 添加部件", () => RhinoApp.RunScript("_PMTAddPart", false)),
+        Button("＋ 组内零件", () => RhinoApp.RunScript("_PMTAddGroupPart", false)),
         Button("◆ 插入/更新帧", InsertKey),
         Button("删除帧", DeleteKey),
         Button("复制", CopyKey),
@@ -79,6 +81,14 @@ namespace ProductMotionTimeline.UI
         new Label { Text = "转角°" }, _axisAngle,
         Button("删除轨道", DeleteTrack));
 
+      var relationshipTools = Horizontal(
+        new Label { Text = "父子层级" },
+        Button("设父级", () => RhinoApp.RunScript("_PMTSetParent", false)),
+        Button("清除父级", () => RhinoApp.RunScript("_PMTClearParent", false)),
+        new Label { Text = "机械约束" },
+        Button("绑定传动", () => RhinoApp.RunScript("_PMTBindMechanical", false)),
+        Button("解除从动", () => RhinoApp.RunScript("_PMTDeleteMechanical", false)));
+
       var scroll = new Scrollable { Content = _canvas, Border = BorderType.None };
       var root = new TableLayout
       {
@@ -90,6 +100,8 @@ namespace ProductMotionTimeline.UI
       root.Rows.Add(new TableRow(settings));
       root.Rows.Add(new TableRow(new TableCell(scroll, true)) { ScaleHeight = true });
       root.Rows.Add(new TableRow(trackTools));
+      root.Rows.Add(new TableRow(relationshipTools));
+      root.Rows.Add(new TableRow(_relationship));
       root.Rows.Add(new TableRow(_status));
       Content = root;
     }
@@ -132,20 +144,32 @@ namespace ProductMotionTimeline.UI
       var track = model.SelectedTrack;
       _trackName.Text = track?.Name ?? string.Empty;
       var key = track?.FindKey(model.CurrentFrame);
+      var constraint = track == null ? null : model.ConstraintForDriven(track.Id);
       if (key != null)
       {
         _interpolation.SelectedIndex = ToDropDownIndex(key.Interpolation);
-        _axisAngle.Value = key.Pose.AxisAngleDegrees;
+        _axisAngle.Value = constraint == null
+          ? key.Pose.AxisAngleDegrees
+          : TimelineEngine.EffectivePose(doc, track, model.CurrentFrame).AxisAngleDegrees;
       }
       else
       {
         _axisAngle.Value = 0.0;
       }
       _rotationAxis.SelectedIndex = track == null ? 2 : (int)track.RotationAxis;
+      _axisAngle.Enabled = constraint == null;
+
+      var parent = track == null ? null : model.FindTrack(track.ParentTrackId);
+      var driver = constraint == null ? null : model.FindTrack(constraint.DriverTrackId);
+      var parentText = parent == null ? "父级：无" : $"父级：{parent.Name}";
+      var constraintText = constraint == null
+        ? "传动：无"
+        : $"传动：{driver?.Name ?? "未知"} → {track.Name}　比例 {constraint.SignedRatio:0.###}　相位 {constraint.PhaseOffsetDegrees:0.###}°";
+      _relationship.Text = parentText + "　　" + constraintText;
 
       _status.Text = track == null
-        ? "先点“添加部件”：多选几何体会自动合并为动画块。"
-        : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　提示：停止播放后用 Gumball 摆姿态，再插入关键帧。";
+        ? "先点“添加部件”；若对象已打组但只想动画其中一部分，请点“组内零件”。"
+        : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　提示：父级继承运动，子级仍可单独卡帧。";
       _canvas.RefreshHeight();
       _suppress = false;
     }
@@ -166,6 +190,12 @@ namespace ProductMotionTimeline.UI
     {
       if (_suppress)
         return;
+      var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
+      if (model?.SelectedTrack != null && model.ConstraintForDriven(model.SelectedTrack.Id) != null)
+      {
+        _status.Text = "当前轨道由机械约束驱动；请修改主动件转角或先解除从动关系。";
+        return;
+      }
       var axis = (RotationAxis)Math.Max(0, Math.Min(2, _rotationAxis.SelectedIndex));
       if (!TimelineEngine.UpdateCurrentKeyRotationChannel(RhinoDoc.ActiveDoc, axis, _axisAngle.Value))
         _status.Text = "请先在当前帧插入关键帧，再设置连续轴转角。";

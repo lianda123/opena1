@@ -1,10 +1,13 @@
-name: Build Rhino 7 and 8 plug-in
+name: Build ProductMotion Timeline for Rhino 7 and 8
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+    paths:
+      - "新建文件夹/**"
+      - ".github/workflows/build.yml"
 
 permissions:
   contents: read
@@ -19,16 +22,39 @@ jobs:
 
       - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: 7.0.x
+          dotnet-version: 8.0.x
 
-      - name: Build Rhino plug-ins
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify hierarchy and transmission logic
+        shell: pwsh
+        working-directory: 新建文件夹
+        run: python tests/verify_v020.py
+
+      - name: Build ProductMotion Timeline
         shell: pwsh
         working-directory: 新建文件夹
         run: ./build.ps1 -Configuration Release
 
-      - name: Upload compiled plug-ins
+      - name: Upload Rhino 7 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: ProductMotionTimeline-0.1.0
-          path: 新建文件夹/dist/ProductMotionTimeline-0.1.0-release.zip
+          name: ProductMotionTimeline-0.2.0-rhino7
+          path: 新建文件夹/dist/ProductMotionTimeline-0.2.0-rhino7.zip
+          if-no-files-found: error
+
+      - name: Upload Rhino 8 plug-in
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductMotionTimeline-0.2.0-rhino8
+          path: 新建文件夹/dist/ProductMotionTimeline-0.2.0-rhino8.zip
+          if-no-files-found: error
+
+      - name: Upload combined package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProductMotionTimeline-0.2.0-rhino7-rhino8
+          path: 新建文件夹/dist/ProductMotionTimeline-0.2.0-rhino7-rhino8.zip
           if-no-files-found: error

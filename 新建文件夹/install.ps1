@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 
 $pluginId = "F9A7EFD6-7BBE-4E9D-A7C6-4BBE9B7DE101"
 $pluginName = "ProductMotion Timeline"
-$version = "0.1.0"
+$version = "0.2.0"
 $sourceRoot = if (Test-Path (Join-Path $PSScriptRoot "dist")) { Join-Path $PSScriptRoot "dist" } else { $PSScriptRoot }
 $installRoot = Join-Path $env:LOCALAPPDATA "ProductMotionTimeline\$version"
 
@@ -45,5 +45,5 @@ function Install-ProductMotionPlugin {
 }
 
 if ($Rhino7) { Install-ProductMotionPlugin -MajorVersion "7" -FrameworkFolder "net48" }
-if ($Rhino8) { Install-ProductMotionPlugin -MajorVersion "8" -FrameworkFolder "net7.0" }
+if ($Rhino8) { Install-ProductMotionPlugin -MajorVersion "8" -FrameworkFolder "net8.0" }
 Write-Host "请完全关闭并重新启动 Rhino，然后运行 PMTimeline。"

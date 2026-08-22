@@ -36,6 +36,22 @@ namespace ProductMotionTimeline.Commands
     }
   }
 
+  public sealed class AddGroupPartCommand : Command
+  {
+    public override string EnglishName => "PMTAddGroupPart";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var instance = TrackFactory.GetOrCreateGroupPart(doc);
+      if (instance == null)
+        return Result.Cancel;
+      TimelineEngine.AddTrack(doc, instance);
+      Panels.OpenPanel(TimelinePanel.PanelId);
+      RhinoApp.WriteLine("ProductMotion：已把所选组内零件建立为独立动画轨道，可继续设置父级或关键帧。");
+      return Result.Success;
+    }
+  }
+
   public sealed class InsertKeyCommand : Command
   {
     public override string EnglishName => "PMTKey";
@@ -104,6 +120,154 @@ namespace ProductMotionTimeline.Commands
         return getter.CommandResult();
       var instance = getter.Object(0).Object() as InstanceObject;
       return TimelineEngine.RebindSelectedTrack(doc, instance) ? Result.Success : Result.Failure;
+    }
+  }
+
+  public sealed class SetParentTrackCommand : Command
+  {
+    public override string EnglishName => "PMTSetParent";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var child = TimelineEngine.Model(doc).SelectedTrack;
+      if (child == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：请先在时间轴中选中子级轨道。");
+        return Result.Nothing;
+      }
+
+      var getter = new GetObject();
+      getter.SetCommandPrompt("选择要作为父级的动画部件");
+      getter.GeometryFilter = ObjectType.InstanceReference;
+      getter.GroupSelect = false;
+      getter.SubObjectSelect = false;
+      getter.Get();
+      if (getter.CommandResult() != Result.Success)
+        return getter.CommandResult();
+
+      var parent = TimelineEngine.FindTrackForInstance(doc, getter.Object(0).Object() as InstanceObject);
+      if (parent == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：所选对象还没有动画轨道，请先添加部件。");
+        return Result.Nothing;
+      }
+      return TimelineEngine.SetParent(doc, child.Id, parent.Id) ? Result.Success : Result.Failure;
+    }
+  }
+
+  public sealed class ClearParentTrackCommand : Command
+  {
+    public override string EnglishName => "PMTClearParent";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var child = TimelineEngine.Model(doc).SelectedTrack;
+      return child != null && TimelineEngine.ClearParent(doc, child.Id)
+        ? Result.Success
+        : Result.Nothing;
+    }
+  }
+
+  public sealed class BindMechanicalConstraintCommand : Command
+  {
+    public override string EnglishName => "PMTBindMechanical";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var driver = TimelineEngine.Model(doc).SelectedTrack;
+      if (driver == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：请先在时间轴中选中主动件轨道。");
+        return Result.Nothing;
+      }
+
+      var getter = new GetObject();
+      getter.SetCommandPrompt("选择由主动件带动的从动动画部件");
+      getter.GeometryFilter = ObjectType.InstanceReference;
+      getter.GroupSelect = false;
+      getter.SubObjectSelect = false;
+      getter.Get();
+      if (getter.CommandResult() != Result.Success)
+        return getter.CommandResult();
+      var driven = TimelineEngine.FindTrackForInstance(doc, getter.Object(0).Object() as InstanceObject);
+      if (driven == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：所选从动件还没有动画轨道，请先添加部件。");
+        return Result.Nothing;
+      }
+
+      var typeGetter = new GetOption();
+      typeGetter.SetCommandPrompt("选择机械传动类型");
+      var externalIndex = typeGetter.AddOption("ExternalGear");
+      var internalIndex = typeGetter.AddOption("InternalGear");
+      var beltIndex = typeGetter.AddOption("Belt");
+      typeGetter.Get();
+      if (typeGetter.CommandResult() != Result.Success)
+        return typeGetter.CommandResult();
+      var selectedType = MechanicalConstraintType.ExternalGear;
+      if (typeGetter.OptionIndex() == internalIndex)
+        selectedType = MechanicalConstraintType.InternalGear;
+      else if (typeGetter.OptionIndex() == beltIndex)
+        selectedType = MechanicalConstraintType.Belt;
+      else if (typeGetter.OptionIndex() != externalIndex)
+        return Result.Cancel;
+
+      var driverCount = GetPositiveInteger("输入主动齿轮齿数/主动轮节数", 20);
+      if (driverCount < 1)
+        return Result.Cancel;
+      var drivenCount = GetPositiveInteger("输入从动齿轮齿数/从动轮节数", 20);
+      if (drivenCount < 1)
+        return Result.Cancel;
+
+      var driverAngle = TimelineEngine.EffectivePose(doc, driver, TimelineEngine.Model(doc).CurrentFrame).AxisAngleDegrees;
+      var drivenAngle = TimelineEngine.EffectivePose(doc, driven, TimelineEngine.Model(doc).CurrentFrame).AxisAngleDegrees;
+      var defaultConstraint = new MechanicalConstraint
+      {
+        Type = selectedType,
+        DriverTeeth = driverCount,
+        DrivenTeeth = drivenCount
+      };
+      var defaultPhase = drivenAngle - driverAngle * defaultConstraint.SignedRatio;
+      var phaseGetter = new GetNumber();
+      phaseGetter.SetCommandPrompt("输入从动件相位角（默认值保持当前啮合姿态）");
+      phaseGetter.SetDefaultNumber(defaultPhase);
+      phaseGetter.Get();
+      if (phaseGetter.CommandResult() != Result.Success)
+        return phaseGetter.CommandResult();
+
+      return TimelineEngine.AddMechanicalConstraint(
+        doc,
+        driver.Id,
+        driven.Id,
+        selectedType,
+        driverCount,
+        drivenCount,
+        phaseGetter.Number())
+        ? Result.Success
+        : Result.Failure;
+    }
+
+    private static int GetPositiveInteger(string prompt, int defaultValue)
+    {
+      var getter = new GetInteger();
+      getter.SetCommandPrompt(prompt);
+      getter.SetLowerLimit(1, false);
+      getter.SetDefaultInteger(defaultValue);
+      getter.Get();
+      return getter.CommandResult() == Result.Success ? getter.Number() : -1;
+    }
+  }
+
+  public sealed class DeleteMechanicalConstraintCommand : Command
+  {
+    public override string EnglishName => "PMTDeleteMechanical";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var driven = TimelineEngine.Model(doc).SelectedTrack;
+      return driven != null && TimelineEngine.DeleteConstraintForDriven(doc, driven.Id)
+        ? Result.Success
+        : Result.Nothing;
     }
   }
 
