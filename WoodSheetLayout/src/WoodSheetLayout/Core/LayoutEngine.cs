@@ -228,12 +228,12 @@ namespace WoodSheetLayout.Core
     private static void ReportSummary(LayoutResult result, LayoutSettings settings)
     {
       var partCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
-      RhinoApp.WriteLine(
+      RhinoApp.WriteLine(string.Format(
         "WoodSheetLayout：完成 {0} 块板件、{1} 张 {2} 边界框；板间距与边界留量均为 {3:0.##} mm。",
         partCount,
         result.Sheets.Count,
         settings.Sheet,
-        settings.SpacingMillimeters);
+        settings.SpacingMillimeters));
 
       foreach (var group in result.Sheets.GroupBy(sheet => sheet.ThicknessMillimeters))
       {
