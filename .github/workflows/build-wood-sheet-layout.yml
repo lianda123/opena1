@@ -9,6 +9,12 @@ on:
     paths:
       - "WoodSheetLayout/**"
       - ".github/workflows/build-wood-sheet-layout.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "WoodSheetLayout/**"
+      - ".github/workflows/build-wood-sheet-layout.yml"
 
 permissions:
   contents: read
