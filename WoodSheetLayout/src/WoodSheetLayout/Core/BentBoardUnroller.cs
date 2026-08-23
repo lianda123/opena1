@@ -9,6 +9,25 @@ namespace WoodSheetLayout.Core
 {
   internal static class BentBoardUnroller
   {
+    internal static bool HasBendBeyondThickness(
+      GeometryBase geometry,
+      double depthFromPlanarFace,
+      double tolerance,
+      double modelUnitsPerMillimeter)
+    {
+      var brep = ToBrep(geometry);
+      if (brep == null || !brep.IsValid || !brep.IsSolid)
+        return false;
+      var thickness = EstimateThickness(brep, tolerance, modelUnitsPerMillimeter);
+      if (thickness <= tolerance)
+        return false;
+
+      // 普通平板沿主平面法向的总深度≈板厚；混合折弯件会明显超过板厚。
+      // 允许25%误差以兼容建模公差、倒角及板材实测厚度。
+      var allowance = Math.Max(tolerance * 5.0, thickness * 0.25);
+      return depthFromPlanarFace > thickness + allowance;
+    }
+
     public static bool TryCreatePart(
       RhinoDoc doc,
       IList<RhinoObject> objects,
@@ -104,6 +123,11 @@ namespace WoodSheetLayout.Core
           out neutralBrep,
           out offsetByFace))
           continue;
+        if (!IsConnectedFaceGraph(neutralBrep))
+        {
+          warning = "中性层公共接缝未能连接，已停止把各面分开铺平。";
+          continue;
+        }
 
         var following = BuildFollowingCurves(
           objects,
@@ -137,6 +161,14 @@ namespace WoodSheetLayout.Core
         if (flatBreps == null || flatBreps.Length == 0)
           continue;
 
+        Brep connectedFlatPatch;
+        if (!TryGetConnectedFlatPatch(flatBreps, tolerance, out connectedFlatPatch))
+        {
+          warning = "直面与弯曲面的公共接缝在展开后断开，已停止输出不连续结果。";
+          continue;
+        }
+        flatBreps = new[] { connectedFlatPatch };
+
         var sourceArea = ComputeArea(neutralBrep);
         var flatArea = flatBreps.Sum(ComputeArea);
         if (sourceArea > tolerance * tolerance &&
@@ -147,7 +179,8 @@ namespace WoodSheetLayout.Core
         }
 
         Plane flatPlane;
-        if (!TryFindFlatPlane(flatBreps, tolerance, out flatPlane))
+        var planarAnchorFace = FindLargestPlanarFaceIndex(neutralBrep, tolerance);
+        if (!TryFindFlatPlane(flatBreps, planarAnchorFace, tolerance, out flatPlane))
         {
           warning = "展开结果没有有效平面。";
           continue;
@@ -207,6 +240,8 @@ namespace WoodSheetLayout.Core
         created.Notes.Add(string.Format(
           "折弯件按中性层 K={0:0.###}（厚度×{0:0.###}）展开。",
           settings.NeutralFactor));
+        if (neutralBrep.Faces.Count > 1)
+          created.Notes.Add("直面与弯曲面以公共接缝整体展开，铺平后保持原有连接关系。");
         if (textNeedsMirror)
           created.Notes.Add("已自动修正折弯件文字镜像方向。");
         if (following.Any(item => item.FromText))
@@ -590,9 +625,84 @@ namespace WoodSheetLayout.Core
       return false;
     }
 
-    private static bool TryFindFlatPlane(IEnumerable<Brep> breps, double tolerance, out Plane plane)
+    private static bool TryGetConnectedFlatPatch(
+      IEnumerable<Brep> flatBreps,
+      double tolerance,
+      out Brep connected)
+    {
+      connected = null;
+      var pieces = flatBreps
+        .Where(item => item != null && item.IsValid)
+        .ToArray();
+      if (pieces.Length == 0)
+        return false;
+      if (pieces.Length == 1)
+        connected = pieces[0];
+      else
+      {
+        var joined = Brep.JoinBreps(pieces, tolerance * 20.0);
+        if (joined == null || joined.Length != 1)
+          return false;
+        connected = joined[0];
+      }
+      return connected != null && connected.IsValid && IsConnectedFaceGraph(connected);
+    }
+
+    private static bool IsConnectedFaceGraph(Brep brep)
+    {
+      if (brep == null || !brep.IsValid || brep.Faces.Count == 0)
+        return false;
+      if (brep.Faces.Count == 1)
+        return true;
+
+      var visited = new HashSet<int> { 0 };
+      var queue = new Queue<int>();
+      queue.Enqueue(0);
+      while (queue.Count > 0)
+      {
+        var current = queue.Dequeue();
+        foreach (var edgeIndex in brep.Faces[current].AdjacentEdges())
+        {
+          foreach (var adjacent in brep.Edges[edgeIndex].AdjacentFaces())
+          {
+            if (visited.Add(adjacent))
+              queue.Enqueue(adjacent);
+          }
+        }
+      }
+      return visited.Count == brep.Faces.Count;
+    }
+
+    private static int FindLargestPlanarFaceIndex(Brep brep, double tolerance)
+    {
+      var bestIndex = -1;
+      var bestArea = 0.0;
+      for (var index = 0; index < brep.Faces.Count; index++)
+      {
+        Plane ignored;
+        if (!brep.Faces[index].TryGetPlane(out ignored, tolerance))
+          continue;
+        var area = ComputeArea(brep.Faces[index]);
+        if (area <= bestArea)
+          continue;
+        bestArea = area;
+        bestIndex = index;
+      }
+      return bestIndex;
+    }
+
+    private static bool TryFindFlatPlane(
+      IList<Brep> breps,
+      int preferredFaceIndex,
+      double tolerance,
+      out Plane plane)
     {
       plane = Plane.Unset;
+      if (breps != null && breps.Count == 1 && preferredFaceIndex >= 0 &&
+          preferredFaceIndex < breps[0].Faces.Count &&
+          breps[0].Faces[preferredFaceIndex].TryGetPlane(out plane, tolerance))
+        return true;
+
       foreach (var brep in breps.OrderByDescending(ComputeArea))
       {
         foreach (var face in brep.Faces)

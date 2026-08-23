@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical checks for Wood Sheet Layout 2.0."""
+"""Static and mathematical checks for Wood Sheet Layout 2.0.1."""
 
 from pathlib import Path
 import math
@@ -53,6 +53,17 @@ def main():
     neutral_length = (inner_radius + thickness * 0.5) * angle
     assert math.isclose(neutral_length, 21.0 * math.pi / 2)
 
+    # A planar-bend-planar chain must unfold as one continuous strip.  The
+    # second segment begins exactly at the first seam, and the final planar
+    # segment begins exactly at the second seam (no gap or overlap).
+    first_flat_length = 30.0
+    last_flat_length = 15.0
+    first_seam_x = first_flat_length
+    second_seam_x = first_seam_x + neutral_length
+    strip_end_x = second_seam_x + last_flat_length
+    assert math.isclose(second_seam_x - first_seam_x, neutral_length)
+    assert math.isclose(strip_end_x, first_flat_length + neutral_length + last_flat_length)
+
     models = (SRC / "Core" / "LayoutModels.cs").read_text(encoding="utf-8")
     analyzer = (SRC / "Core" / "BoardAnalyzer.cs").read_text(encoding="utf-8")
     bent = (SRC / "Core" / "BentBoardUnroller.cs").read_text(encoding="utf-8")
@@ -72,7 +83,9 @@ def main():
         assert token in analyzer, token
     for token in [
         "CreateFromOffsetFace", "PerformUnroll", "Pullback", "Pushup",
-        "NeutralFactor", "面积变形", "TextFacesAgainstPatch"
+        "NeutralFactor", "面积变形", "TextFacesAgainstPatch",
+        "HasBendBeyondThickness", "IsConnectedFaceGraph",
+        "TryGetConnectedFlatPatch", "公共接缝"
     ]:
         assert token in bent, token
     for token in ["PointInRegion", "BoundaryDistanceLessThan", "IsNestedInsideHole", "NetArea"]:
@@ -84,7 +97,7 @@ def main():
     for command in ["WoodSheetLayout", "WSLayFlatA3", "WSLayFlatA4"]:
         assert command in commands, command
     assert "net48;net8.0" in project
-    assert "<Version>2.0.0</Version>" in project
+    assert "<Version>2.0.1</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -93,10 +106,11 @@ def main():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     for phrase in [
         "真实外轮廓", "孔洞", "Custom", "4 mm", "NeutralFactor",
-        "折弯", "Rhino 7", "Rhino 8", "不修改原模型"
+        "折弯", "直面与弯曲面的连续展开", "公共接缝",
+        "Rhino 7", "Rhino 8", "不修改原模型"
     ]:
         assert phrase in readme, phrase
-    print("Wood Sheet Layout 2.0 static/mathematical checks passed.")
+    print("Wood Sheet Layout 2.0.1 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

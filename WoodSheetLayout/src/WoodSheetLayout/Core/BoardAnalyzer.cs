@@ -90,10 +90,25 @@ namespace WoodSheetLayout.Core
       }
 
       // 只有整个实体确实像一张薄平板时才使用刚体放平；弯曲件交给中性层展开器。
+      // 对“直面 + 弯曲面”的混合板件，平面段可能很大，但实体沿该平面法向的
+      // 总深度会明显大于真实板厚。此时必须优先整体展开，否则会把弯曲段当作
+      // 普通平板附属几何一起刚体旋转，公共接缝也就无法保持连续。
       var planarSlenderness = bestObject == null
         ? double.MaxValue
         : bestThickness / Math.Max(Math.Sqrt(bestFootprint), tolerance);
-      if (bestObject != null && bestThickness > tolerance && planarSlenderness <= 0.12)
+      var preferContinuousUnroll = bestObject != null &&
+        BentBoardUnroller.HasBendBeyondThickness(
+          bestObject.Geometry,
+          bestThickness,
+          tolerance,
+          settings.ModelUnitsPerMillimeter);
+
+      if (preferContinuousUnroll &&
+          BentBoardUnroller.TryCreatePart(doc, objects, sequence, settings, out part, out warning))
+        return true;
+
+      if (bestObject != null && bestThickness > tolerance && planarSlenderness <= 0.12 &&
+          !preferContinuousUnroll)
       {
         if (TryCreatePlanarPart(
           doc,
@@ -109,7 +124,8 @@ namespace WoodSheetLayout.Core
           return true;
       }
 
-      if (BentBoardUnroller.TryCreatePart(doc, objects, sequence, settings, out part, out warning))
+      if (!preferContinuousUnroll &&
+          BentBoardUnroller.TryCreatePart(doc, objects, sequence, settings, out part, out warning))
         return true;
 
       if (bestObject == null || bestThickness <= tolerance)
