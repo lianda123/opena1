@@ -9,7 +9,7 @@ foreach ($major in @("7", "8")) {
   }
 }
 
-$installRoot = Join-Path $env:LOCALAPPDATA "WoodSheetLayout\1.1.0"
+$installRoot = Join-Path $env:LOCALAPPDATA "WoodSheetLayout\2.0.0"
 if (Test-Path $installRoot) {
   Remove-Item -LiteralPath $installRoot -Recurse -Force
 }

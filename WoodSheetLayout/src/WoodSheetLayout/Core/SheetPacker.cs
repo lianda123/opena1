@@ -36,7 +36,8 @@ namespace WoodSheetLayout.Core
           {
             GlobalIndex = ++globalSheetIndex,
             IndexWithinThickness = index + 1,
-            ThicknessMillimeters = bucket.RepresentativeThickness
+            ThicknessMillimeters = bucket.RepresentativeThickness,
+            UsedPartArea = attempt.Sheets[index].UsedPartArea
           };
           packed.Placements.AddRange(attempt.Sheets[index].Placements);
           result.Sheets.Add(packed);
@@ -57,12 +58,9 @@ namespace WoodSheetLayout.Core
       PackAttempt best = null;
       foreach (SortStrategy sort in Enum.GetValues(typeof(SortStrategy)))
       {
-        foreach (PackingHeuristic heuristic in Enum.GetValues(typeof(PackingHeuristic)))
-        {
-          var attempt = RunAttempt(parts, settings, sort, heuristic);
-          if (best == null || IsBetter(attempt, best))
-            best = attempt;
-        }
+        var attempt = RunAttempt(parts, settings, sort);
+        if (best == null || IsBetter(attempt, best))
+          best = attempt;
       }
       return best;
     }
@@ -70,21 +68,20 @@ namespace WoodSheetLayout.Core
     private static PackAttempt RunAttempt(
       IEnumerable<BoardPart> parts,
       LayoutSettings settings,
-      SortStrategy sort,
-      PackingHeuristic heuristic)
+      SortStrategy sort)
     {
       var ordered = SortParts(parts, sort).ToList();
       var attempt = new PackAttempt();
       foreach (var part in ordered)
       {
-        MaxRectsSheet destination = null;
-        PackCandidate selected = null;
+        ContourSheet destination = null;
+        PlacementCandidate selected = null;
 
-        // 优先填充前面的板框，只有放不下才开新板框。
+        // 优先继续填充已有板框；真实轮廓允许凹槽互补和放入大孔洞。
         foreach (var sheet in attempt.Sheets)
         {
-          PackCandidate candidate;
-          if (!sheet.TryFindBest(part, heuristic, out candidate))
+          PlacementCandidate candidate;
+          if (!sheet.TryFindBest(part, out candidate))
             continue;
           destination = sheet;
           selected = candidate;
@@ -93,9 +90,9 @@ namespace WoodSheetLayout.Core
 
         if (destination == null)
         {
-          destination = new MaxRectsSheet(settings.SheetWidth, settings.SheetHeight, settings.Spacing);
+          destination = new ContourSheet(settings);
           attempt.Sheets.Add(destination);
-          if (!destination.TryFindBest(part, heuristic, out selected))
+          if (!destination.TryFindBest(part, out selected))
             throw new InvalidOperationException("板件在空白边界框中仍无法放置。");
         }
         destination.Place(selected);
@@ -108,25 +105,26 @@ namespace WoodSheetLayout.Core
       if (candidate.Sheets.Count != current.Sheets.Count)
         return candidate.Sheets.Count < current.Sheets.Count;
 
-      var candidateLast = candidate.Sheets.Last().UsedArea;
-      var currentLast = current.Sheets.Last().UsedArea;
-      if (Math.Abs(candidateLast - currentLast) > 1e-8)
-        return candidateLast < currentLast;
+      var candidateOccupied = candidate.Sheets.Sum(item => item.OccupiedBoundingArea);
+      var currentOccupied = current.Sheets.Sum(item => item.OccupiedBoundingArea);
+      if (Math.Abs(candidateOccupied - currentOccupied) > 1e-8)
+        return candidateOccupied < currentOccupied;
 
-      return candidate.Sheets.Sum(sheet => sheet.OccupiedBoundingArea) <
-             current.Sheets.Sum(sheet => sheet.OccupiedBoundingArea);
+      var candidateNested = candidate.Sheets.Sum(item => item.Placements.Count(placement => placement.NestedInsideHole));
+      var currentNested = current.Sheets.Sum(item => item.Placements.Count(placement => placement.NestedInsideHole));
+      return candidateNested > currentNested;
     }
 
     private static IEnumerable<BoardPart> SortParts(IEnumerable<BoardPart> parts, SortStrategy strategy)
     {
       switch (strategy)
       {
-        case SortStrategy.Area:
+        case SortStrategy.NetArea:
           return parts.OrderByDescending(Area).ThenByDescending(MaxSide);
         case SortStrategy.Width:
-          return parts.OrderByDescending(item => item.FlatBounds.Diagonal.X).ThenByDescending(Area);
+          return parts.OrderByDescending(item => item.Outline.Bounds.Diagonal.X).ThenByDescending(Area);
         case SortStrategy.Height:
-          return parts.OrderByDescending(item => item.FlatBounds.Diagonal.Y).ThenByDescending(Area);
+          return parts.OrderByDescending(item => item.Outline.Bounds.Diagonal.Y).ThenByDescending(Area);
         default:
           return parts.OrderByDescending(MaxSide).ThenByDescending(Area);
       }
@@ -134,25 +132,30 @@ namespace WoodSheetLayout.Core
 
     private static bool FitsEmptySheet(BoardPart part, LayoutSettings settings)
     {
-      var usableWidth = settings.SheetWidth - 2.0 * settings.Spacing;
-      var usableHeight = settings.SheetHeight - 2.0 * settings.Spacing;
-      var width = part.FlatBounds.Max.X - part.FlatBounds.Min.X;
-      var height = part.FlatBounds.Max.Y - part.FlatBounds.Min.Y;
-      return (width <= usableWidth && height <= usableHeight) ||
-             (height <= usableWidth && width <= usableHeight);
+      if (part == null || part.Outline == null)
+        return false;
+      foreach (var angle in settings.RotationAnglesRadians())
+      {
+        var bounds = OutlineGeometry.RotatedBounds(part.Outline, angle);
+        if (!bounds.IsValid)
+          continue;
+        if (bounds.Diagonal.X <= settings.SheetWidth - 2.0 * settings.FrameMargin + 1e-8 &&
+            bounds.Diagonal.Y <= settings.SheetHeight - 2.0 * settings.FrameMargin + 1e-8)
+          return true;
+      }
+      return false;
     }
 
     private static double Area(BoardPart part)
     {
-      return Math.Abs((part.FlatBounds.Max.X - part.FlatBounds.Min.X) *
-                      (part.FlatBounds.Max.Y - part.FlatBounds.Min.Y));
+      return part.Outline == null ? 0.0 : Math.Abs(part.Outline.NetArea);
     }
 
     private static double MaxSide(BoardPart part)
     {
-      return Math.Max(
-        Math.Abs(part.FlatBounds.Max.X - part.FlatBounds.Min.X),
-        Math.Abs(part.FlatBounds.Max.Y - part.FlatBounds.Min.Y));
+      if (part.Outline == null || !part.Outline.Bounds.IsValid)
+        return 0.0;
+      return Math.Max(part.Outline.Bounds.Diagonal.X, part.Outline.Bounds.Diagonal.Y);
     }
 
     private static List<ThicknessBucket> BuildThicknessBuckets(
@@ -175,34 +178,12 @@ namespace WoodSheetLayout.Core
       return buckets;
     }
 
-    private static BoundingBox OrientedBounds(BoundingBox bounds, bool rotated)
-    {
-      if (!rotated)
-        return bounds;
-      var rotation = Transform.Rotation(Math.PI * 0.5, Vector3d.ZAxis, Point3d.Origin);
-      var result = BoundingBox.Unset;
-      foreach (var corner in bounds.GetCorners())
-      {
-        var point = corner;
-        point.Transform(rotation);
-        result = result.IsValid ? BoundingBox.Union(result, point) : new BoundingBox(point, point);
-      }
-      return result;
-    }
-
     private enum SortStrategy
     {
-      Area,
+      NetArea,
       MaxSide,
       Width,
       Height
-    }
-
-    private enum PackingHeuristic
-    {
-      BestShortSide,
-      BestArea,
-      BottomLeft
     }
 
     private sealed class ThicknessBucket
@@ -213,32 +194,31 @@ namespace WoodSheetLayout.Core
 
     private sealed class PackAttempt
     {
-      public List<MaxRectsSheet> Sheets { get; } = new List<MaxRectsSheet>();
+      public List<ContourSheet> Sheets { get; } = new List<ContourSheet>();
     }
 
-    private sealed class PackCandidate
+    private sealed class PlacementCandidate
     {
       public BoardPart Part { get; set; }
-      public bool Rotated { get; set; }
-      public BoundingBox Bounds { get; set; }
-      public RectD Rectangle { get; set; }
-      public double ScoreA { get; set; }
-      public double ScoreB { get; set; }
+      public double Angle { get; set; }
+      public double TranslationX { get; set; }
+      public double TranslationY { get; set; }
+      public PositionedOutline Outline { get; set; }
+      public bool NestedInsideHole { get; set; }
+      public double Score { get; set; }
     }
 
-    private sealed class MaxRectsSheet
+    private sealed class ContourSheet
     {
-      private readonly double _gap;
-      private readonly List<RectD> _free = new List<RectD>();
+      private readonly LayoutSettings _settings;
 
-      public MaxRectsSheet(double width, double height, double gap)
+      public ContourSheet(LayoutSettings settings)
       {
-        _gap = gap;
-        _free.Add(new RectD(gap, gap, width - 2.0 * gap, height - 2.0 * gap));
+        _settings = settings;
       }
 
       public List<PartPlacement> Placements { get; } = new List<PartPlacement>();
-      public double UsedArea { get; private set; }
+      public double UsedPartArea { get; private set; }
 
       public double OccupiedBoundingArea
       {
@@ -246,158 +226,161 @@ namespace WoodSheetLayout.Core
         {
           if (Placements.Count == 0)
             return 0.0;
-          var right = Placements.Max(item => item.LocalX + item.OrientedBounds.Max.X - item.OrientedBounds.Min.X);
-          var top = Placements.Max(item => item.LocalY + item.OrientedBounds.Max.Y - item.OrientedBounds.Min.Y);
+          var right = Placements.Max(item => item.PositionedOutline.Bounds.Max.X);
+          var top = Placements.Max(item => item.PositionedOutline.Bounds.Max.Y);
           return right * top;
         }
       }
 
-      public bool TryFindBest(BoardPart part, PackingHeuristic heuristic, out PackCandidate best)
+      public bool TryFindBest(BoardPart part, out PlacementCandidate best)
       {
         best = null;
-        foreach (var free in _free)
+        foreach (var angle in _settings.RotationAnglesRadians())
         {
-          foreach (var rotated in new[] { false, true })
+          var rotated = OutlineGeometry.Position(part.Outline, angle, 0.0, 0.0);
+          if (rotated == null || !rotated.Bounds.IsValid)
+            continue;
+
+          foreach (var translation in CandidateTranslations(rotated))
           {
-            var bounds = OrientedBounds(part.FlatBounds, rotated);
-            var width = bounds.Max.X - bounds.Min.X;
-            var height = bounds.Max.Y - bounds.Min.Y;
-            if (width > free.Width + 1e-9 || height > free.Height + 1e-9)
+            var positioned = OutlineGeometry.Position(part.Outline, angle, translation.X, translation.Y);
+            if (!OutlineGeometry.FitsSheet(
+              positioned,
+              _settings.SheetWidth,
+              _settings.SheetHeight,
+              _settings.FrameMargin))
+              continue;
+            if (Placements.Any(existing =>
+              OutlineGeometry.Collides(positioned, existing.PositionedOutline, _settings.PartGap)))
               continue;
 
-            var candidate = new PackCandidate
-            {
-              Part = part,
-              Rotated = rotated,
-              Bounds = bounds,
-              Rectangle = new RectD(free.X, free.Y, width, height)
-            };
-            Score(candidate, free, heuristic);
-            if (best == null || candidate.ScoreA < best.ScoreA - 1e-9 ||
-                (Math.Abs(candidate.ScoreA - best.ScoreA) <= 1e-9 && candidate.ScoreB < best.ScoreB))
-              best = candidate;
+            var nested = Placements.Any(existing =>
+              OutlineGeometry.IsNestedInsideHole(positioned, existing.PositionedOutline));
+            var compactRight = Math.Max(positioned.Bounds.Max.X,
+              Placements.Count == 0 ? _settings.FrameMargin : Placements.Max(item => item.PositionedOutline.Bounds.Max.X));
+            var compactTop = Math.Max(positioned.Bounds.Max.Y,
+              Placements.Count == 0 ? _settings.FrameMargin : Placements.Max(item => item.PositionedOutline.Bounds.Max.Y));
+            var score = positioned.Bounds.Min.Y * _settings.SheetWidth + positioned.Bounds.Min.X +
+                        compactRight * compactTop * 0.001;
+            if (nested)
+              score -= _settings.SheetWidth * _settings.SheetHeight;
 
-            if (Math.Abs(width - height) <= 1e-9)
-              break;
+            if (best == null || score < best.Score - 1e-8)
+            {
+              best = new PlacementCandidate
+              {
+                Part = part,
+                Angle = angle,
+                TranslationX = translation.X,
+                TranslationY = translation.Y,
+                Outline = positioned,
+                NestedInsideHole = nested,
+                Score = score
+              };
+            }
           }
         }
         return best != null;
       }
 
-      public void Place(PackCandidate candidate)
+      public void Place(PlacementCandidate candidate)
       {
-        var occupied = candidate.Rectangle;
-        SplitFreeRectangles(occupied);
-        PruneFreeRectangles();
         Placements.Add(new PartPlacement
         {
           Part = candidate.Part,
-          RotatedNinetyDegrees = candidate.Rotated,
-          LocalX = occupied.X,
-          LocalY = occupied.Y,
-          OrientedBounds = candidate.Bounds
+          RotationRadians = candidate.Angle,
+          TranslationX = candidate.TranslationX,
+          TranslationY = candidate.TranslationY,
+          OrientedBounds = candidate.Outline.Bounds,
+          PositionedOutline = candidate.Outline,
+          NestedInsideHole = candidate.NestedInsideHole
         });
-        UsedArea += occupied.Width * occupied.Height;
+        UsedPartArea += candidate.Part.Outline.NetArea;
       }
 
-      private static void Score(PackCandidate candidate, RectD free, PackingHeuristic heuristic)
+      private IEnumerable<Point2d> CandidateTranslations(PositionedOutline rotated)
       {
-        var horizontal = free.Width - candidate.Rectangle.Width;
-        var vertical = free.Height - candidate.Rectangle.Height;
-        switch (heuristic)
-        {
-          case PackingHeuristic.BestArea:
-            candidate.ScoreA = free.Width * free.Height - candidate.Rectangle.Width * candidate.Rectangle.Height;
-            candidate.ScoreB = Math.Min(horizontal, vertical);
-            break;
-          case PackingHeuristic.BottomLeft:
-            candidate.ScoreA = candidate.Rectangle.Top;
-            candidate.ScoreB = candidate.Rectangle.X;
-            break;
-          default:
-            candidate.ScoreA = Math.Min(horizontal, vertical);
-            candidate.ScoreB = Math.Max(horizontal, vertical);
-            break;
-        }
-      }
+        var unique = new HashSet<string>(StringComparer.Ordinal);
+        var candidates = new List<Point2d>();
+        AddCandidate(
+          candidates,
+          unique,
+          _settings.FrameMargin - rotated.Bounds.Min.X,
+          _settings.FrameMargin - rotated.Bounds.Min.Y);
 
-      private void SplitFreeRectangles(RectD occupied)
-      {
-        var next = new List<RectD>();
-        foreach (var free in _free)
+        var xTargets = new List<double> { _settings.FrameMargin };
+        var yTargets = new List<double> { _settings.FrameMargin };
+        foreach (var placement in Placements)
         {
-          if (!free.Intersects(occupied))
+          var bounds = placement.PositionedOutline.Bounds;
+          xTargets.Add(bounds.Max.X + _settings.PartGap);
+          xTargets.Add(bounds.Min.X - _settings.PartGap - rotated.Bounds.Diagonal.X);
+          yTargets.Add(bounds.Max.Y + _settings.PartGap);
+          yTargets.Add(bounds.Min.Y - _settings.PartGap - rotated.Bounds.Diagonal.Y);
+
+          AddCandidate(candidates, unique,
+            bounds.Max.X + _settings.PartGap - rotated.Bounds.Min.X,
+            bounds.Min.Y - rotated.Bounds.Min.Y);
+          AddCandidate(candidates, unique,
+            bounds.Min.X - rotated.Bounds.Min.X,
+            bounds.Max.Y + _settings.PartGap - rotated.Bounds.Min.Y);
+
+          foreach (var hole in placement.PositionedOutline.Holes)
           {
-            next.Add(free);
-            continue;
+            var centerX = (hole.Bounds.Min.X + hole.Bounds.Max.X) * 0.5;
+            var centerY = (hole.Bounds.Min.Y + hole.Bounds.Max.Y) * 0.5;
+            var rotatedCenterX = (rotated.Bounds.Min.X + rotated.Bounds.Max.X) * 0.5;
+            var rotatedCenterY = (rotated.Bounds.Min.Y + rotated.Bounds.Max.Y) * 0.5;
+            AddCandidate(candidates, unique, centerX - rotatedCenterX, centerY - rotatedCenterY);
+            AddCandidate(candidates, unique,
+              hole.Bounds.Min.X + _settings.PartGap - rotated.Bounds.Min.X,
+              hole.Bounds.Min.Y + _settings.PartGap - rotated.Bounds.Min.Y);
           }
 
-          var leftRight = occupied.X - _gap;
-          if (leftRight > free.X)
-            next.Add(RectD.FromEdges(free.X, free.Y, leftRight, free.Top));
-
-          var rightLeft = occupied.Right + _gap;
-          if (rightLeft < free.Right)
-            next.Add(RectD.FromEdges(rightLeft, free.Y, free.Right, free.Top));
-
-          var bottomTop = occupied.Y - _gap;
-          if (bottomTop > free.Y)
-            next.Add(RectD.FromEdges(free.X, free.Y, free.Right, bottomTop));
-
-          var topBottom = occupied.Top + _gap;
-          if (topBottom < free.Top)
-            next.Add(RectD.FromEdges(free.X, topBottom, free.Right, free.Top));
-        }
-        _free.Clear();
-        _free.AddRange(next.Where(item => item.Width > 1e-9 && item.Height > 1e-9));
-      }
-
-      private void PruneFreeRectangles()
-      {
-        for (var left = _free.Count - 1; left >= 0; left--)
-        {
-          for (var right = _free.Count - 1; right >= 0; right--)
+          var placedLoops = new[] { placement.PositionedOutline.Outer }
+            .Concat(placement.PositionedOutline.Holes);
+          foreach (var placedLoop in placedLoops)
           {
-            if (left == right || !_free[right].Contains(_free[left]))
-              continue;
-            _free.RemoveAt(left);
-            break;
+            foreach (var placedPoint in OutlineGeometry.SampleAnchorPoints(placedLoop, 18))
+            {
+              foreach (var candidatePoint in OutlineGeometry.SampleAnchorPoints(rotated.Outer, 18))
+              {
+                AddCandidate(candidates, unique,
+                  placedPoint.X - candidatePoint.X + _settings.PartGap,
+                  placedPoint.Y - candidatePoint.Y);
+                AddCandidate(candidates, unique,
+                  placedPoint.X - candidatePoint.X - _settings.PartGap,
+                  placedPoint.Y - candidatePoint.Y);
+                AddCandidate(candidates, unique,
+                  placedPoint.X - candidatePoint.X,
+                  placedPoint.Y - candidatePoint.Y + _settings.PartGap);
+                AddCandidate(candidates, unique,
+                  placedPoint.X - candidatePoint.X,
+                  placedPoint.Y - candidatePoint.Y - _settings.PartGap);
+              }
+            }
           }
         }
-      }
-    }
 
-    private struct RectD
-    {
-      public RectD(double x, double y, double width, double height)
-      {
-        X = x;
-        Y = y;
-        Width = width;
-        Height = height;
+        foreach (var targetX in xTargets.Distinct())
+        {
+          foreach (var targetY in yTargets.Distinct())
+            AddCandidate(candidates, unique, targetX - rotated.Bounds.Min.X, targetY - rotated.Bounds.Min.Y);
+        }
+        return candidates;
       }
 
-      public double X { get; }
-      public double Y { get; }
-      public double Width { get; }
-      public double Height { get; }
-      public double Right => X + Width;
-      public double Top => Y + Height;
-
-      public static RectD FromEdges(double left, double bottom, double right, double top)
+      private static void AddCandidate(
+        ICollection<Point2d> candidates,
+        ISet<string> unique,
+        double x,
+        double y)
       {
-        return new RectD(left, bottom, right - left, top - bottom);
-      }
-
-      public bool Intersects(RectD other)
-      {
-        return X < other.Right && Right > other.X && Y < other.Top && Top > other.Y;
-      }
-
-      public bool Contains(RectD other)
-      {
-        return other.X >= X - 1e-9 && other.Y >= Y - 1e-9 &&
-               other.Right <= Right + 1e-9 && other.Top <= Top + 1e-9;
+        if (double.IsNaN(x) || double.IsNaN(y) || double.IsInfinity(x) || double.IsInfinity(y))
+          return;
+        var key = Math.Round(x, 5).ToString("R") + ":" + Math.Round(y, 5).ToString("R");
+        if (unique.Add(key))
+          candidates.Add(new Point2d(x, y));
       }
     }
   }
