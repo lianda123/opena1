@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - main
+      - woodsheetlayout-2.0
     paths:
       - "WoodSheetLayout/**"
       - ".github/workflows/build-wood-sheet-layout.yml"
