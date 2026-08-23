@@ -15,10 +15,10 @@
     <Title>Wood Sheet Layout</Title>
     <Company>Lianda Design Tools</Company>
     <Product>Wood Sheet Layout for Rhino</Product>
-    <Description>One-click flattening and sheet layout for laser-cut wooden assembly products.</Description>
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <Description>Contour nesting and neutral-layer unrolling for laser-cut wooden assembly products.</Description>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">

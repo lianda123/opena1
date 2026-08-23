@@ -40,73 +40,77 @@ namespace WoodSheetLayout.Core
       if (!IsFinitePositive(settings.ModelUnitsPerMillimeter))
       {
         settings.ModelUnitsPerMillimeter = 1.0;
-        RhinoApp.WriteLine("WoodSheetLayout：文档没有有效单位，将按毫米处理 A3/A4 和 4 mm 间距。");
+        RhinoApp.WriteLine("WoodSheetLayout：文档没有有效单位，将按毫米处理板框、间距与中性层厚度。");
       }
 
       var components = BoardAnalyzer.BuildGroupedComponents(objects);
       var parts = new List<BoardPart>();
+      var analysisIssues = new List<LayoutIssue>();
       var sequence = 0;
       foreach (var component in components)
       {
         BoardPart part;
         string warning;
-        if (BoardAnalyzer.TryCreatePart(
-          doc,
-          component,
-          ++sequence,
-          settings.ModelUnitsPerMillimeter,
-          out part,
-          out warning))
+        sequence++;
+        if (BoardAnalyzer.TryCreatePart(doc, component, sequence, settings, out part, out warning))
         {
           parts.Add(part);
         }
         else
         {
-          RhinoApp.WriteLine(
-            "WoodSheetLayout：第 {0} 组已跳过：{1}",
-            sequence,
-            warning ?? "无法识别木板。");
+          analysisIssues.Add(new LayoutIssue
+          {
+            PartSequence = sequence,
+            PartName = ComponentName(component, sequence),
+            Message = warning ?? "无法识别或铺平木板。",
+            Severity = IssueSeverity.Warning,
+            SourceBounds = BoardAnalyzer.CombinedBounds(component)
+          });
         }
       }
 
-      if (parts.Count == 0)
+      var selectionBounds = BoardAnalyzer.CombinedBounds(objects);
+      var origin = selectionBounds.IsValid
+        ? new Point2d(selectionBounds.Max.X + settings.SheetGap, selectionBounds.Min.Y)
+        : Point2d.Origin;
+      var result = parts.Count == 0
+        ? new LayoutResult()
+        : SheetPacker.Pack(parts, settings, origin);
+      result.Issues.AddRange(analysisIssues);
+      foreach (var oversized in result.OversizedParts)
+      {
+        result.Issues.Add(new LayoutIssue
+        {
+          PartSequence = oversized.Sequence,
+          PartName = oversized.Name,
+          Message = "零件超过当前边界框可用范围，未排入。",
+          Severity = IssueSeverity.Warning,
+          SourceBounds = oversized.SourceBounds
+        });
+      }
+      for (var index = 0; index < result.Issues.Count; index++)
+        result.Issues[index].Number = index + 1;
+
+      if (result.Sheets.Count == 0 && result.Issues.Count == 0)
       {
         RhinoApp.WriteLine("WoodSheetLayout：没有识别到可铺平的板件实体。");
         return false;
       }
 
-      var selectionBounds = CombinedBounds(objects);
-      var origin = selectionBounds.IsValid
-        ? new Point2d(selectionBounds.Max.X + settings.SheetGap, selectionBounds.Min.Y)
-        : Point2d.Origin;
-      var result = SheetPacker.Pack(parts, settings, origin);
-      if (result.Sheets.Count == 0)
-      {
-        ReportOversized(result, settings);
-        return false;
-      }
-
-      var undo = doc.BeginUndoRecord("WoodSheetLayout 一键铺平排版");
+      var undo = doc.BeginUndoRecord("WoodSheetLayout 2.0 真实轮廓铺平排版");
       try
       {
-        var boundaryLayerByThickness = new Dictionary<string, int>();
+        var layers = new OutputLayerManager(doc);
         foreach (var sheet in result.Sheets)
         {
-          var thicknessKey = sheet.ThicknessMillimeters.ToString("0.00");
-          int boundaryLayer;
-          if (!boundaryLayerByThickness.TryGetValue(thicknessKey, out boundaryLayer))
-          {
-            boundaryLayer = FindOrCreateBoundaryLayer(
-              doc,
-              sheet.ThicknessMillimeters,
-              BoundaryColors[boundaryLayerByThickness.Count % BoundaryColors.Length]);
-            boundaryLayerByThickness[thicknessKey] = boundaryLayer;
-          }
-
+          var color = BoundaryColors[(sheet.GlobalIndex - 1) % BoundaryColors.Length];
+          var sheetLayer = layers.CreateSheetLayer(sheet, color);
+          var boundaryLayer = layers.CreateChildLayer(sheetLayer, "边界框与统计", color, color);
           AddBoundary(doc, sheet, settings, boundaryLayer);
           foreach (var placement in sheet.Placements)
-            AddPlacedPart(doc, sheet, placement, settings);
+            AddPlacedPart(doc, sheet, placement, layers, sheetLayer);
         }
+        AddIssueMarkers(doc, result.Issues, layers);
       }
       finally
       {
@@ -116,54 +120,51 @@ namespace WoodSheetLayout.Core
 
       doc.Views.Redraw();
       ReportSummary(result, settings);
-      return true;
+      return result.Sheets.Count > 0;
     }
 
     private static void AddPlacedPart(
       RhinoDoc doc,
       PackedSheet sheet,
       PartPlacement placement,
-      LayoutSettings settings)
+      OutputLayerManager layers,
+      int sheetLayer)
     {
-      var rotation = placement.RotatedNinetyDegrees
-        ? Transform.Rotation(Math.PI * 0.5, Vector3d.ZAxis, Point3d.Origin)
-        : Transform.Identity;
-      var targetX = sheet.Origin.X + placement.LocalX;
-      var targetY = sheet.Origin.Y + placement.LocalY;
-      var translation = Transform.Translation(
-        targetX - placement.OrientedBounds.Min.X,
-        targetY - placement.OrientedBounds.Min.Y,
-        -placement.OrientedBounds.Min.Z);
-      var finalTransform = translation * rotation * placement.Part.FlattenTransform;
+      var rotation = Transform.Rotation(placement.RotationRadians, Vector3d.ZAxis, Point3d.Origin);
+      var localTranslation = Transform.Translation(placement.TranslationX, placement.TranslationY, 0.0);
+      var sheetTranslation = Transform.Translation(sheet.Origin.X, sheet.Origin.Y, 0.0);
+      var finalTransform = sheetTranslation * localTranslation * rotation;
 
       var groupName = string.Format(
-        "WSL_{0:0.00}mm_S{1:00}_{2}_{3}",
+        "WSL2_{0:0.00}mm_S{1:00}_{2}_{3}",
         sheet.ThicknessMillimeters,
         sheet.IndexWithinThickness,
         placement.Part.Name,
         Guid.NewGuid().ToString("N").Substring(0, 6));
       var groupIndex = doc.Groups.Add(groupName);
 
-      foreach (var source in placement.Part.Objects)
+      foreach (var item in placement.Part.FlatGeometry)
       {
-        var newId = doc.Objects.Transform(source.Id, finalTransform, false);
-        if (newId == Guid.Empty)
+        if (item.Geometry == null)
+          continue;
+        var geometry = item.Geometry.Duplicate();
+        if (geometry == null || !geometry.Transform(finalTransform))
         {
-          RhinoApp.WriteLine("WoodSheetLayout：对象“{0}”复制铺平失败。", source.Attributes.Name);
+          RhinoApp.WriteLine("WoodSheetLayout：对象“{0}”输出变换失败。", item.Name ?? placement.Part.Name);
           continue;
         }
 
-        var duplicate = doc.Objects.FindId(newId);
-        if (duplicate == null)
-          continue;
-        var attributes = duplicate.Attributes.Duplicate();
+        var attributes = item.SourceAttributes == null
+          ? new ObjectAttributes()
+          : item.SourceAttributes.Duplicate();
         attributes.RemoveFromAllGroups();
         if (groupIndex >= 0)
           attributes.AddToGroup(groupIndex);
-        attributes.Name = string.IsNullOrWhiteSpace(source.Attributes.Name)
-          ? placement.Part.Name
-          : source.Attributes.Name;
-        doc.Objects.ModifyAttributes(newId, attributes, true);
+        attributes.LayerIndex = layers.GetSourceLayer(sheetLayer, item.SourceAttributes);
+        attributes.Name = string.IsNullOrWhiteSpace(item.Name) ? placement.Part.Name : item.Name;
+        var newId = doc.Objects.Add(geometry, attributes);
+        if (newId == Guid.Empty)
+          RhinoApp.WriteLine("WoodSheetLayout：对象“{0}”复制输出失败。", attributes.Name);
       }
     }
 
@@ -188,12 +189,16 @@ namespace WoodSheetLayout.Core
         LayerIndex = layerIndex,
         Name = string.Format(
           "{0}_{1:0.00}mm_第{2:00}张",
-          settings.Sheet,
+          settings.SheetDescription,
           sheet.ThicknessMillimeters,
           sheet.IndexWithinThickness)
       };
       doc.Objects.AddCurve(new PolylineCurve(points), attributes);
 
+      var usableArea = Math.Max(1e-12,
+        (settings.SheetWidth - 2.0 * settings.FrameMargin) *
+        (settings.SheetHeight - 2.0 * settings.FrameMargin));
+      var utilization = sheet.UsedPartArea / usableArea * 100.0;
       var labelHeight = 6.0 * settings.ModelUnitsPerMillimeter;
       var labelOffset = 2.0 * settings.ModelUnitsPerMillimeter;
       var labelPlane = new Plane(
@@ -202,16 +207,45 @@ namespace WoodSheetLayout.Core
       var label = new TextEntity
       {
         Plane = labelPlane,
-        PlainText = FormatThickness(sheet.ThicknessMillimeters),
+        PlainText = string.Format(
+          "{0}｜第{1:00}张｜{2}件｜利用率{3:0.0}%",
+          FormatThickness(sheet.ThicknessMillimeters),
+          sheet.IndexWithinThickness,
+          sheet.Placements.Count,
+          utilization),
         TextHeight = labelHeight,
         Justification = TextJustification.BottomLeft
       };
       var labelAttributes = new ObjectAttributes
       {
         LayerIndex = layerIndex,
-        Name = "板厚_" + FormatThickness(sheet.ThicknessMillimeters)
+        Name = "板材统计_" + FormatThickness(sheet.ThicknessMillimeters)
       };
       doc.Objects.AddText(label, labelAttributes);
+    }
+
+    private static void AddIssueMarkers(
+      RhinoDoc doc,
+      IEnumerable<LayoutIssue> issues,
+      OutputLayerManager layers)
+    {
+      var issueList = issues.ToList();
+      if (issueList.Count == 0)
+        return;
+      var layer = layers.CreateIssueLayer();
+      foreach (var issue in issueList)
+      {
+        var point = issue.SourceBounds.IsValid ? issue.SourceBounds.Center : Point3d.Origin;
+        var text = string.Format("WSL-{0:000} {1}：{2}", issue.Number, issue.PartName, issue.Message);
+        var attributes = new ObjectAttributes
+        {
+          LayerIndex = layer,
+          Name = "WSL问题_" + issue.Number.ToString("000"),
+          ObjectColor = Color.Gold,
+          ColorSource = ObjectColorSource.ColorFromObject
+        };
+        doc.Objects.AddTextDot(new TextDot(text, point), attributes);
+      }
     }
 
     private static string FormatThickness(double thicknessMillimeters)
@@ -222,71 +256,143 @@ namespace WoodSheetLayout.Core
         : thicknessMillimeters.ToString("0.##") + "mm";
     }
 
-    private static int FindOrCreateBoundaryLayer(RhinoDoc doc, double thicknessMillimeters, Color color)
-    {
-      var name = "WSL_边界框_" + thicknessMillimeters.ToString("0.00") + "mm";
-      foreach (var layer in doc.Layers)
-      {
-        if (string.Equals(layer.Name, name, StringComparison.OrdinalIgnoreCase))
-          return layer.Index;
-      }
-
-      return doc.Layers.Add(new Layer
-      {
-        Name = name,
-        Color = color,
-        PlotColor = color
-      });
-    }
-
-    private static BoundingBox CombinedBounds(IEnumerable<RhinoObject> objects)
-    {
-      var result = BoundingBox.Unset;
-      foreach (var rhinoObject in objects)
-      {
-        var bounds = rhinoObject.Geometry.GetBoundingBox(true);
-        if (!bounds.IsValid)
-          continue;
-        result = result.IsValid ? BoundingBox.Union(result, bounds) : bounds;
-      }
-      return result;
-    }
-
     private static void ReportSummary(LayoutResult result, LayoutSettings settings)
     {
       var partCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout：完成 {0} 块板件、{1} 张 {2} 边界框；板间距与边界留量均为 {3:0.##} mm。",
+        "WoodSheetLayout 2.0：完成 {0} 块板件、{1} 张 {2}；零件间距 {3:0.##} mm，边框留量 {4:0.##} mm。",
         partCount,
         result.Sheets.Count,
-        settings.Sheet,
-        settings.SpacingMillimeters));
+        settings.SheetDescription,
+        settings.PartGapMillimeters,
+        settings.FrameMarginMillimeters));
 
-      foreach (var group in result.Sheets.GroupBy(sheet => sheet.ThicknessMillimeters))
+      foreach (var sheet in result.Sheets)
       {
-        RhinoApp.WriteLine(
-          "  厚度 {0:0.00} mm：{1} 块，{2} 张。",
-          group.Key,
-          group.Sum(sheet => sheet.Placements.Count),
-          group.Count());
+        var usableArea = Math.Max(1e-12,
+          (settings.SheetWidth - 2.0 * settings.FrameMargin) *
+          (settings.SheetHeight - 2.0 * settings.FrameMargin));
+        RhinoApp.WriteLine(string.Format(
+          "  {0} 第{1:00}张：{2}件，真实轮廓利用率 {3:0.0}%{4}",
+          FormatThickness(sheet.ThicknessMillimeters),
+          sheet.IndexWithinThickness,
+          sheet.Placements.Count,
+          sheet.UsedPartArea / usableArea * 100.0,
+          sheet.Placements.Any(item => item.NestedInsideHole) ? "（包含孔洞嵌套）" : string.Empty));
       }
-      ReportOversized(result, settings);
+
+      foreach (var part in result.Sheets.SelectMany(sheet => sheet.Placements).Select(item => item.Part).Distinct())
+      {
+        foreach (var note in part.Notes)
+          RhinoApp.WriteLine("  {0}：{1}", part.Name, note);
+      }
+
+      if (result.Issues.Count > 0)
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：{0} 个问题/未排入对象已用黄色 WSL 编号标记：", result.Issues.Count);
+        foreach (var issue in result.Issues)
+          RhinoApp.WriteLine("  WSL-{0:000} {1}：{2}", issue.Number, issue.PartName, issue.Message);
+      }
+      else
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：未排入零件 0 个。原模型未移动、未删除、未改图层。 ");
+      }
     }
 
-    private static void ReportOversized(LayoutResult result, LayoutSettings settings)
+    private static string ComponentName(IEnumerable<RhinoObject> component, int sequence)
     {
-      foreach (var part in result.OversizedParts)
-      {
-        RhinoApp.WriteLine(
-          "WoodSheetLayout：板件“{0}”超过 {1} 可用范围，未排入边界框。",
-          part.Name,
-          settings.Sheet);
-      }
+      return component
+        .Select(item => item.Attributes.Name)
+        .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item)) ?? "木板_" + sequence.ToString("000");
     }
 
     private static bool IsFinitePositive(double value)
     {
       return value > 0.0 && !double.IsNaN(value) && !double.IsInfinity(value);
+    }
+
+    private sealed class OutputLayerManager
+    {
+      private readonly RhinoDoc _doc;
+      private readonly int _rootLayer;
+      private readonly Dictionary<string, int> _sourceLayerMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+      public OutputLayerManager(RhinoDoc doc)
+      {
+        _doc = doc;
+        _rootLayer = CreateLayer(
+          "WoodSheetLayout_2.0_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          Color.White,
+          Color.White,
+          Guid.Empty,
+          -1);
+      }
+
+      public int CreateSheetLayer(PackedSheet sheet, Color color)
+      {
+        return CreateLayer(
+          string.Format("{0:0.00}mm_第{1:00}张", sheet.ThicknessMillimeters, sheet.IndexWithinThickness),
+          color,
+          color,
+          _doc.Layers[_rootLayer].Id,
+          -1);
+      }
+
+      public int CreateChildLayer(int parent, string name, Color color, Color plotColor)
+      {
+        return CreateLayer(name, color, plotColor, _doc.Layers[parent].Id, -1);
+      }
+
+      public int GetSourceLayer(int sheetLayer, ObjectAttributes sourceAttributes)
+      {
+        var sourceLayer = sourceAttributes == null || sourceAttributes.LayerIndex < 0 ||
+                          sourceAttributes.LayerIndex >= _doc.Layers.Count
+          ? null
+          : _doc.Layers[sourceAttributes.LayerIndex];
+        var sourceKey = sourceLayer == null ? "默认图层" : sourceLayer.FullPath;
+        var key = sheetLayer.ToString() + "|" + sourceKey;
+        int layerIndex;
+        if (_sourceLayerMap.TryGetValue(key, out layerIndex))
+          return layerIndex;
+
+        var name = "原图层_" + SanitizeLayerName(sourceKey);
+        var color = sourceLayer == null ? Color.White : sourceLayer.Color;
+        var plotColor = sourceLayer == null ? color : sourceLayer.PlotColor;
+        var lineType = sourceLayer == null ? -1 : sourceLayer.LinetypeIndex;
+        layerIndex = CreateLayer(name, color, plotColor, _doc.Layers[sheetLayer].Id, lineType);
+        _sourceLayerMap[key] = layerIndex;
+        return layerIndex;
+      }
+
+      public int CreateIssueLayer()
+      {
+        return CreateLayer("问题标记_黄色", Color.Gold, Color.Gold, _doc.Layers[_rootLayer].Id, -1);
+      }
+
+      private int CreateLayer(
+        string name,
+        Color color,
+        Color plotColor,
+        Guid parentId,
+        int lineTypeIndex)
+      {
+        var layer = new Layer
+        {
+          Name = name,
+          Color = color,
+          PlotColor = plotColor,
+          ParentLayerId = parentId
+        };
+        if (lineTypeIndex >= 0)
+          layer.LinetypeIndex = lineTypeIndex;
+        return _doc.Layers.Add(layer);
+      }
+
+      private static string SanitizeLayerName(string value)
+      {
+        var result = (value ?? "默认图层").Replace("::", "_").Replace("/", "_").Replace("\\", "_");
+        return result.Length <= 80 ? result : result.Substring(result.Length - 80);
+      }
     }
   }
 }

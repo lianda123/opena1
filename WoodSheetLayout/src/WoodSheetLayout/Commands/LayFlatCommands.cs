@@ -13,32 +13,96 @@ namespace WoodSheetLayout.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      var option = new GetOption();
-      option.SetCommandPrompt("选择激光排版边界框");
-      option.AcceptNothing(true);
-      option.SetDefaultString("A3");
-      var a3 = option.AddOption("A3");
-      var a4 = option.AddOption("A4");
-      var getResult = option.Get();
-      if (getResult == GetResult.Cancel)
-        return Result.Cancel;
-
-      var sheet = SheetKind.A3;
-      if (getResult == GetResult.Option && option.OptionIndex() == a4)
-        sheet = SheetKind.A4;
-      else if (getResult == GetResult.Option && option.OptionIndex() != a3)
-        return Result.Cancel;
-
-      return RunLayout(doc, sheet);
+      var settings = new LayoutSettings();
+      var configurationResult = Configure(settings);
+      if (configurationResult != Result.Success)
+        return configurationResult;
+      return RunLayout(doc, settings);
     }
 
-    internal static Result RunLayout(RhinoDoc doc, SheetKind sheet)
+    private static Result Configure(LayoutSettings settings)
+    {
+      var sheetWidth = new OptionDouble(settings.CustomWidthMillimeters);
+      var sheetHeight = new OptionDouble(settings.CustomHeightMillimeters);
+      var landscape = new OptionToggle(settings.Landscape, "Portrait", "Landscape");
+      var grainLock = new OptionToggle(settings.GrainDirectionLocked, "No", "Yes");
+      var partGap = new OptionDouble(settings.PartGapMillimeters);
+      var frameMargin = new OptionDouble(settings.FrameMarginMillimeters);
+      var neutralFactor = new OptionDouble(settings.NeutralFactor);
+      var rotationStep = new OptionDouble(settings.FreeRotationStepDegrees);
+
+      var getter = new GetOption();
+      getter.SetCommandPrompt("设置板框与真实轮廓排版参数，回车开始选择零件");
+      getter.AcceptNothing(true);
+      var sheetOption = getter.AddOptionList("Sheet", new[] { "A3", "A4", "Custom" }, 0);
+      var orientationOption = getter.AddOptionToggle("Orientation", ref landscape);
+      var rotationOption = getter.AddOptionList("Rotation", new[] { "ZeroNinety", "Free" }, 0);
+      var grainOption = getter.AddOptionToggle("GrainLock", ref grainLock);
+      getter.AddOptionDouble("CustomWidth", ref sheetWidth);
+      getter.AddOptionDouble("CustomHeight", ref sheetHeight);
+      getter.AddOptionDouble("PartGap", ref partGap);
+      getter.AddOptionDouble("FrameMargin", ref frameMargin);
+      getter.AddOptionDouble("NeutralFactor", ref neutralFactor);
+      getter.AddOptionDouble("FreeAngleStep", ref rotationStep);
+
+      while (true)
+      {
+        var result = getter.Get();
+        if (result == GetResult.Cancel)
+          return Result.Cancel;
+        if (result == GetResult.Nothing)
+          break;
+        if (result != GetResult.Option)
+          continue;
+
+        if (getter.OptionIndex() == sheetOption)
+          settings.Sheet = (SheetKind)getter.Option().CurrentListOptionIndex;
+        else if (getter.OptionIndex() == rotationOption)
+          settings.Rotation = (RotationMode)getter.Option().CurrentListOptionIndex;
+        else if (getter.OptionIndex() != orientationOption && getter.OptionIndex() != grainOption)
+          continue;
+      }
+
+      settings.CustomWidthMillimeters = sheetWidth.CurrentValue;
+      settings.CustomHeightMillimeters = sheetHeight.CurrentValue;
+      settings.Landscape = landscape.CurrentValue;
+      settings.GrainDirectionLocked = grainLock.CurrentValue;
+      settings.PartGapMillimeters = partGap.CurrentValue;
+      settings.FrameMarginMillimeters = frameMargin.CurrentValue;
+      settings.NeutralFactor = neutralFactor.CurrentValue;
+      settings.FreeRotationStepDegrees = rotationStep.CurrentValue;
+
+      if (settings.CustomWidthMillimeters <= 8.0 || settings.CustomHeightMillimeters <= 8.0)
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：Custom 长宽必须大于8mm。");
+        return Result.Failure;
+      }
+      if (settings.PartGapMillimeters < 0.0 || settings.FrameMarginMillimeters < 0.0)
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：PartGap 和 FrameMargin 不能为负数。");
+        return Result.Failure;
+      }
+      if (settings.NeutralFactor < 0.0 || settings.NeutralFactor > 1.0)
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：NeutralFactor 必须在0到1之间，默认0.5代表木板厚度中间层。");
+        return Result.Failure;
+      }
+      if (settings.FreeRotationStepDegrees < 1.0 || settings.FreeRotationStepDegrees > 90.0)
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：FreeAngleStep 必须在1°到90°之间。");
+        return Result.Failure;
+      }
+      return Result.Success;
+    }
+
+    internal static Result RunLayout(RhinoDoc doc, LayoutSettings settings)
     {
       var getter = new GetObject();
-      getter.SetCommandPrompt("选择木板及与木板打组的刀线/雕刻曲线（可选择多组）");
+      getter.SetCommandPrompt("选择木板及与木板打组的刀线/雕刻曲线/文字（可选择多组）");
       getter.GroupSelect = true;
       getter.SubObjectSelect = false;
       getter.GeometryFilter = Rhino.DocObjects.ObjectType.AnyObject;
+      getter.EnablePreSelect(true, true);
       getter.GetMultiple(1, 0);
       if (getter.CommandResult() != Result.Success)
         return getter.CommandResult();
@@ -47,14 +111,22 @@ namespace WoodSheetLayout.Commands
         .Select(index => getter.Object(index).Object())
         .Where(item => item != null)
         .ToList();
-      var settings = new LayoutSettings
+      return LayoutEngine.Execute(doc, objects, settings) ? Result.Success : Result.Failure;
+    }
+
+    internal static LayoutSettings FixedSettings(SheetKind sheet)
+    {
+      return new LayoutSettings
       {
         Sheet = sheet,
-        SpacingMillimeters = 4.0,
+        PartGapMillimeters = 4.0,
+        FrameMarginMillimeters = 4.0,
         ThicknessToleranceMillimeters = 0.15,
-        Landscape = true
+        Landscape = true,
+        Rotation = RotationMode.ZeroNinety,
+        GrainDirectionLocked = false,
+        NeutralFactor = 0.5
       };
-      return LayoutEngine.Execute(doc, objects, settings) ? Result.Success : Result.Failure;
     }
   }
 
@@ -64,7 +136,7 @@ namespace WoodSheetLayout.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      return WoodSheetLayoutCommand.RunLayout(doc, SheetKind.A3);
+      return WoodSheetLayoutCommand.RunLayout(doc, WoodSheetLayoutCommand.FixedSettings(SheetKind.A3));
     }
   }
 
@@ -74,7 +146,7 @@ namespace WoodSheetLayout.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      return WoodSheetLayoutCommand.RunLayout(doc, SheetKind.A4);
+      return WoodSheetLayoutCommand.RunLayout(doc, WoodSheetLayoutCommand.FixedSettings(SheetKind.A4));
     }
   }
 }
