@@ -45,7 +45,7 @@ namespace WoodExport.Commands
       var cadSucceeded = true;
       if (format != ExportFormat.BomOnly)
       {
-        var directory = Path.GetDirectoryName(bomPath) ?? Environment.CurrentDirectory;
+        var directory = Path.GetDirectoryName(bomPath) ?? System.Environment.CurrentDirectory;
         var baseName = CommandHelpers.ExportBaseName(bomPath);
         cadSucceeded = WoodExportEngine.ExportCadByThickness(
           doc, result, settings, directory, baseName, format);
