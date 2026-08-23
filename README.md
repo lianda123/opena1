@@ -6,7 +6,7 @@
 
 | 插件 | 功能 | Rhino 7 + Rhino 8 安装包 |
 |---|---|---|
-| WoodCheck 1.0.0 | 穿模、碰撞、槽深、孔轴同心、薄弱位置和曲线检查 | [下载 WoodCheck 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/WoodCheck-1.0.0-rhino7-rhino8.zip) |
+| WoodCheck 1.1.0 | 实体碰撞体积、Ø2mm轴孔同心、重复激光曲线三项检查 | [下载 WoodCheck 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/WoodCheck-1.1.0-rhino7-rhino8.zip) |
 | MechanismMaker 1.0.0 | 齿轮、齿条、凸轮、曲柄、四连杆、棘轮和日内瓦机构 | [下载 MechanismMaker 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/MechanismMaker-1.0.0-rhino7-rhino8.zip) |
 | WoodExport 1.0.0 | 零件编号、刻字、BOM、按厚度输出 DXF/DWG | [下载 WoodExport 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/WoodExport-1.0.0-rhino7-rhino8.zip) |
 | ExplodeBook 1.0.0 | 爆炸图、装配顺序、箭头、编号和 A4/A3 说明书页面 | [下载 ExplodeBook 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/ExplodeBook-1.0.0-rhino7-rhino8.zip) |
