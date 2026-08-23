@@ -1,0 +1,12 @@
+name: ExplodeBook
+version: 1.0.0
+authors:
+  - Lianda Design Tools
+description: Exploded views, assembly sequencing, arrows, part numbers and Rhino Layout instruction pages.
+url: https://github.com/lianda123/opena1
+keywords:
+  - wood
+  - assembly
+  - exploded-view
+  - instruction-manual
+  - layout
