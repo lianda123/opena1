@@ -272,13 +272,13 @@ namespace WoodSheetLayout.Core
         var usableArea = Math.Max(1e-12,
           (settings.SheetWidth - 2.0 * settings.FrameMargin) *
           (settings.SheetHeight - 2.0 * settings.FrameMargin));
-        RhinoApp.WriteLine(
+        RhinoApp.WriteLine(string.Format(
           "  {0} 第{1:00}张：{2}件，真实轮廓利用率 {3:0.0}%{4}",
           FormatThickness(sheet.ThicknessMillimeters),
           sheet.IndexWithinThickness,
           sheet.Placements.Count,
           sheet.UsedPartArea / usableArea * 100.0,
-          sheet.Placements.Any(item => item.NestedInsideHole) ? "（包含孔洞嵌套）" : string.Empty);
+          sheet.Placements.Any(item => item.NestedInsideHole) ? "（包含孔洞嵌套）" : string.Empty));
       }
 
       foreach (var part in result.Sheets.SelectMany(sheet => sheet.Placements).Select(item => item.Part).Distinct())
