@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $pluginId = "A4B064E4-E870-461D-8889-C808924C5153"
-$version = "1.0.0"
+$version = "1.1.0"
 $installRoot = Join-Path $env:LOCALAPPDATA "WoodCheck\$version"
 $targets = if ($RhinoVersion -eq "Both") { @("7", "8") } else { @($RhinoVersion) }
 
