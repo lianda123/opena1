@@ -1,0 +1,12 @@
+name: WoodExport
+version: 1.0.0
+authors:
+  - Lianda Design Tools
+description: Automatic part numbering, laser engraving labels, BOM and thickness-based DXF/DWG export for wooden products.
+url: https://github.com/lianda123/opena1
+keywords:
+  - wood
+  - laser-cut
+  - BOM
+  - DXF
+  - DWG

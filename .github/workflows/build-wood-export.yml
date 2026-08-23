@@ -1,0 +1,60 @@
+name: Build WoodExport for Rhino 7 and 8
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "WoodExport/**"
+      - ".github/workflows/build-wood-export.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify WoodExport rules
+        shell: pwsh
+        working-directory: WoodExport
+        run: python tests/verify_woodexport.py
+
+      - name: Build WoodExport
+        shell: pwsh
+        working-directory: WoodExport
+        run: ./build.ps1 -Configuration Release
+
+      - name: Upload Rhino 7 plug-in
+        uses: actions/upload-artifact@v4
+        with:
+          name: WoodExport-1.0.0-rhino7
+          path: WoodExport/dist/WoodExport-1.0.0-rhino7.zip
+          if-no-files-found: error
+
+      - name: Upload Rhino 8 plug-in
+        uses: actions/upload-artifact@v4
+        with:
+          name: WoodExport-1.0.0-rhino8
+          path: WoodExport/dist/WoodExport-1.0.0-rhino8.zip
+          if-no-files-found: error
+
+      - name: Upload combined package
+        uses: actions/upload-artifact@v4
+        with:
+          name: WoodExport-1.0.0-rhino7-rhino8
+          path: WoodExport/dist/WoodExport-1.0.0-rhino7-rhino8.zip
+          if-no-files-found: error
