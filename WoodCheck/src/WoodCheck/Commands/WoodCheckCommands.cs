@@ -16,20 +16,61 @@ namespace WoodCheck.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      var getter = new GetObject();
-      getter.SetCommandPrompt("选择要检查的木板、轴孔和切割曲线（支持多选及打组）");
-      getter.GroupSelect = true;
-      getter.SubObjectSelect = false;
-      getter.GeometryFilter = ObjectType.AnyObject;
-      getter.GetMultiple(1, 0);
-      if (getter.CommandResult() != Result.Success)
-        return getter.CommandResult();
+      List<RhinoObject> objects;
+      var result = CommandHelpers.GetObjects(
+        "选择要进行三项装配检查的实体、轴孔木板和激光曲线（支持打组）",
+        out objects);
+      return result == Result.Success
+        ? WoodCheckRunner.Run(doc, objects, CheckScope.All, "三项综合检查")
+        : result;
+    }
+  }
 
-      var objects = Enumerable.Range(0, getter.ObjectCount)
-        .Select(index => getter.Object(index).Object())
-        .Where(item => item != null)
-        .ToList();
-      return WoodCheckRunner.Run(doc, objects);
+  public sealed class WoodCheckCollisionCommand : Command
+  {
+    public override string EnglishName => "WCC";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      List<RhinoObject> objects;
+      var result = CommandHelpers.GetObjects(
+        "选择要检查实体穿模和真实碰撞体积的零件（支持打组）",
+        out objects);
+      return result == Result.Success
+        ? WoodCheckRunner.Run(doc, objects, CheckScope.Collision, "实体穿模/碰撞体积")
+        : result;
+    }
+  }
+
+  public sealed class WoodCheckAxisCommand : Command
+  {
+    public override string EnglishName => "WCA";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      List<RhinoObject> objects;
+      var result = CommandHelpers.GetObjects(
+        "选择含 Ø2mm 附近轴孔的木板实体（支持打组）",
+        out objects);
+      return result == Result.Success
+        ? WoodCheckRunner.Run(doc, objects, CheckScope.Axis, "Ø2mm 轴孔同心")
+        : result;
+    }
+  }
+
+  public sealed class WoodCheckDuplicateCommand : Command
+  {
+    public override string EnglishName => "WCD";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      List<RhinoObject> objects;
+      var result = CommandHelpers.GetObjects(
+        "选择要检查重复曲线和激光重复走刀的曲线（支持打组）",
+        out objects);
+      return result == Result.Success
+        ? WoodCheckRunner.Run(doc, objects, CheckScope.DuplicateCurve, "重复曲线/激光重复走刀")
+        : result;
     }
   }
 
@@ -44,7 +85,7 @@ namespace WoodCheck.Commands
         .Where(item => !item.IsHidden && !item.IsLocked)
         .Where(item => item.Attributes.GetUserString(MarkerManager.MarkerKey) != MarkerManager.MarkerValue)
         .ToList();
-      return WoodCheckRunner.Run(doc, objects);
+      return WoodCheckRunner.Run(doc, objects, CheckScope.All, "全文件三项检查");
     }
   }
 
@@ -68,14 +109,14 @@ namespace WoodCheck.Commands
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
       var code = string.Empty;
-      var result = RhinoGet.GetString("输入问题编号，例如 E001 或 W002", false, ref code);
+      var result = RhinoGet.GetString("输入问题编号，例如 E001、W001 或 I001", false, ref code);
       if (result != Result.Success)
         return result;
 
       var ids = MarkerManager.FindSourceIds(doc, code);
       if (ids.Count == 0)
       {
-        RhinoApp.WriteLine("WoodCheck：未找到问题编号 {0}，请先运行 WoodCheck。", code);
+        RhinoApp.WriteLine("WoodCheck：未找到问题编号 {0}，请先运行检查命令。", code);
         return Result.Nothing;
       }
 
@@ -95,32 +136,20 @@ namespace WoodCheck.Commands
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
       var current = WoodCheckPlugin.CurrentSettings;
-      var boardThickness = current.NominalBoardThicknessMm;
+      var collisionVolume = current.CollisionVolumeMm3;
       var shaftDiameter = current.ShaftDiameterMm;
-      var slotDepth = current.MinimumSlotDepthMm;
       var axisTolerance = current.AxisToleranceMm;
-      var minimumWall = current.MinimumWallMm;
-      var minimumFeature = current.MinimumFeatureMm;
-      var openGap = current.OpenCurveGapMm;
 
-      if (!AskPositive("名义木板厚度（mm）", ref boardThickness)) return Result.Cancel;
-      if (!AskPositive("钢轴直径（mm）", ref shaftDiameter)) return Result.Cancel;
-      if (!AskPositive("最小槽深（mm）", ref slotDepth)) return Result.Cancel;
+      if (!AskPositive("最小真实碰撞体积（mm³）", ref collisionVolume)) return Result.Cancel;
+      if (!AskPositive("钢轴孔目标直径（mm）", ref shaftDiameter)) return Result.Cancel;
       if (!AskPositive("孔轴同心允许偏差（mm）", ref axisTolerance)) return Result.Cancel;
-      if (!AskPositive("最小剩余壁厚（mm）", ref minimumWall)) return Result.Cancel;
-      if (!AskPositive("最小加工特征（mm）", ref minimumFeature)) return Result.Cancel;
-      if (!AskPositive("视为断口的首尾间隙（mm）", ref openGap)) return Result.Cancel;
 
-      current.NominalBoardThicknessMm = boardThickness;
+      current.CollisionVolumeMm3 = collisionVolume;
       current.ShaftDiameterMm = shaftDiameter;
-      current.MinimumSlotDepthMm = slotDepth;
       current.AxisToleranceMm = axisTolerance;
-      current.MinimumWallMm = minimumWall;
-      current.MinimumFeatureMm = minimumFeature;
-      current.OpenCurveGapMm = openGap;
-      RhinoApp.WriteLine(
-        "WoodCheck 参数已更新：板厚 {0:0.###} mm，轴径 Ø{1:0.###} mm，最小槽深 {2:0.###} mm。",
-        boardThickness, shaftDiameter, slotDepth);
+      RhinoApp.WriteLine(string.Format(
+        "WoodCheck 参数：最小碰撞体积 {0:0.###} mm³，轴孔 Ø{1:0.###} mm，同心偏差 {2:0.###} mm。",
+        collisionVolume, shaftDiameter, axisTolerance));
       return Result.Success;
     }
 
@@ -138,9 +167,37 @@ namespace WoodCheck.Commands
     }
   }
 
+  internal static class CommandHelpers
+  {
+    public static Result GetObjects(string prompt, out List<RhinoObject> objects)
+    {
+      objects = new List<RhinoObject>();
+      var getter = new GetObject();
+      getter.SetCommandPrompt(prompt);
+      getter.GroupSelect = true;
+      getter.SubObjectSelect = false;
+      getter.GeometryFilter = ObjectType.AnyObject;
+      getter.GetMultiple(1, 0);
+      if (getter.CommandResult() != Result.Success)
+        return getter.CommandResult();
+
+      objects = Enumerable.Range(0, getter.ObjectCount)
+        .Select(index => getter.Object(index).Object())
+        .Where(item => item != null)
+        .GroupBy(item => item.Id)
+        .Select(group => group.First())
+        .ToList();
+      return objects.Count > 0 ? Result.Success : Result.Nothing;
+    }
+  }
+
   internal static class WoodCheckRunner
   {
-    public static Result Run(RhinoDoc doc, IList<RhinoObject> objects)
+    public static Result Run(
+      RhinoDoc doc,
+      IList<RhinoObject> objects,
+      CheckScope scope,
+      string label)
     {
       if (objects == null || objects.Count == 0)
       {
@@ -149,8 +206,8 @@ namespace WoodCheck.Commands
       }
 
       MarkerManager.Clear(doc);
-      RhinoApp.WriteLine("WoodCheck：正在检查 {0} 个对象……", objects.Count);
-      var report = WoodCheckEngine.Run(doc, objects, WoodCheckPlugin.CurrentSettings);
+      RhinoApp.WriteLine("WoodCheck：正在执行 {0}，共 {1} 个对象……", label, objects.Count);
+      var report = WoodCheckEngine.Run(doc, objects, WoodCheckPlugin.CurrentSettings, scope);
       if (WoodCheckPlugin.CurrentSettings.MarkIssues)
         MarkerManager.Render(doc, report);
 
@@ -161,9 +218,9 @@ namespace WoodCheck.Commands
         RhinoApp.WriteLine("[{0}] {1}：{2}", issue.Code, issue.Title, issue.Message);
       }
 
-      RhinoApp.WriteLine(
-        "WoodCheck 完成：错误 {0}，警告 {1}，提示 {2}。输入 WCLocate 可按编号定位，WCClearMarkers 可清除标记。",
-        report.ErrorCount, report.WarningCount, report.InfoCount);
+      RhinoApp.WriteLine(string.Format(
+        "WoodCheck 完成：红色碰撞 {0}，橙色轴孔 {1}，黄色重复曲线 {2}。输入 WCLocate 可按编号定位。",
+        report.ErrorCount, report.WarningCount, report.InfoCount));
       doc.Views.Redraw();
       return Result.Success;
     }

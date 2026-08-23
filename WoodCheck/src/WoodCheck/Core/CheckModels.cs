@@ -14,27 +14,28 @@ namespace WoodCheck.Core
 
   internal enum CheckKind
   {
-    InvalidGeometry,
     Collision,
-    ShallowSlot,
     AxisMisalignment,
-    WeakWall,
-    DuplicateCurve,
-    OpenCurve
+    DuplicateCurve
+  }
+
+  [Flags]
+  internal enum CheckScope
+  {
+    None = 0,
+    Collision = 1,
+    Axis = 2,
+    DuplicateCurve = 4,
+    All = Collision | Axis | DuplicateCurve
   }
 
   internal sealed class CheckSettings
   {
-    public double NominalBoardThicknessMm { get; set; } = 2.0;
     public double ShaftDiameterMm { get; set; } = 2.0;
     public double CollisionVolumeMm3 { get; set; } = 0.01;
-    public double MinimumSlotDepthMm { get; set; } = 4.0;
     public double AxisToleranceMm { get; set; } = 0.15;
     public double AxisSearchRadiusMm { get; set; } = 3.0;
     public double MaximumAxisSpanMm { get; set; } = 100.0;
-    public double MinimumWallMm { get; set; } = 1.0;
-    public double MinimumFeatureMm { get; set; } = 0.5;
-    public double OpenCurveGapMm { get; set; } = 0.2;
     public bool MarkIssues { get; set; } = true;
   }
 
