@@ -187,6 +187,9 @@ namespace WoodSheetLayout.Core
     public int IndexWithinThickness { get; set; }
     public double ThicknessMillimeters { get; set; }
     public Point2d Origin { get; set; }
+    public double Width { get; set; }
+    public double Height { get; set; }
+    public bool AutoExpanded { get; set; }
     public double UsedPartArea { get; set; }
     public List<PartPlacement> Placements { get; } = new List<PartPlacement>();
   }
