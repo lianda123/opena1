@@ -1,8 +1,8 @@
 name: WoodSheetLayout
-version: 2.0.3
+version: 2.0.4
 authors:
   - Lianda Design Tools
-description: True-contour nesting, hole nesting and neutral-layer unrolling for laser-cut wooden assembly products.
+description: True-contour nesting with verified hole placement and a separate neutral-layer bend command.
 url: https://github.com/lianda123/opena1
 keywords:
   - wood
