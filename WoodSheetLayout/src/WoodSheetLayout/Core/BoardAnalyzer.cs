@@ -293,7 +293,8 @@ namespace WoodSheetLayout.Core
         var height = Math.Abs(box.Max.Y - box.Min.Y);
         var depth = Math.Abs(box.Max.Z - box.Min.Z);
         var area = width * height;
-        var annotationDistance = AverageAnnotationDistance(face, annotationSamples);
+        // 保持1.1行为：用标注曲线采样点到候选平面的距离选木板正面。
+        var annotationDistance = AverageAnnotationDistance(facePlane, annotationSamples);
         if (width <= tolerance || height <= tolerance || depth <= tolerance)
           continue;
         if (depth < bestThickness - tolerance ||
