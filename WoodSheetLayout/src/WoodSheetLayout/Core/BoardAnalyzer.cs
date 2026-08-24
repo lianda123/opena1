@@ -91,13 +91,31 @@ namespace WoodSheetLayout.Core
         }
       }
 
-      // 只有整个实体确实像一张薄平板时才使用刚体放平；弯曲件交给中性层展开器。
-      // 对“直面 + 弯曲面”的混合板件，平面段可能很大，但实体沿该平面法向的
-      // 总深度会明显大于真实板厚。此时必须优先整体展开，否则会把弯曲段当作
-      // 普通平板附属几何一起刚体旋转，公共接缝也就无法保持连续。
-      var planarSlenderness = bestObject == null
-        ? double.MaxValue
-        : bestThickness / Math.Max(Math.Sqrt(bestFootprint), tolerance);
+      // 普通命令严格走1.1快速路径：找到可测厚度的大平面后立即刚体铺平。
+      // 不扫描曲面、不估算折弯、不提取真实外轮廓；这些重计算只属于
+      // WSLayFlatBend。这样带圆孔、圆角或局部圆柱孔壁的普通板不会被误判跳过。
+      if (settings.PartMode == LayoutPartMode.PlanarOnly)
+      {
+        if (bestObject == null || bestThickness <= tolerance)
+        {
+          warning = "未找到具有可测厚度的大平面实体；请确认木板为有真实厚度的 Brep、Extrusion 或 Mesh。";
+          return false;
+        }
+
+        return TryCreatePlanarPart(
+          doc,
+          objects,
+          sequence,
+          settings,
+          bestObject,
+          bestFace,
+          bestPlane,
+          bestThickness,
+          out part,
+          out warning);
+      }
+
+      // 只有独立折弯命令才执行下面的曲面分析和中性层展开判定。
       var preferContinuousUnroll = bestObject != null &&
         BentBoardUnroller.HasBendBeyondThickness(
           bestObject.Geometry,
@@ -110,13 +128,6 @@ namespace WoodSheetLayout.Core
           tolerance,
           settings.ModelUnitsPerMillimeter));
       var isBentBoard = preferContinuousUnroll || hasPrimaryCurvedSurface;
-
-      if (settings.PartMode == LayoutPartMode.PlanarOnly && isBentBoard)
-      {
-        skippedByMode = true;
-        warning = "检测到折弯板，普通排版已跳过；请使用 WSLayFlatBend 单独展开排版。";
-        return false;
-      }
 
       if (settings.PartMode == LayoutPartMode.BentOnly)
       {
@@ -136,27 +147,7 @@ namespace WoodSheetLayout.Core
           out warning);
       }
 
-      if (bestObject != null && bestThickness > tolerance && planarSlenderness <= 0.12 &&
-          !isBentBoard)
-      {
-        if (TryCreatePlanarPart(
-          doc,
-          objects,
-          sequence,
-          settings,
-          bestObject,
-          bestFace,
-          bestPlane,
-          bestThickness,
-          out part,
-          out warning))
-          return true;
-      }
-
-      if (bestObject == null || bestThickness <= tolerance)
-        warning = warning ?? "未找到具有可测厚度且可提取真实外轮廓的平板。";
-      else
-        warning = warning ?? "实体不是可用于普通排版的薄平板。";
+      warning = warning ?? "未找到可以由折弯件命令展开的恒厚板件。";
       return false;
     }
 
