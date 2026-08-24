@@ -262,7 +262,7 @@ def main():
     installer = (root / "install.ps1").read_text(encoding="utf-8")
     build = (root / "build.ps1").read_text(encoding="utf-8")
     assert "<TargetFrameworks>net48;net8.0</TargetFrameworks>" in project
-    assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3000"' in project
+    assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3001"' in project
     assert "<Prefer32Bit>false</Prefer32Bit>" in project
     assert "<Version>1.2.1</Version>" in project
     for token in ['ValidateSet("Auto", "7", "8", "Both")', 'Plug-ins\\{$pluginId}', "Unblock-File", '"LoadMode"']:
