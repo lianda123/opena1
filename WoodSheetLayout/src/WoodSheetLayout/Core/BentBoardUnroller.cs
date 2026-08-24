@@ -9,6 +9,38 @@ namespace WoodSheetLayout.Core
 {
   internal static class BentBoardUnroller
   {
+    internal static bool HasPrimaryCurvedSurface(
+      GeometryBase geometry,
+      double tolerance,
+      double modelUnitsPerMillimeter)
+    {
+      var brep = ToBrep(geometry);
+      if (brep == null || !brep.IsValid || !brep.IsSolid)
+        return false;
+
+      var thickness = EstimateThickness(brep, tolerance, modelUnitsPerMillimeter);
+      var diagonal = brep.GetBoundingBox(true).Diagonal.Length;
+      if (thickness <= tolerance || diagonal <= tolerance || thickness >= diagonal * 0.25)
+        return false;
+
+      var faceAreas = Enumerable.Range(0, brep.Faces.Count)
+        .Select(index => new
+        {
+          Face = brep.Faces[index],
+          Area = ComputeArea(brep.Faces[index])
+        })
+        .ToList();
+      var maximumArea = faceAreas.Select(item => item.Area).DefaultIfEmpty(0.0).Max();
+      if (maximumArea <= tolerance * tolerance)
+        return false;
+
+      return faceAreas.Any(item =>
+      {
+        Plane ignored;
+        return item.Area >= maximumArea * 0.08 && !item.Face.TryGetPlane(out ignored, tolerance);
+      });
+    }
+
     internal static bool HasBendBeyondThickness(
       GeometryBase geometry,
       double depthFromPlanarFace,
