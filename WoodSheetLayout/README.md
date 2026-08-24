@@ -1,4 +1,4 @@
-# WoodSheetLayout 2.1.3（Rhino 7 / Rhino 8）
+# WoodSheetLayout 2.1.4（Rhino 7 / Rhino 8）
 
 面向木制拼装产品、激光切割刀模和 CAD 出图的一键铺平插件。本版严格回归 1.1.0 的普通排版骨架，只加入自定义边界框、独立折弯件铺平和中文命令选项。
 
@@ -14,6 +14,11 @@
 - 普通命令不再扫描曲面或判断折弯：测到板面和厚度后立即进入1.1铺平路径。
 - 对STEP/IGES、连续布尔或圆角产生的封闭多重曲面：精确平面识别失败时，自动以放宽公差和曲面局部坐标架寻找最薄方向。
 - 近似平面回退只在标准1.1识别失败时运行，不增加正常木板的处理负担。
+- 普通Brep板面方向重新严格使用1.1的“曲线采样点到候选平面距离”判断，不再让修剪面ClosestPoint影响零件有效性。
+- 每个已铺平零件建立唯一`WSL_PAIR`配对Group：原始木板、原始同组曲线及对应铺平副本共同加入该组。
+- 不在原模型旁生成黄色问题编号或缺件文字；移动配对Group即可核对原件与副本。
+- 配对Group只增加组成员关系，不移动原始模型，也不改变原图层和颜色。
+- 再次运行排版时自动忽略带`FlatCopy`标记的旧铺平副本，避免重复排版。
 
 FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、切割线、孔线、刻线和文字，不会把零件变成矩形。
 
@@ -79,16 +84,16 @@ FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、�
 
 - 每个厚度建立独立板框，左上角显示厚度、板号、零件数量和矩形占位利用率。
 - 每个零件和同组曲线在输出区重新组成独立Group。
-- 无法识别、无法展开或超过板框的对象在源位置生成黄色 `WSL-001` 编号。
+- 无法识别、无法展开或超过板框的对象只在Rhino命令行报告，不在模型中生成文字标记。
 - 整个命令支持一次Rhino撤销。
 
 ## 编译和安装
 
 编译输出：
 
-- `WoodSheetLayout-2.1.3-rhino7.zip`
-- `WoodSheetLayout-2.1.3-rhino8.zip`
-- `WoodSheetLayout-2.1.3-rhino7-rhino8.zip`
+- `WoodSheetLayout-2.1.4-rhino7.zip`
+- `WoodSheetLayout-2.1.4-rhino8.zip`
+- `WoodSheetLayout-2.1.4-rhino7-rhino8.zip`
 
 用户安装编译好的插件不需要安装.NET SDK。完整解压后运行 `install.ps1`；或者在Rhino输入 `_PlugInManager`，Rhino 7选择 `net48/WoodSheetLayout.rhp`，Rhino 8选择 `net8.0/WoodSheetLayout.rhp`。安装后完全重启Rhino。
 

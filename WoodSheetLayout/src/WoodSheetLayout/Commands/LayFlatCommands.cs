@@ -108,8 +108,8 @@ namespace WoodSheetLayout.Commands
     {
       var getter = new GetObject();
       getter.SetCommandPrompt(settings.PartMode == LayoutPartMode.BentOnly
-        ? "选择折弯木板及其同组刀线、雕刻线或文字（普通平板自动跳过）"
-        : "选择平板及其同组刀线、雕刻线或文字（折弯件自动跳过）");
+        ? "选择折弯木板及其同组刀线、雕刻线或文字"
+        : "选择普通木板及其同组刀线、雕刻线或文字（每块木板使用独立组）");
       getter.GroupSelect = true;
       getter.SubObjectSelect = false;
       getter.GeometryFilter = Rhino.DocObjects.ObjectType.AnyObject;
