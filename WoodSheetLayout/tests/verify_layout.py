@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks for the 1.1-based WoodSheetLayout 2.1.2 fast planar path."""
+"""Checks for the 1.1-based WoodSheetLayout 2.1.3 fast planar path."""
 
 from pathlib import Path
 import math
@@ -72,6 +72,11 @@ def main():
     assert "return TryCreatePlanarPart(" in planar_section
     assert "planarSlenderness" not in analyzer
     assert "可提取真实外轮廓" not in analyzer
+    for token in [
+        "TryFindApproximateBrepPlane", "relaxedTolerance",
+        "face.FrameAt(u, v, out candidatePlane)", "exactScore > 0.25"
+    ]:
+        assert token in analyzer, token
 
     # Exact 1.1 MaxRects characteristics: four sorts x three heuristics = 12 attempts.
     for token in [
@@ -103,13 +108,13 @@ def main():
         assert token in bent, token
     for token in ["ShowProgressMeter", "EscapeKeyPressed", "RhinoApp.Wait"]:
         assert token in progress, token
-    for token in ["WoodSheetLayout_2.1.2", "矩形包围盒MaxRects", "边框出血"]:
+    for token in ["WoodSheetLayout_2.1.3", "矩形包围盒MaxRects", "边框出血"]:
         assert token in engine, token
 
     assert "net48;net8.0" in project
     assert "<Prefer32Bit>false</Prefer32Bit>" in project
     assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3001"' in project
-    assert "<Version>2.1.2</Version>" in project
+    assert "<Version>2.1.3</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -123,7 +128,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("WoodSheetLayout 2.1.2 fast planar FlatBounds/MaxRects checks passed.")
+    print("WoodSheetLayout 2.1.3 multiface fallback/FlatBounds/MaxRects checks passed.")
 
 
 if __name__ == "__main__":
