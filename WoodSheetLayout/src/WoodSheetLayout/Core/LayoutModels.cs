@@ -18,6 +18,12 @@ namespace WoodSheetLayout.Core
     DevelopableMidSurface
   }
 
+  internal enum LayoutPartMode
+  {
+    PlanarOnly,
+    BentOnly
+  }
+
   internal enum IssueSeverity
   {
     Warning,
@@ -26,6 +32,7 @@ namespace WoodSheetLayout.Core
 
   internal sealed class LayoutSettings
   {
+    public LayoutPartMode PartMode { get; set; } = LayoutPartMode.PlanarOnly;
     public SheetKind Sheet { get; set; } = SheetKind.A3;
     public double CustomWidthMillimeters { get; set; } = 420.0;
     public double CustomHeightMillimeters { get; set; } = 297.0;
@@ -191,6 +198,7 @@ namespace WoodSheetLayout.Core
     public List<PackedSheet> Sheets { get; } = new List<PackedSheet>();
     public List<BoardPart> OversizedParts { get; } = new List<BoardPart>();
     public List<LayoutIssue> Issues { get; } = new List<LayoutIssue>();
+    public List<string> SkippedParts { get; } = new List<string>();
     public List<string> Warnings { get; } = new List<string>();
   }
 }
