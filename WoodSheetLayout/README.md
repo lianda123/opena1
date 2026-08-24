@@ -1,4 +1,4 @@
-# WoodSheetLayout 2.2.1（Rhino 7 / Rhino 8）
+# WoodSheetLayout 2.2.2（Rhino 7 / Rhino 8）
 
 面向木制拼装产品、激光切割刀模和 CAD 出图的一键铺平插件。本版不再只保留1.1.0的MaxRects，而是恢复普通命令从选择、分组、铺平到文档复制输出的完整1.1.0通道；自定义边界框、独立折弯件铺平和中文选项只加在外围。
 
@@ -108,6 +108,16 @@ FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、�
 - 同组压痕、图案、文字等附属曲线展开后统一放在平板上表面，不再停留在板厚中间层。
 - 边界随动曲线只用于重建实体，不会作为额外刻线重复输出。
 
+### 2.2.2孔槽实体布尔重建
+
+已按 `zhewan3.3dm` 再次核对：2.2.1虽然提取了边界，但Rhino把多个闭合环建立为独立填充面，随后最大面选择仍得到无孔外板。本版改为：
+
+- 从每个主皮肤面直接读取完整 `BrepLoopType.Inner`，不再把孔洞拆成零散边线。
+- 外轮廓单独建立完整平板实体。
+- 每个内环单独生成超过板厚的贯穿切割实体，并逐个执行 `Brep.CreateBooleanDifference`。
+- 输出前检查平板顶面的真实内环数量；小于原实体内环数时停止输出，避免再次生成表面无孔的错误零件。
+- 开口卡槽属于外轮廓，继续由展开后的外边界直接重建；封闭孔洞由实体布尔差生成。
+
 ## 建模准备
 
 1. 推荐每块木板使用有真实厚度的闭合Brep、Extrusion或Mesh；其他可复制对象也会强制铺平。
@@ -126,9 +136,9 @@ FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、�
 
 编译输出：
 
-- `WoodSheetLayout-2.2.1-rhino7.zip`
-- `WoodSheetLayout-2.2.1-rhino8.zip`
-- `WoodSheetLayout-2.2.1-rhino7-rhino8.zip`
+- `WoodSheetLayout-2.2.2-rhino7.zip`
+- `WoodSheetLayout-2.2.2-rhino8.zip`
+- `WoodSheetLayout-2.2.2-rhino7-rhino8.zip`
 
 用户安装编译好的插件不需要安装.NET SDK。完整解压后运行 `install.ps1`；或者在Rhino输入 `_PlugInManager`，Rhino 7选择 `net48/WoodSheetLayout.rhp`，Rhino 8选择 `net8.0/WoodSheetLayout.rhp`。安装后完全重启Rhino。
 
