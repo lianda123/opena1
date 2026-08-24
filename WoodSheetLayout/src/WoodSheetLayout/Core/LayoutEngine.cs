@@ -134,8 +134,10 @@ namespace WoodSheetLayout.Core
         throw new OperationCanceledException();
 
       var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
-        ? "WoodSheetLayout 2.0.4 折弯件中性层展开排版"
-        : "WoodSheetLayout 2.0.4 平板真实轮廓排版");
+        ? "WoodSheetLayout 2.1.0 折弯件中性层展开排版"
+        : settings.Packing == PackingMode.Fast
+          ? "WoodSheetLayout 2.1.0 平板快速规整排版"
+          : "WoodSheetLayout 2.1.0 平板真实轮廓排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -310,11 +312,14 @@ namespace WoodSheetLayout.Core
     {
       var partCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.0.4：完成 {0} 块{1}、{2} 张 {3}；零件间距 {4:0.##} mm，边框留量 {5:0.##} mm。",
+        "WoodSheetLayout 2.1.0：完成 {0} 块{1}、{2} 张 {3}；{4}；零件间距 {5:0.##} mm，边框留量 {6:0.##} mm。",
         partCount,
         settings.PartMode == LayoutPartMode.BentOnly ? "折弯板" : "平板",
         result.Sheets.Count,
         settings.SheetDescription,
+        settings.Packing == PackingMode.Fast
+          ? "Fast快速规整排版"
+          : settings.EnableHoleNesting ? "Contour真实轮廓＋孔洞嵌套" : "Contour真实轮廓排版",
         settings.PartGapMillimeters,
         settings.FrameMarginMillimeters));
 
@@ -383,7 +388,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.0.4_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.1.0_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,
