@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical checks for Wood Sheet Layout 2.0.3."""
+"""Static and mathematical checks for Wood Sheet Layout 2.0.4."""
 
 from pathlib import Path
 import math
@@ -77,29 +77,36 @@ def main():
     for token in [
         "SheetKind.Custom", "CustomWidthMillimeters", "CustomHeightMillimeters",
         "PartGapMillimeters", "FrameMarginMillimeters", "NeutralFactor",
-        "GrainDirectionLocked", "yield return Math.PI * 0.5"
+        "GrainDirectionLocked", "yield return Math.PI * 0.5",
+        "LayoutPartMode.PlanarOnly", "LayoutPartMode.BentOnly", "SkippedParts"
     ]:
         assert token in models or token in commands, token
     for removed_token in ["RotationMode", "FreeRotationStepDegrees", "FreeAngleStep"]:
         assert removed_token not in models + commands, removed_token
-    for token in ["DuplicateNakedEdgeCurves", "TextWouldFaceDown", "BentBoardUnroller.TryCreatePart"]:
+    for token in [
+        "DuplicateNakedEdgeCurves", "TextWouldFaceDown", "BentBoardUnroller.TryCreatePart",
+        "skippedByMode", "WSLayFlatBend", "HasPrimaryCurvedSurface"
+    ]:
         assert token in analyzer, token
+    assert "OutlineGeometry.CreateRectangle" not in analyzer
     for token in [
         "CreateFromOffsetFace", "PerformUnroll", "Pullback", "Pushup",
         "NeutralFactor", "面积变形", "TextFacesAgainstPatch",
         "HasBendBeyondThickness", "IsConnectedFaceGraph",
-        "TryGetConnectedFlatPatch", "公共接缝"
+        "TryGetConnectedFlatPatch", "公共接缝", "HasPrimaryCurvedSurface"
     ]:
         assert token in bent, token
     for token in [
         "PointInRegion", "BoundaryDistanceLessThan", "IsNestedInsideHole", "NetArea",
-        "BoundsSeparated", "SegmentsSeparated", "SimplifyClosedPolyline"
+        "BoundsSeparated", "SegmentsSeparated", "SimplifyClosedPolyline",
+        "LoopContainsLoop", "TryRegionInteriorProbe"
     ]:
         assert token in outline, token
     for token in [
         "CandidateTranslations", "NestedInsideHole", "RotationAnglesRadians",
         "BuildThicknessBuckets", "MaximumCandidateTranslationsPerAngle = 2200",
-        "SampleAnchorPoints(placedLoop, 10)", "partCount <= 24"
+        "SampleAnchorPoints(placedLoop, 10)", "HoleFirst", "AddPriorityCandidate",
+        "StrategyCount(item.Parts)"
     ]:
         assert token in packer, token
     for token in [
@@ -107,12 +114,12 @@ def main():
         "EscapeKeyPressed", "RhinoApp.Wait", "按 Esc 取消"
     ]:
         assert token in progress, token
-    for token in ["WoodSheetLayout_2.0", "真实轮廓利用率", "问题标记_黄色", "未排入"]:
+    for token in ["WoodSheetLayout_2.0.4", "真实轮廓利用率", "问题标记_黄色", "未排入", "ReportSkippedParts"]:
         assert token in engine, token
-    for command in ["WoodSheetLayout", "WSLayFlatA3", "WSLayFlatA4"]:
+    for command in ["WoodSheetLayout", "WSLayFlatA3", "WSLayFlatA4", "WSLayFlatBend"]:
         assert command in commands, command
     assert "net48;net8.0" in project
-    assert "<Version>2.0.3</Version>" in project
+    assert "<Version>2.0.4</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -122,10 +129,11 @@ def main():
     for phrase in [
         "真实外轮廓", "孔洞", "Custom", "4 mm", "NeutralFactor",
         "折弯", "直面与弯曲面的连续展开", "公共接缝",
-        "Rhino 7", "Rhino 8", "不修改原模型", "进度条", "按 `Esc`"
+        "Rhino 7", "Rhino 8", "不修改原模型", "进度条", "按 `Esc`",
+        "WSLayFlatBend", "整条零件外轮廓验证", "不再退回矩形包围盒"
     ]:
         assert phrase in readme, phrase
-    print("Wood Sheet Layout 2.0.3 static/mathematical checks passed.")
+    print("Wood Sheet Layout 2.0.4 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":
