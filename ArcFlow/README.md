@@ -36,7 +36,7 @@ ArcFlow 用独立的真实圆弧段构建复杂曲线与参数化螺旋。相邻
 ## 1.2.1 Rhino 7 兼容性修正
 
 - Rhino 7 目标仍为 `.NET Framework 4.8`，并明确关闭 `Prefer32Bit`。
-- RhinoCommon 引用从 7.38 降到 Rhino 7 SR0 的 `7.0.20314.3000`，扩大旧版 Rhino 7 的兼容范围。
+- RhinoCommon 引用从 7.38 降到 Rhino 7 SR0 的 `7.0.20314.3001`，扩大旧版 Rhino 7 的兼容范围。
 - 双版本包运行 `install.ps1` 时会同时安装 Rhino 7 与 Rhino 8，不再错误地优先只选择 Rhino 8。
 - 安装脚本会解除 `.rhp` 的 Windows 下载锁定，使用带花括号的正确插件注册表路径，并设置自动加载模式。
 
