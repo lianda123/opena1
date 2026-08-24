@@ -10,11 +10,17 @@ namespace WoodSheetLayout.Core
     public static LayoutResult Pack(
       IEnumerable<BoardPart> sourceParts,
       LayoutSettings settings,
-      Point2d outputOrigin)
+      Point2d outputOrigin,
+      LayoutProgress progress)
     {
       var result = new LayoutResult();
       var buckets = BuildThicknessBuckets(sourceParts, settings.ThicknessToleranceMillimeters);
       var globalSheetIndex = 0;
+      if (progress != null)
+      {
+        var totalSteps = buckets.Sum(item => item.Parts.Count * StrategyCount(item.Parts.Count));
+        progress.BeginPacking(totalSteps);
+      }
 
       foreach (var bucket in buckets)
       {
@@ -29,7 +35,7 @@ namespace WoodSheetLayout.Core
         if (validParts.Count == 0)
           continue;
 
-        var attempt = FindBestAttempt(validParts, settings);
+        var attempt = FindBestAttempt(validParts, settings, progress);
         for (var index = 0; index < attempt.Sheets.Count; index++)
         {
           var packed = new PackedSheet
@@ -53,12 +59,15 @@ namespace WoodSheetLayout.Core
       return result;
     }
 
-    private static PackAttempt FindBestAttempt(IList<BoardPart> parts, LayoutSettings settings)
+    private static PackAttempt FindBestAttempt(
+      IList<BoardPart> parts,
+      LayoutSettings settings,
+      LayoutProgress progress)
     {
       PackAttempt best = null;
-      foreach (SortStrategy sort in Enum.GetValues(typeof(SortStrategy)))
+      foreach (var sort in StrategiesFor(parts.Count))
       {
-        var attempt = RunAttempt(parts, settings, sort);
+        var attempt = RunAttempt(parts, settings, sort, progress);
         if (best == null || IsBetter(attempt, best))
           best = attempt;
       }
@@ -68,7 +77,8 @@ namespace WoodSheetLayout.Core
     private static PackAttempt RunAttempt(
       IEnumerable<BoardPart> parts,
       LayoutSettings settings,
-      SortStrategy sort)
+      SortStrategy sort,
+      LayoutProgress progress)
     {
       var ordered = SortParts(parts, sort).ToList();
       var attempt = new PackAttempt();
@@ -90,14 +100,32 @@ namespace WoodSheetLayout.Core
 
         if (destination == null)
         {
-          destination = new ContourSheet(settings);
+          destination = new ContourSheet(settings, progress);
           attempt.Sheets.Add(destination);
           if (!destination.TryFindBest(part, out selected))
             throw new InvalidOperationException("板件在空白边界框中仍无法放置。");
         }
         destination.Place(selected);
+        if (progress != null && !progress.CompletePackingStep())
+          throw new OperationCanceledException();
       }
       return attempt;
+    }
+
+    private static IEnumerable<SortStrategy> StrategiesFor(int partCount)
+    {
+      yield return SortStrategy.NetArea;
+      yield return SortStrategy.MaxSide;
+      if (partCount <= 24)
+      {
+        yield return SortStrategy.Width;
+        yield return SortStrategy.Height;
+      }
+    }
+
+    private static int StrategyCount(int partCount)
+    {
+      return partCount <= 24 ? 4 : 2;
     }
 
     private static bool IsBetter(PackAttempt candidate, PackAttempt current)
@@ -210,11 +238,14 @@ namespace WoodSheetLayout.Core
 
     private sealed class ContourSheet
     {
+      private const int MaximumCandidateTranslationsPerAngle = 2200;
       private readonly LayoutSettings _settings;
+      private readonly LayoutProgress _progress;
 
-      public ContourSheet(LayoutSettings settings)
+      public ContourSheet(LayoutSettings settings, LayoutProgress progress)
       {
         _settings = settings;
+        _progress = progress;
       }
 
       public List<PartPlacement> Placements { get; } = new List<PartPlacement>();
@@ -241,8 +272,11 @@ namespace WoodSheetLayout.Core
           if (rotated == null || !rotated.Bounds.IsValid)
             continue;
 
+          var candidateIndex = 0;
           foreach (var translation in CandidateTranslations(rotated))
           {
+            if ((candidateIndex++ & 63) == 0 && _progress != null && !_progress.Pulse())
+              throw new OperationCanceledException();
             var positioned = OutlineGeometry.Position(part.Outline, angle, translation.X, translation.Y);
             if (!OutlineGeometry.FitsSheet(
               positioned,
@@ -341,9 +375,9 @@ namespace WoodSheetLayout.Core
             .Concat(placement.PositionedOutline.Holes);
           foreach (var placedLoop in placedLoops)
           {
-            foreach (var placedPoint in OutlineGeometry.SampleAnchorPoints(placedLoop, 18))
+            foreach (var placedPoint in OutlineGeometry.SampleAnchorPoints(placedLoop, 10))
             {
-              foreach (var candidatePoint in OutlineGeometry.SampleAnchorPoints(rotated.Outer, 18))
+              foreach (var candidatePoint in OutlineGeometry.SampleAnchorPoints(rotated.Outer, 10))
               {
                 AddCandidate(candidates, unique,
                   placedPoint.X - candidatePoint.X + _settings.PartGap,
@@ -367,7 +401,19 @@ namespace WoodSheetLayout.Core
           foreach (var targetY in yTargets.Distinct())
             AddCandidate(candidates, unique, targetX - rotated.Bounds.Min.X, targetY - rotated.Bounds.Min.Y);
         }
-        return candidates;
+        return candidates
+          .Where(point => TranslationFitsSheetBounds(rotated.Bounds, point))
+          .OrderBy(point => point.Y * _settings.SheetWidth + point.X)
+          .Take(MaximumCandidateTranslationsPerAngle)
+          .ToArray();
+      }
+
+      private bool TranslationFitsSheetBounds(BoundingBox bounds, Point2d translation)
+      {
+        return bounds.Min.X + translation.X >= _settings.FrameMargin - 1e-8 &&
+               bounds.Min.Y + translation.Y >= _settings.FrameMargin - 1e-8 &&
+               bounds.Max.X + translation.X <= _settings.SheetWidth - _settings.FrameMargin + 1e-8 &&
+               bounds.Max.Y + translation.Y <= _settings.SheetHeight - _settings.FrameMargin + 1e-8;
       }
 
       private static void AddCandidate(

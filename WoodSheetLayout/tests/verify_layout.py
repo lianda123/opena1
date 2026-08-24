@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical checks for Wood Sheet Layout 2.0.2."""
+"""Static and mathematical checks for Wood Sheet Layout 2.0.3."""
 
 from pathlib import Path
 import math
@@ -70,6 +70,7 @@ def main():
     outline = (SRC / "Core" / "OutlineGeometry.cs").read_text(encoding="utf-8")
     engine = (SRC / "Core" / "LayoutEngine.cs").read_text(encoding="utf-8")
     packer = (SRC / "Core" / "SheetPacker.cs").read_text(encoding="utf-8")
+    progress = (SRC / "Core" / "LayoutProgress.cs").read_text(encoding="utf-8")
     commands = (SRC / "Commands" / "LayFlatCommands.cs").read_text(encoding="utf-8")
     project = (SRC / "WoodSheetLayout.csproj").read_text(encoding="utf-8")
 
@@ -90,16 +91,28 @@ def main():
         "TryGetConnectedFlatPatch", "公共接缝"
     ]:
         assert token in bent, token
-    for token in ["PointInRegion", "BoundaryDistanceLessThan", "IsNestedInsideHole", "NetArea"]:
+    for token in [
+        "PointInRegion", "BoundaryDistanceLessThan", "IsNestedInsideHole", "NetArea",
+        "BoundsSeparated", "SegmentsSeparated", "SimplifyClosedPolyline"
+    ]:
         assert token in outline, token
-    for token in ["CandidateTranslations", "NestedInsideHole", "RotationAnglesRadians", "BuildThicknessBuckets"]:
+    for token in [
+        "CandidateTranslations", "NestedInsideHole", "RotationAnglesRadians",
+        "BuildThicknessBuckets", "MaximumCandidateTranslationsPerAngle = 2200",
+        "SampleAnchorPoints(placedLoop, 10)", "partCount <= 24"
+    ]:
         assert token in packer, token
+    for token in [
+        "ShowProgressMeter", "UpdateProgressMeter", "HideProgressMeter",
+        "EscapeKeyPressed", "RhinoApp.Wait", "按 Esc 取消"
+    ]:
+        assert token in progress, token
     for token in ["WoodSheetLayout_2.0", "真实轮廓利用率", "问题标记_黄色", "未排入"]:
         assert token in engine, token
     for command in ["WoodSheetLayout", "WSLayFlatA3", "WSLayFlatA4"]:
         assert command in commands, command
     assert "net48;net8.0" in project
-    assert "<Version>2.0.2</Version>" in project
+    assert "<Version>2.0.3</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -109,10 +122,10 @@ def main():
     for phrase in [
         "真实外轮廓", "孔洞", "Custom", "4 mm", "NeutralFactor",
         "折弯", "直面与弯曲面的连续展开", "公共接缝",
-        "Rhino 7", "Rhino 8", "不修改原模型"
+        "Rhino 7", "Rhino 8", "不修改原模型", "进度条", "按 `Esc`"
     ]:
         assert phrase in readme, phrase
-    print("Wood Sheet Layout 2.0.2 static/mathematical checks passed.")
+    print("Wood Sheet Layout 2.0.3 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":
