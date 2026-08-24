@@ -130,6 +130,7 @@ def main():
         "OutputGuide", "doc.Objects.ModifyAttributes",
         "AddClassicPlanarPart", "doc.Objects.Transform(source.Id, finalTransform, false)",
         "placement.Part.FlattenKind == FlattenKind.Planar",
+        "-placement.Part.FlatBounds.Min.Z",
         "TryCreatePlacedGeometry", "AddGeometryWithFallback",
         "数量校验未通过", "数量校验通过"
     ]:
