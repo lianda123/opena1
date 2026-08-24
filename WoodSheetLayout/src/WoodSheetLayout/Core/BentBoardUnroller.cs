@@ -145,6 +145,9 @@ namespace WoodSheetLayout.Core
 
       foreach (var patch in patches)
       {
+        var seamTolerance = Math.Max(
+          tolerance * 20.0,
+          thickness * 0.025);
         Brep neutralBrep;
         Dictionary<int, Brep> offsetByFace;
         if (!TryCreateNeutralPatch(
@@ -152,6 +155,7 @@ namespace WoodSheetLayout.Core
           patch.FaceIndices,
           thickness * settings.NeutralFactor,
           tolerance,
+          seamTolerance,
           out neutralBrep,
           out offsetByFace))
           continue;
@@ -194,7 +198,7 @@ namespace WoodSheetLayout.Core
           continue;
 
         Brep connectedFlatPatch;
-        if (!TryGetConnectedFlatPatch(flatBreps, tolerance, out connectedFlatPatch))
+        if (!TryGetConnectedFlatPatch(flatBreps, seamTolerance, out connectedFlatPatch))
         {
           warning = "直面与弯曲面的公共接缝在展开后断开，已停止输出不连续结果。";
           continue;
@@ -272,6 +276,15 @@ namespace WoodSheetLayout.Core
         created.Notes.Add(string.Format(
           "折弯件按中性层 K={0:0.###}（厚度×{0:0.###}）展开。",
           settings.NeutralFactor));
+        var planarFaceCount = patch.FaceIndices.Count(index =>
+        {
+          Plane ignored;
+          return boardBrep.Faces[index].TryGetPlane(out ignored, tolerance);
+        });
+        created.Notes.Add(string.Format(
+          "识别连续折弯链：{0}个直面＋{1}个折弯面。",
+          planarFaceCount,
+          patch.FaceIndices.Count - planarFaceCount));
         if (neutralBrep.Faces.Count > 1)
           created.Notes.Add("直面与弯曲面以公共接缝整体展开，铺平后保持原有连接关系。");
         if (textNeedsMirror)
@@ -295,25 +308,14 @@ namespace WoodSheetLayout.Core
     {
       foreach (var flatBrep in flatBreps)
       {
-        GeometryBase output = flatBrep;
-        if (flatBrep.Faces.Count == 1)
-        {
-          try
-          {
-            var solid = Brep.CreateFromOffsetFace(
-              flatBrep.Faces[0],
-              thickness * 0.5,
-              tolerance,
-              true,
-              true);
-            if (solid != null && solid.IsValid)
-              output = solid;
-          }
-          catch
-          {
-            output = flatBrep;
-          }
-        }
+        Brep planarSolid;
+        GeometryBase output = TryCreatePlanarBoardSolid(
+          flatBrep,
+          thickness,
+          tolerance,
+          out planarSolid)
+          ? planarSolid
+          : flatBrep;
         part.FlatGeometry.Add(new FlatGeometryItem
         {
           Geometry = output,
@@ -322,6 +324,60 @@ namespace WoodSheetLayout.Core
           Name = boardObject.Attributes.Name
         });
       }
+    }
+
+    private static bool TryCreatePlanarBoardSolid(
+      Brep flatPatch,
+      double thickness,
+      double tolerance,
+      out Brep solid)
+    {
+      solid = null;
+      if (flatPatch == null || !flatPatch.IsValid)
+        return false;
+
+      // 多段折弯展开后可能仍由多个共面面片组成。先从整体裸边重建
+      // 一个带孔洞和卡口的平面板，再从中性层向两侧各偏移半个厚度。
+      var nakedEdges = flatPatch.DuplicateNakedEdgeCurves(true, true) ?? new Curve[0];
+      var loopTolerance = Math.Max(tolerance * 20.0, 1e-7);
+      var joinedLoops = Curve.JoinCurves(nakedEdges, loopTolerance);
+      if (joinedLoops == null || joinedLoops.Length == 0)
+        return false;
+
+      Brep[] planarBreps;
+      try
+      {
+        planarBreps = Brep.CreatePlanarBreps(joinedLoops, loopTolerance);
+      }
+      catch
+      {
+        planarBreps = null;
+      }
+      if (planarBreps == null || planarBreps.Length == 0)
+        return false;
+
+      // CreatePlanarBreps可能同时返回孔洞内部的小面，选择覆盖整块板的最大面。
+      var planar = planarBreps
+        .Where(item => item != null && item.IsValid && item.Faces.Count > 0)
+        .OrderByDescending(ComputeArea)
+        .FirstOrDefault();
+      if (planar == null)
+        return false;
+
+      try
+      {
+        solid = Brep.CreateFromOffsetFace(
+          planar.Faces[0],
+          thickness * 0.5,
+          tolerance,
+          true,
+          true);
+      }
+      catch
+      {
+        solid = null;
+      }
+      return solid != null && solid.IsValid && solid.IsSolid;
     }
 
     private static void AddFlatFollowingGeometry(
@@ -432,6 +488,7 @@ namespace WoodSheetLayout.Core
       IList<int> faceIndices,
       double offsetDistance,
       double tolerance,
+      double seamTolerance,
       out Brep neutralBrep,
       out Dictionary<int, Brep> offsetByFace)
     {
@@ -441,23 +498,138 @@ namespace WoodSheetLayout.Core
       foreach (var faceIndex in faceIndices)
       {
         Brep offset;
-        if (!TryOffsetTowardSolid(sourceBrep, sourceBrep.Faces[faceIndex], offsetDistance, tolerance, out offset))
-          return false;
+        if (!TryOffsetTowardSolid(
+          sourceBrep,
+          sourceBrep.Faces[faceIndex],
+          offsetDistance,
+          tolerance,
+          out offset))
+          continue;
         offsets.Add(offset);
         offsetByFace[faceIndex] = offset;
       }
 
+      // 先把原始直面/弯曲面组成连续皮肤，再整体偏移到中性层。
+      // 逐面偏移仍保留给附属曲线的参数映射。
+      Brep sourcePatch;
+      if (TryBuildSourcePatch(sourceBrep, faceIndices, seamTolerance, out sourcePatch) &&
+          TryOffsetPatchTowardSolid(
+            sourceBrep,
+            sourcePatch,
+            offsetDistance,
+            tolerance,
+            seamTolerance,
+            out neutralBrep))
+      {
+        return true;
+      }
+
+      // 整体偏移失败时才退回旧版逐面偏移；回退要求每个面都成功。
+      if (offsets.Count != faceIndices.Count)
+        return false;
       if (offsets.Count == 1)
       {
         neutralBrep = offsets[0].DuplicateBrep();
         return neutralBrep != null;
       }
 
-      var joined = Brep.JoinBreps(offsets, tolerance * 10.0);
+      var joined = Brep.JoinBreps(offsets, seamTolerance);
       if (joined == null || joined.Length != 1)
         return false;
       neutralBrep = joined[0];
       return neutralBrep != null && neutralBrep.IsValid;
+    }
+
+    private static bool TryBuildSourcePatch(
+      Brep sourceBrep,
+      IEnumerable<int> faceIndices,
+      double tolerance,
+      out Brep patch)
+    {
+      patch = null;
+      var faces = faceIndices
+        .Distinct()
+        .Select(index => sourceBrep.Faces[index].DuplicateFace(false))
+        .Where(item => item != null && item.IsValid)
+        .ToArray();
+      if (faces.Length == 0)
+        return false;
+      if (faces.Length == 1)
+      {
+        patch = faces[0];
+        return true;
+      }
+
+      var joined = Brep.JoinBreps(faces, tolerance);
+      if (joined == null || joined.Length != 1)
+        return false;
+      patch = joined[0];
+      return patch != null && patch.IsValid && IsConnectedFaceGraph(patch);
+    }
+
+    private static bool TryOffsetPatchTowardSolid(
+      Brep sourceSolid,
+      Brep sourcePatch,
+      double distance,
+      double tolerance,
+      double seamTolerance,
+      out Brep best)
+    {
+      best = null;
+      var bestScore = -1;
+      foreach (var extend in new[] { false, true })
+      {
+        foreach (var signedDistance in new[] { -Math.Abs(distance), Math.Abs(distance) })
+        {
+          Brep[] candidates;
+          Brep[] blends;
+          Brep[] walls;
+          try
+          {
+            candidates = Brep.CreateOffsetBrep(
+              sourcePatch,
+              signedDistance,
+              false,
+              extend,
+              tolerance,
+              out blends,
+              out walls);
+          }
+          catch
+          {
+            candidates = null;
+            blends = null;
+          }
+          if (candidates == null || candidates.Length == 0)
+            continue;
+
+          var pieces = candidates
+            .Concat(blends ?? new Brep[0])
+            .Where(item => item != null && item.IsValid)
+            .ToArray();
+          if (pieces.Length == 0)
+            continue;
+          var joined = pieces.Length == 1
+            ? pieces
+            : Brep.JoinBreps(pieces, seamTolerance);
+          if (joined == null || joined.Length != 1 || !IsConnectedFaceGraph(joined[0]))
+            continue;
+
+          var score = CountPatchSamplesInside(sourceSolid, joined[0], tolerance);
+          if (score <= bestScore)
+            continue;
+          bestScore = score;
+          best = joined[0];
+        }
+        if (best != null && bestScore > 0)
+          break;
+      }
+      return best != null && best.IsValid && bestScore > 0;
+    }
+
+    private static int CountPatchSamplesInside(Brep solid, Brep patch, double tolerance)
+    {
+      return patch.Faces.Sum(face => CountSamplesInside(solid, face, tolerance));
     }
 
     private static bool TryOffsetTowardSolid(
@@ -596,7 +768,10 @@ namespace WoodSheetLayout.Core
       var rightNormal = right.NormalAt(rightU, rightV);
       if (!leftNormal.Unitize() || !rightNormal.Unitize())
         return false;
-      return Vector3d.Multiply(leftNormal, rightNormal) >= Math.Cos(8.0 * Math.PI / 180.0);
+      // BrepFace底层参数方向可能相反；几何上切向连续的相邻面有时会
+      // 返回相反法线。使用绝对点积，避免蓝色和绿色连续面链被拆开。
+      return Math.Abs(Vector3d.Multiply(leftNormal, rightNormal)) >=
+             Math.Cos(12.0 * Math.PI / 180.0);
     }
 
     private static double AverageDistanceToPatch(
@@ -659,7 +834,7 @@ namespace WoodSheetLayout.Core
 
     private static bool TryGetConnectedFlatPatch(
       IEnumerable<Brep> flatBreps,
-      double tolerance,
+      double joinTolerance,
       out Brep connected)
     {
       connected = null;
@@ -672,7 +847,7 @@ namespace WoodSheetLayout.Core
         connected = pieces[0];
       else
       {
-        var joined = Brep.JoinBreps(pieces, tolerance * 20.0);
+        var joined = Brep.JoinBreps(pieces, joinTolerance);
         if (joined == null || joined.Length != 1)
           return false;
         connected = joined[0];

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks for the full 1.1 workflow restored in WoodSheetLayout 2.1.7."""
+"""Checks the 1.1 planar workflow and 2.2.0 multi-segment bend workflow."""
 
 from pathlib import Path
 import math
@@ -122,10 +122,18 @@ def main():
 
     for token in ["NeutralFactor", "公共接缝", "PerformUnroll"]:
         assert token in bent, token
+    for token in [
+        "seamTolerance", "TryBuildSourcePatch", "TryOffsetPatchTowardSolid",
+        "Brep.CreateOffsetBrep", "Math.Abs(Vector3d.Multiply",
+        "Math.Cos(12.0 * Math.PI / 180.0)",
+        "TryCreatePlanarBoardSolid", "Brep.CreatePlanarBreps",
+        "Brep.CreateFromOffsetFace", "识别连续折弯链"
+    ]:
+        assert token in bent, token
     for token in ["ShowProgressMeter", "EscapeKeyPressed", "RhinoApp.Wait"]:
         assert token in progress, token
     for token in [
-        "WoodSheetLayout_2.1.7", "矩形MaxRects", "边框出血",
+        "WoodSheetLayout_2.2.0", "矩形MaxRects", "边框出血",
         "WSL_PAIR_", "WoodSheetLayoutRole", "FlatCopy", "Source",
         "OutputGuide", "doc.Objects.ModifyAttributes",
         "AddClassicPlanarPart", "doc.Objects.Transform(source.Id, finalTransform, false)",
@@ -148,7 +156,7 @@ def main():
     assert "net48;net8.0" in project
     assert "<Prefer32Bit>false</Prefer32Bit>" in project
     assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3001"' in project
-    assert "<Version>2.1.7</Version>" in project
+    assert "<Version>2.2.0</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -162,7 +170,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("WoodSheetLayout 2.1.7 full-1.1-workflow checks passed.")
+    print("WoodSheetLayout 2.2.0 planar/bend workflow checks passed.")
 
 
 if __name__ == "__main__":
