@@ -308,9 +308,101 @@ namespace WoodSheetLayout.Core
           bestAnnotationDistance = annotationDistance;
         }
       }
+
+      // STEP/IGES 导入、连续布尔或圆角后的大板面有时视觉上是平面，
+      // 但底层NURBS会在文档公差内带有极小起伏，TryGetPlane因此全部失败。
+      // 仅当精确候选不存在或明显不像薄板时，才执行较慢的近似平面回退。
+      var exactScore = bestPlane.IsValid && bestFootprint > tolerance * tolerance
+        ? bestThickness / Math.Max(Math.Sqrt(bestFootprint), tolerance)
+        : double.MaxValue;
+      if (!bestPlane.IsValid || exactScore > 0.25)
+      {
+        Plane approximatePlane;
+        BrepFace approximateFace;
+        double approximateThickness;
+        double approximateFootprint;
+        if (TryFindApproximateBrepPlane(
+          brep,
+          tolerance,
+          annotationSamples,
+          out approximatePlane,
+          out approximateFace,
+          out approximateThickness,
+          out approximateFootprint))
+        {
+          var approximateScore = approximateThickness /
+            Math.Max(Math.Sqrt(approximateFootprint), tolerance);
+          if (!bestPlane.IsValid || approximateScore < exactScore)
+          {
+            bestPlane = approximatePlane;
+            bestFace = approximateFace;
+            bestThickness = approximateThickness;
+            bestFootprint = approximateFootprint;
+          }
+        }
+      }
+
       if (bestPlane.IsValid)
         bestPlane = OrientBoardBehindPlane(bestPlane, brep.GetBoundingBox(bestPlane));
       return bestPlane.IsValid && bestThickness < double.MaxValue;
+    }
+
+    private static bool TryFindApproximateBrepPlane(
+      Brep brep,
+      double tolerance,
+      IList<Point3d> annotationSamples,
+      out Plane bestPlane,
+      out BrepFace bestFace,
+      out double bestThickness,
+      out double bestFootprint)
+    {
+      bestPlane = Plane.Unset;
+      bestFace = null;
+      bestThickness = 0.0;
+      bestFootprint = 0.0;
+      var bestScore = double.MaxValue;
+      var bestAnnotationDistance = double.MaxValue;
+      var diagonal = brep.GetBoundingBox(true).Diagonal.Length;
+      var relaxedTolerance = Math.Max(tolerance * 10.0, diagonal * 1e-7);
+
+      foreach (var face in brep.Faces)
+      {
+        Plane candidatePlane;
+        if (!face.TryGetPlane(out candidatePlane, relaxedTolerance))
+        {
+          var u = face.Domain(0).ParameterAt(0.5);
+          var v = face.Domain(1).ParameterAt(0.5);
+          if (!face.FrameAt(u, v, out candidatePlane) || !candidatePlane.IsValid)
+            continue;
+        }
+
+        var box = brep.GetBoundingBox(candidatePlane);
+        if (!box.IsValid)
+          continue;
+        var width = Math.Abs(box.Max.X - box.Min.X);
+        var height = Math.Abs(box.Max.Y - box.Min.Y);
+        var depth = Math.Abs(box.Max.Z - box.Min.Z);
+        var footprint = width * height;
+        if (width <= tolerance || height <= tolerance || depth <= tolerance ||
+            footprint <= tolerance * tolerance)
+          continue;
+
+        var score = depth / Math.Max(Math.Sqrt(footprint), tolerance);
+        var annotationDistance = AverageAnnotationDistance(face, annotationSamples);
+        if (score < bestScore - 1e-9 ||
+            (Math.Abs(score - bestScore) <= 1e-9 &&
+             annotationDistance < bestAnnotationDistance - tolerance))
+        {
+          bestPlane = candidatePlane;
+          bestFace = face;
+          bestThickness = depth;
+          bestFootprint = footprint;
+          bestScore = score;
+          bestAnnotationDistance = annotationDistance;
+        }
+      }
+
+      return bestPlane.IsValid && bestThickness > tolerance;
     }
 
     private static bool TryFindMeshPlane(

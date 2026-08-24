@@ -134,8 +134,8 @@ namespace WoodSheetLayout.Core
         throw new OperationCanceledException();
 
       var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
-        ? "WoodSheetLayout 2.1.2 折弯件中性层展开排版"
-        : "WoodSheetLayout 2.1.2 经典MaxRects快速排版");
+        ? "WoodSheetLayout 2.1.3 折弯件中性层展开排版"
+        : "WoodSheetLayout 2.1.3 经典MaxRects快速排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -310,7 +310,7 @@ namespace WoodSheetLayout.Core
     {
       var partCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.1.2：完成 {0} 块{1}、{2} 张 {3}；1.1快速识别＋矩形包围盒MaxRects；零件间距 {4:0.##} mm，边框出血 {5:0.##} mm。",
+        "WoodSheetLayout 2.1.3：完成 {0} 块{1}、{2} 张 {3}；1.1快速识别＋多重曲面回退＋矩形包围盒MaxRects；零件间距 {4:0.##} mm，边框出血 {5:0.##} mm。",
         partCount,
         settings.PartMode == LayoutPartMode.BentOnly ? "折弯板" : "平板",
         result.Sheets.Count,
@@ -383,7 +383,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.1.2_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.1.3_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,

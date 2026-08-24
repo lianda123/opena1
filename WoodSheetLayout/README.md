@@ -1,4 +1,4 @@
-# WoodSheetLayout 2.1.2（Rhino 7 / Rhino 8）
+# WoodSheetLayout 2.1.3（Rhino 7 / Rhino 8）
 
 面向木制拼装产品、激光切割刀模和 CAD 出图的一键铺平插件。本版严格回归 1.1.0 的普通排版骨架，只加入自定义边界框、独立折弯件铺平和中文命令选项。
 
@@ -12,6 +12,8 @@
 - 优先排满已有板框；放不下才自动生成下一张同厚度板框。
 - 不再提供真实轮廓精排、孔洞嵌套或自由角度搜索。
 - 普通命令不再扫描曲面或判断折弯：测到板面和厚度后立即进入1.1铺平路径。
+- 对STEP/IGES、连续布尔或圆角产生的封闭多重曲面：精确平面识别失败时，自动以放宽公差和曲面局部坐标架寻找最薄方向。
+- 近似平面回退只在标准1.1识别失败时运行，不增加正常木板的处理负担。
 
 FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、切割线、孔线、刻线和文字，不会把零件变成矩形。
 
@@ -84,9 +86,9 @@ FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、�
 
 编译输出：
 
-- `WoodSheetLayout-2.1.2-rhino7.zip`
-- `WoodSheetLayout-2.1.2-rhino8.zip`
-- `WoodSheetLayout-2.1.2-rhino7-rhino8.zip`
+- `WoodSheetLayout-2.1.3-rhino7.zip`
+- `WoodSheetLayout-2.1.3-rhino8.zip`
+- `WoodSheetLayout-2.1.3-rhino7-rhino8.zip`
 
 用户安装编译好的插件不需要安装.NET SDK。完整解压后运行 `install.ps1`；或者在Rhino输入 `_PlugInManager`，Rhino 7选择 `net48/WoodSheetLayout.rhp`，Rhino 8选择 `net8.0/WoodSheetLayout.rhp`。安装后完全重启Rhino。
 
