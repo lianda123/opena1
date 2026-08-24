@@ -49,7 +49,7 @@ namespace ArcFlow.Commands
       Arc replacement;
       if (!ArcChainBuilder.TryCreateTangentArc(start, tangent, pointGetter.Point(), tolerance, out replacement))
         return Result.Failure;
-      if (!doc.Objects.Replace(objectGetter.Object(0).ObjectId, new ArcCurve(replacement), false))
+      if (!doc.Objects.Replace(objectGetter.Object(0).ObjectId, new ArcCurve(replacement)))
         return Result.Failure;
       doc.Views.Redraw();
       RhinoApp.WriteLine("ArcFlowEdit：已移动端点，并保持圆弧起点切线不变。");
