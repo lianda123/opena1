@@ -51,15 +51,31 @@ namespace WoodSheetLayout.Core
       var components = BoardAnalyzer.BuildGroupedComponents(objects);
       var parts = new List<BoardPart>();
       var analysisIssues = new List<LayoutIssue>();
+      var skippedParts = new List<string>();
       var sequence = 0;
       foreach (var component in components)
       {
         BoardPart part;
         string warning;
+        bool skippedByMode;
         sequence++;
-        if (BoardAnalyzer.TryCreatePart(doc, component, sequence, settings, out part, out warning))
+        if (BoardAnalyzer.TryCreatePart(
+          doc,
+          component,
+          sequence,
+          settings,
+          out part,
+          out warning,
+          out skippedByMode))
         {
           parts.Add(part);
+        }
+        else if (skippedByMode)
+        {
+          skippedParts.Add(string.Format(
+            "{0}：{1}",
+            ComponentName(component, sequence),
+            warning ?? "因当前命令模式而跳过。"));
         }
         else
         {
@@ -83,6 +99,7 @@ namespace WoodSheetLayout.Core
       var result = parts.Count == 0
         ? new LayoutResult()
         : SheetPacker.Pack(parts, settings, origin, progress);
+      result.SkippedParts.AddRange(skippedParts);
       result.Issues.AddRange(analysisIssues);
       foreach (var oversized in result.OversizedParts)
       {
@@ -100,6 +117,15 @@ namespace WoodSheetLayout.Core
 
       if (result.Sheets.Count == 0 && result.Issues.Count == 0)
       {
+        if (result.SkippedParts.Count > 0)
+        {
+          RhinoApp.WriteLine(
+            settings.PartMode == LayoutPartMode.PlanarOnly
+              ? "WoodSheetLayout：本次选择只有折弯件；普通排版未处理，请运行 WSLayFlatBend。"
+              : "WSLayFlatBend：本次选择没有可展开的折弯件；普通平板已跳过。");
+          ReportSkippedParts(result);
+          return true;
+        }
         RhinoApp.WriteLine("WoodSheetLayout：没有识别到可铺平的板件实体。");
         return false;
       }
@@ -107,7 +133,9 @@ namespace WoodSheetLayout.Core
       if (progress.IsCancelled)
         throw new OperationCanceledException();
 
-      var undo = doc.BeginUndoRecord("WoodSheetLayout 2.0 真实轮廓铺平排版");
+      var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
+        ? "WoodSheetLayout 2.0.4 折弯件中性层展开排版"
+        : "WoodSheetLayout 2.0.4 平板真实轮廓排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -132,7 +160,7 @@ namespace WoodSheetLayout.Core
 
       doc.Views.Redraw();
       ReportSummary(result, settings);
-      return result.Sheets.Count > 0;
+      return result.Sheets.Count > 0 || result.SkippedParts.Count > 0;
       }
       catch (OperationCanceledException)
       {
@@ -282,8 +310,9 @@ namespace WoodSheetLayout.Core
     {
       var partCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.0：完成 {0} 块板件、{1} 张 {2}；零件间距 {3:0.##} mm，边框留量 {4:0.##} mm。",
+        "WoodSheetLayout 2.0.4：完成 {0} 块{1}、{2} 张 {3}；零件间距 {4:0.##} mm，边框留量 {5:0.##} mm。",
         partCount,
+        settings.PartMode == LayoutPartMode.BentOnly ? "折弯板" : "平板",
         result.Sheets.Count,
         settings.SheetDescription,
         settings.PartGapMillimeters,
@@ -319,6 +348,17 @@ namespace WoodSheetLayout.Core
       {
         RhinoApp.WriteLine("WoodSheetLayout：未排入零件 0 个。原模型未移动、未删除、未改图层。 ");
       }
+
+      ReportSkippedParts(result);
+    }
+
+    private static void ReportSkippedParts(LayoutResult result)
+    {
+      if (result.SkippedParts.Count == 0)
+        return;
+      RhinoApp.WriteLine("WoodSheetLayout：按当前命令模式跳过 {0} 组对象（未生成黄色问题标记）：", result.SkippedParts.Count);
+      foreach (var message in result.SkippedParts)
+        RhinoApp.WriteLine("  " + message);
     }
 
     private static string ComponentName(IEnumerable<RhinoObject> component, int sequence)
@@ -343,7 +383,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.0_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.0.4_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,
