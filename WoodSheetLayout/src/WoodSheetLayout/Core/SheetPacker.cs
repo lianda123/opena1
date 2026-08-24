@@ -25,43 +25,59 @@ namespace WoodSheetLayout.Core
       foreach (var bucket in buckets)
       {
         var validParts = new List<BoardPart>();
+        var oversizedParts = new List<BoardPart>();
+        var thicknessSheetIndex = 0;
         foreach (var part in bucket.Parts)
         {
           if (FitsEmptySheet(part, settings))
             validParts.Add(part);
           else
-            result.OversizedParts.Add(part);
+            oversizedParts.Add(part);
         }
-        if (validParts.Count == 0)
-          continue;
 
-        if (settings.Packing == PackingMode.Fast)
+        if (validParts.Count > 0 && settings.Packing == PackingMode.Fast)
         {
           var fastAttempt = FindBestFastAttempt(validParts, settings, progress);
           for (var index = 0; index < fastAttempt.Sheets.Count; index++)
           {
             var packed = CreatePackedSheet(
               ++globalSheetIndex,
-              index + 1,
+              ++thicknessSheetIndex,
               bucket.RepresentativeThickness,
+              settings.SheetWidth,
+              settings.SheetHeight,
               fastAttempt.Sheets[index].UsedPartArea,
               fastAttempt.Sheets[index].Placements);
             result.Sheets.Add(packed);
           }
         }
-        else
+        else if (validParts.Count > 0)
         {
           var contourAttempt = FindBestContourAttempt(validParts, settings, progress);
           for (var index = 0; index < contourAttempt.Sheets.Count; index++)
           {
             var packed = CreatePackedSheet(
               ++globalSheetIndex,
-              index + 1,
+              ++thicknessSheetIndex,
               bucket.RepresentativeThickness,
+              settings.SheetWidth,
+              settings.SheetHeight,
               contourAttempt.Sheets[index].UsedPartArea,
               contourAttempt.Sheets[index].Placements);
             result.Sheets.Add(packed);
           }
+        }
+
+        // 所有选中组件都必须进入一个边界框。超过A3/A4/Custom的零件
+        // 不缩放、不丢弃，改为生成一张刚好容纳它的自动加大边界框。
+        foreach (var oversized in oversizedParts)
+        {
+          result.Sheets.Add(CreateExpandedSheet(
+            ++globalSheetIndex,
+            ++thicknessSheetIndex,
+            bucket.RepresentativeThickness,
+            oversized,
+            settings));
         }
       }
 
@@ -69,7 +85,7 @@ namespace WoodSheetLayout.Core
       foreach (var sheet in result.Sheets)
       {
         sheet.Origin = new Point2d(cursorX, outputOrigin.Y);
-        cursorX += settings.SheetWidth + settings.SheetGap;
+        cursorX += sheet.Width + settings.SheetGap;
       }
       return result;
     }
@@ -78,6 +94,8 @@ namespace WoodSheetLayout.Core
       int globalIndex,
       int indexWithinThickness,
       double thicknessMillimeters,
+      double width,
+      double height,
       double usedPartArea,
       IEnumerable<PartPlacement> placements)
     {
@@ -86,10 +104,71 @@ namespace WoodSheetLayout.Core
         GlobalIndex = globalIndex,
         IndexWithinThickness = indexWithinThickness,
         ThicknessMillimeters = thicknessMillimeters,
+        Width = width,
+        Height = height,
         UsedPartArea = usedPartArea
       };
       packed.Placements.AddRange(placements);
       return packed;
+    }
+
+    private static PackedSheet CreateExpandedSheet(
+      int globalIndex,
+      int indexWithinThickness,
+      double thicknessMillimeters,
+      BoardPart part,
+      LayoutSettings settings)
+    {
+      var selectedAngle = 0.0;
+      var selectedBounds = BoundingBox.Unset;
+      var selectedWidth = double.MaxValue;
+      var selectedHeight = double.MaxValue;
+      var selectedArea = double.MaxValue;
+      foreach (var angle in settings.RotationAnglesRadians())
+      {
+        var bounds = RotatedFlatBounds(part.FlatBounds, angle);
+        if (!bounds.IsValid)
+          continue;
+        var width = Math.Max(settings.SheetWidth, bounds.Diagonal.X + 2.0 * settings.FrameMargin);
+        var height = Math.Max(settings.SheetHeight, bounds.Diagonal.Y + 2.0 * settings.FrameMargin);
+        var area = width * height;
+        if (area >= selectedArea)
+          continue;
+        selectedAngle = angle;
+        selectedBounds = bounds;
+        selectedWidth = width;
+        selectedHeight = height;
+        selectedArea = area;
+      }
+
+      var translationX = settings.FrameMargin - selectedBounds.Min.X;
+      var translationY = settings.FrameMargin - selectedBounds.Min.Y;
+      var positioned = OutlineGeometry.Position(
+        part.Outline,
+        selectedAngle,
+        translationX,
+        translationY);
+      var sheet = new PackedSheet
+      {
+        GlobalIndex = globalIndex,
+        IndexWithinThickness = indexWithinThickness,
+        ThicknessMillimeters = thicknessMillimeters,
+        Width = selectedWidth,
+        Height = selectedHeight,
+        AutoExpanded = true,
+        UsedPartArea = part.Outline == null ? BoundingArea(part) : part.Outline.NetArea
+      };
+      sheet.Placements.Add(new PartPlacement
+      {
+        Part = part,
+        RotationRadians = selectedAngle,
+        TranslationX = translationX,
+        TranslationY = translationY,
+        OrientedBounds = positioned == null ? selectedBounds : positioned.Bounds,
+        PositionedOutline = positioned,
+        NestedInsideHole = false
+      });
+      return sheet;
     }
 
     private static ContourPackAttempt FindBestContourAttempt(
