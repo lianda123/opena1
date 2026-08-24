@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks for the 1.1-based WoodSheetLayout 2.1.3 fast planar path."""
+"""Checks for the 1.1-based WoodSheetLayout 2.1.4 complete planar path."""
 
 from pathlib import Path
 import math
@@ -63,6 +63,8 @@ def main():
     ]:
         assert token in analyzer, token
     assert "FlatBounds = outline.Bounds" not in analyzer
+    assert "AverageAnnotationDistance(facePlane, annotationSamples)" in analyzer
+    assert analyzer.index("AverageAnnotationDistance(facePlane, annotationSamples)") < analyzer.index("var exactScore")
 
     # The normal command must return through the planar path before any bend scan.
     planar_branch = analyzer.index("if (settings.PartMode == LayoutPartMode.PlanarOnly)")
@@ -108,13 +110,18 @@ def main():
         assert token in bent, token
     for token in ["ShowProgressMeter", "EscapeKeyPressed", "RhinoApp.Wait"]:
         assert token in progress, token
-    for token in ["WoodSheetLayout_2.1.3", "矩形包围盒MaxRects", "边框出血"]:
+    for token in [
+        "WoodSheetLayout_2.1.4", "矩形包围盒MaxRects", "边框出血",
+        "WSL_PAIR_", "WoodSheetLayoutRole", "FlatCopy", "Source",
+        "doc.Objects.ModifyAttributes"
+    ]:
         assert token in engine, token
+    assert "AddIssueMarkers(doc" not in engine
 
     assert "net48;net8.0" in project
     assert "<Prefer32Bit>false</Prefer32Bit>" in project
     assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3001"' in project
-    assert "<Version>2.1.3</Version>" in project
+    assert "<Version>2.1.4</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -128,7 +135,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("WoodSheetLayout 2.1.3 multiface fallback/FlatBounds/MaxRects checks passed.")
+    print("WoodSheetLayout 2.1.4 complete planar/pair-group checks passed.")
 
 
 if __name__ == "__main__":
