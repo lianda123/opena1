@@ -18,7 +18,7 @@ namespace WoodSheetLayout.Core
       var globalSheetIndex = 0;
       if (progress != null)
       {
-        var totalSteps = buckets.Sum(item => item.Parts.Count * StrategyCount(item.Parts.Count));
+        var totalSteps = buckets.Sum(item => item.Parts.Count * StrategyCount(item.Parts));
         progress.BeginPacking(totalSteps);
       }
 
@@ -65,7 +65,7 @@ namespace WoodSheetLayout.Core
       LayoutProgress progress)
     {
       PackAttempt best = null;
-      foreach (var sort in StrategiesFor(parts.Count))
+      foreach (var sort in StrategiesFor(parts))
       {
         var attempt = RunAttempt(parts, settings, sort, progress);
         if (best == null || IsBetter(attempt, best))
@@ -112,20 +112,23 @@ namespace WoodSheetLayout.Core
       return attempt;
     }
 
-    private static IEnumerable<SortStrategy> StrategiesFor(int partCount)
+    private static IEnumerable<SortStrategy> StrategiesFor(IList<BoardPart> parts)
     {
+      if (parts.Any(item => HoleArea(item) > 1e-8))
+        yield return SortStrategy.HoleFirst;
       yield return SortStrategy.NetArea;
       yield return SortStrategy.MaxSide;
-      if (partCount <= 24)
+      if (parts.Count <= 24)
       {
         yield return SortStrategy.Width;
         yield return SortStrategy.Height;
       }
     }
 
-    private static int StrategyCount(int partCount)
+    private static int StrategyCount(IList<BoardPart> parts)
     {
-      return partCount <= 24 ? 4 : 2;
+      return (parts.Count <= 24 ? 4 : 2) +
+             (parts.Any(item => HoleArea(item) > 1e-8) ? 1 : 0);
     }
 
     private static bool IsBetter(PackAttempt candidate, PackAttempt current)
@@ -133,14 +136,14 @@ namespace WoodSheetLayout.Core
       if (candidate.Sheets.Count != current.Sheets.Count)
         return candidate.Sheets.Count < current.Sheets.Count;
 
-      var candidateOccupied = candidate.Sheets.Sum(item => item.OccupiedBoundingArea);
-      var currentOccupied = current.Sheets.Sum(item => item.OccupiedBoundingArea);
-      if (Math.Abs(candidateOccupied - currentOccupied) > 1e-8)
-        return candidateOccupied < currentOccupied;
-
       var candidateNested = candidate.Sheets.Sum(item => item.Placements.Count(placement => placement.NestedInsideHole));
       var currentNested = current.Sheets.Sum(item => item.Placements.Count(placement => placement.NestedInsideHole));
-      return candidateNested > currentNested;
+      if (candidateNested != currentNested)
+        return candidateNested > currentNested;
+
+      var candidateOccupied = candidate.Sheets.Sum(item => item.OccupiedBoundingArea);
+      var currentOccupied = current.Sheets.Sum(item => item.OccupiedBoundingArea);
+      return candidateOccupied < currentOccupied - 1e-8;
     }
 
     private static IEnumerable<BoardPart> SortParts(IEnumerable<BoardPart> parts, SortStrategy strategy)
@@ -153,6 +156,8 @@ namespace WoodSheetLayout.Core
           return parts.OrderByDescending(item => item.Outline.Bounds.Diagonal.X).ThenByDescending(Area);
         case SortStrategy.Height:
           return parts.OrderByDescending(item => item.Outline.Bounds.Diagonal.Y).ThenByDescending(Area);
+        case SortStrategy.HoleFirst:
+          return parts.OrderByDescending(HoleArea).ThenByDescending(OuterArea).ThenByDescending(MaxSide);
         default:
           return parts.OrderByDescending(MaxSide).ThenByDescending(Area);
       }
@@ -186,6 +191,20 @@ namespace WoodSheetLayout.Core
       return Math.Max(part.Outline.Bounds.Diagonal.X, part.Outline.Bounds.Diagonal.Y);
     }
 
+    private static double HoleArea(BoardPart part)
+    {
+      return part.Outline == null
+        ? 0.0
+        : part.Outline.Holes.Sum(item => Math.Abs(item.SignedArea));
+    }
+
+    private static double OuterArea(BoardPart part)
+    {
+      return part.Outline == null || part.Outline.Outer == null
+        ? 0.0
+        : Math.Abs(part.Outline.Outer.SignedArea);
+    }
+
     private static List<ThicknessBucket> BuildThicknessBuckets(
       IEnumerable<BoardPart> parts,
       double toleranceMillimeters)
@@ -211,7 +230,8 @@ namespace WoodSheetLayout.Core
       NetArea,
       MaxSide,
       Width,
-      Height
+      Height,
+      HoleFirst
     }
 
     private sealed class ThicknessBucket
@@ -289,7 +309,10 @@ namespace WoodSheetLayout.Core
               continue;
 
             var nested = Placements.Any(existing =>
-              OutlineGeometry.IsNestedInsideHole(positioned, existing.PositionedOutline));
+              OutlineGeometry.IsNestedInsideHole(
+                positioned,
+                existing.PositionedOutline,
+                _settings.PartGap));
             var compactRight = Math.Max(positioned.Bounds.Max.X,
               Placements.Count == 0 ? _settings.FrameMargin : Placements.Max(item => item.PositionedOutline.Bounds.Max.X));
             var compactTop = Math.Max(positioned.Bounds.Max.Y,
@@ -335,6 +358,7 @@ namespace WoodSheetLayout.Core
       private IEnumerable<Point2d> CandidateTranslations(PositionedOutline rotated)
       {
         var unique = new HashSet<string>(StringComparer.Ordinal);
+        var holePriorityKeys = new HashSet<string>(StringComparer.Ordinal);
         var candidates = new List<Point2d>();
         AddCandidate(
           candidates,
@@ -361,14 +385,60 @@ namespace WoodSheetLayout.Core
 
           foreach (var hole in placement.PositionedOutline.Holes)
           {
+            if (rotated.Bounds.Diagonal.X + 2.0 * _settings.PartGap > hole.Bounds.Diagonal.X + 1e-8 ||
+                rotated.Bounds.Diagonal.Y + 2.0 * _settings.PartGap > hole.Bounds.Diagonal.Y + 1e-8)
+              continue;
+
             var centerX = (hole.Bounds.Min.X + hole.Bounds.Max.X) * 0.5;
             var centerY = (hole.Bounds.Min.Y + hole.Bounds.Max.Y) * 0.5;
             var rotatedCenterX = (rotated.Bounds.Min.X + rotated.Bounds.Max.X) * 0.5;
             var rotatedCenterY = (rotated.Bounds.Min.Y + rotated.Bounds.Max.Y) * 0.5;
-            AddCandidate(candidates, unique, centerX - rotatedCenterX, centerY - rotatedCenterY);
-            AddCandidate(candidates, unique,
+            AddPriorityCandidate(
+              candidates,
+              unique,
+              holePriorityKeys,
+              centerX - rotatedCenterX,
+              centerY - rotatedCenterY);
+            AddPriorityCandidate(candidates, unique, holePriorityKeys,
               hole.Bounds.Min.X + _settings.PartGap - rotated.Bounds.Min.X,
               hole.Bounds.Min.Y + _settings.PartGap - rotated.Bounds.Min.Y);
+            AddPriorityCandidate(candidates, unique, holePriorityKeys,
+              hole.Bounds.Max.X - _settings.PartGap - rotated.Bounds.Max.X,
+              hole.Bounds.Min.Y + _settings.PartGap - rotated.Bounds.Min.Y);
+            AddPriorityCandidate(candidates, unique, holePriorityKeys,
+              hole.Bounds.Min.X + _settings.PartGap - rotated.Bounds.Min.X,
+              hole.Bounds.Max.Y - _settings.PartGap - rotated.Bounds.Max.Y);
+            AddPriorityCandidate(candidates, unique, holePriorityKeys,
+              hole.Bounds.Max.X - _settings.PartGap - rotated.Bounds.Max.X,
+              hole.Bounds.Max.Y - _settings.PartGap - rotated.Bounds.Max.Y);
+
+            var holeProbe = OutlineGeometry.InteriorProbe(hole);
+            var candidateProbe = OutlineGeometry.InteriorProbe(rotated.Outer);
+            AddPriorityCandidate(
+              candidates,
+              unique,
+              holePriorityKeys,
+              holeProbe.X - candidateProbe.X,
+              holeProbe.Y - candidateProbe.Y);
+
+            foreach (var holePoint in OutlineGeometry.SampleAnchorPoints(hole, 8))
+            {
+              foreach (var candidatePoint in OutlineGeometry.SampleAnchorPoints(rotated.Outer, 8))
+              {
+                AddPriorityCandidate(candidates, unique, holePriorityKeys,
+                  holePoint.X - candidatePoint.X + _settings.PartGap,
+                  holePoint.Y - candidatePoint.Y);
+                AddPriorityCandidate(candidates, unique, holePriorityKeys,
+                  holePoint.X - candidatePoint.X - _settings.PartGap,
+                  holePoint.Y - candidatePoint.Y);
+                AddPriorityCandidate(candidates, unique, holePriorityKeys,
+                  holePoint.X - candidatePoint.X,
+                  holePoint.Y - candidatePoint.Y + _settings.PartGap);
+                AddPriorityCandidate(candidates, unique, holePriorityKeys,
+                  holePoint.X - candidatePoint.X,
+                  holePoint.Y - candidatePoint.Y - _settings.PartGap);
+              }
+            }
           }
 
           var placedLoops = new[] { placement.PositionedOutline.Outer }
@@ -403,7 +473,8 @@ namespace WoodSheetLayout.Core
         }
         return candidates
           .Where(point => TranslationFitsSheetBounds(rotated.Bounds, point))
-          .OrderBy(point => point.Y * _settings.SheetWidth + point.X)
+          .OrderBy(point => holePriorityKeys.Contains(CandidateKey(point)) ? 0 : 1)
+          .ThenBy(point => point.Y * _settings.SheetWidth + point.X)
           .Take(MaximumCandidateTranslationsPerAngle)
           .ToArray();
       }
@@ -424,9 +495,26 @@ namespace WoodSheetLayout.Core
       {
         if (double.IsNaN(x) || double.IsNaN(y) || double.IsInfinity(x) || double.IsInfinity(y))
           return;
-        var key = Math.Round(x, 5).ToString("R") + ":" + Math.Round(y, 5).ToString("R");
+        var key = CandidateKey(new Point2d(x, y));
         if (unique.Add(key))
           candidates.Add(new Point2d(x, y));
+      }
+
+      private static void AddPriorityCandidate(
+        ICollection<Point2d> candidates,
+        ISet<string> unique,
+        ISet<string> priorityKeys,
+        double x,
+        double y)
+      {
+        AddCandidate(candidates, unique, x, y);
+        if (!double.IsNaN(x) && !double.IsNaN(y) && !double.IsInfinity(x) && !double.IsInfinity(y))
+          priorityKeys.Add(CandidateKey(new Point2d(x, y)));
+      }
+
+      private static string CandidateKey(Point2d point)
+      {
+        return Math.Round(point.X, 5).ToString("R") + ":" + Math.Round(point.Y, 5).ToString("R");
       }
     }
   }
