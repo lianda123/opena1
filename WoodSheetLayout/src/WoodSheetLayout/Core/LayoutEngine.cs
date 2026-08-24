@@ -341,7 +341,11 @@ namespace WoodSheetLayout.Core
       createdCount = 0;
       failedCount = 0;
       var rotation = Transform.Rotation(placement.RotationRadians, Vector3d.ZAxis, Point3d.Origin);
-      var localTranslation = Transform.Translation(placement.TranslationX, placement.TranslationY, 0.0);
+      // 与1.1.0一致，把铺平后的最低Z放到世界XY；曲线所在正面保持朝上。
+      var localTranslation = Transform.Translation(
+        placement.TranslationX,
+        placement.TranslationY,
+        -placement.Part.FlatBounds.Min.Z);
       var sheetTranslation = Transform.Translation(sheet.Origin.X, sheet.Origin.Y, 0.0);
       var finalTransform = sheetTranslation * localTranslation * rotation * placement.Part.FlattenTransform;
 
