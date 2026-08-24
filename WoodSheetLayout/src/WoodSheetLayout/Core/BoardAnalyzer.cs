@@ -45,10 +45,12 @@ namespace WoodSheetLayout.Core
       int sequence,
       LayoutSettings settings,
       out BoardPart part,
-      out string warning)
+      out string warning,
+      out bool skippedByMode)
     {
       part = null;
       warning = null;
+      skippedByMode = false;
       if (doc == null || objects == null || objects.Count == 0)
         return false;
 
@@ -102,13 +104,40 @@ namespace WoodSheetLayout.Core
           bestThickness,
           tolerance,
           settings.ModelUnitsPerMillimeter);
+      var hasPrimaryCurvedSurface = objects.Any(item =>
+        BentBoardUnroller.HasPrimaryCurvedSurface(
+          item.Geometry,
+          tolerance,
+          settings.ModelUnitsPerMillimeter));
+      var isBentBoard = preferContinuousUnroll || hasPrimaryCurvedSurface;
 
-      if (preferContinuousUnroll &&
-          BentBoardUnroller.TryCreatePart(doc, objects, sequence, settings, out part, out warning))
-        return true;
+      if (settings.PartMode == LayoutPartMode.PlanarOnly && isBentBoard)
+      {
+        skippedByMode = true;
+        warning = "检测到折弯板，普通排版已跳过；请使用 WSLayFlatBend 单独展开排版。";
+        return false;
+      }
+
+      if (settings.PartMode == LayoutPartMode.BentOnly)
+      {
+        if (!isBentBoard)
+        {
+          skippedByMode = true;
+          warning = "检测到普通平板，折弯件命令已跳过。";
+          return false;
+        }
+
+        return BentBoardUnroller.TryCreatePart(
+          doc,
+          objects,
+          sequence,
+          settings,
+          out part,
+          out warning);
+      }
 
       if (bestObject != null && bestThickness > tolerance && planarSlenderness <= 0.12 &&
-          !preferContinuousUnroll)
+          !isBentBoard)
       {
         if (TryCreatePlanarPart(
           doc,
@@ -124,14 +153,10 @@ namespace WoodSheetLayout.Core
           return true;
       }
 
-      if (!preferContinuousUnroll &&
-          BentBoardUnroller.TryCreatePart(doc, objects, sequence, settings, out part, out warning))
-        return true;
-
       if (bestObject == null || bestThickness <= tolerance)
-        warning = warning ?? "未找到具有可测厚度的平板或可展开折弯板。";
+        warning = warning ?? "未找到具有可测厚度且可提取真实外轮廓的平板。";
       else
-        warning = warning ?? "实体不是薄平板，且中性层展开失败。";
+        warning = warning ?? "实体不是可用于普通排版的薄平板。";
       return false;
     }
 
@@ -196,10 +221,8 @@ namespace WoodSheetLayout.Core
         }
       }
       if (outline == null)
-        outline = OutlineGeometry.CreateRectangle(ProjectBoundsToXY(flatBounds));
-      if (outline == null)
       {
-        warning = "无法提取木板真实外轮廓。";
+        warning = "无法提取木板真实外轮廓；为避免退回矩形包围盒，已停止排入。";
         return false;
       }
 
@@ -458,13 +481,6 @@ namespace WoodSheetLayout.Core
       return centerZ <= 0.0
         ? plane
         : new Plane(plane.Origin, plane.XAxis, -plane.YAxis);
-    }
-
-    private static BoundingBox ProjectBoundsToXY(BoundingBox bounds)
-    {
-      return new BoundingBox(
-        new Point3d(bounds.Min.X, bounds.Min.Y, 0.0),
-        new Point3d(bounds.Max.X, bounds.Max.Y, 0.0));
     }
 
     private static int Find(int[] parent, int index)
