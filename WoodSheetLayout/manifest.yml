@@ -1,8 +1,8 @@
 name: WoodSheetLayout
-version: 2.1.0
+version: 2.1.1
 authors:
   - Lianda Design Tools
-description: Fast regular MaxRects layout with optional contour nesting and a separate neutral-layer bend command.
+description: Classic FlatBounds MaxRects layout with custom sheets and a separate neutral-layer bend command.
 url: https://github.com/lianda123/opena1
 keywords:
   - wood

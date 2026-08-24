@@ -208,23 +208,9 @@ namespace WoodSheetLayout.Core
         return false;
       }
 
-      PartOutline outline = null;
-      if (boardFace != null)
-      {
-        var faceCopy = boardFace.DuplicateFace(false);
-        if (faceCopy != null)
-        {
-          var edgeCurves = faceCopy.DuplicateNakedEdgeCurves(true, true) ?? new Curve[0];
-          foreach (var curve in edgeCurves)
-            curve.Transform(flatten);
-          outline = OutlineGeometry.Create(edgeCurves, settings.OutlineChordTolerance);
-        }
-      }
-      if (outline == null)
-      {
-        warning = "无法提取木板真实外轮廓；为避免退回矩形包围盒，已停止排入。";
-        return false;
-      }
+      // 普通平板严格恢复1.1的矩形包围盒骨架，不再计算真实轮廓候选。
+      // 包围盒包含木板以及同组刀线、雕刻线和文字，因此排版规整且不会互相覆盖。
+      var outline = OutlineGeometry.CreateRectangle(flatBounds);
 
       var name = objects
         .Select(item => item.Attributes.Name)
@@ -238,7 +224,8 @@ namespace WoodSheetLayout.Core
         FlattenTransform = flatten,
         FlattenKind = FlattenKind.Planar,
         Outline = outline,
-        FlatBounds = outline.Bounds,
+        // 普通排版严格沿用1.1：板件与同组曲线的整体矩形包围盒参与MaxRects。
+        FlatBounds = flatBounds,
         SourceBounds = CombinedBounds(objects),
         ThicknessModelUnits = thickness,
         ThicknessMillimeters = thickness / Math.Max(settings.ModelUnitsPerMillimeter, 1e-12),
