@@ -1,10 +1,10 @@
-# WoodSheetLayout 2.0.2（Rhino 7 / Rhino 8）
+# WoodSheetLayout 2.0.3（Rhino 7 / Rhino 8）
 
 面向木制拼装产品、折弯木板、激光切割刀模和 CAD 出图的一键铺平套料插件。2.0 从矩形包围盒排版升级为真实外轮廓排版，并加入孔洞嵌套、木纹方向锁定和折弯件中性层展开。
 
 插件采用非破坏方式：**不修改原模型，不移动原对象，不删除原对象，也不改变原对象的组、图层和颜色。** 所有结果放入一个新的 `WoodSheetLayout_2.0_日期时间` 独立图层树中。
 
-## 2.0.2 主要功能
+## 2.0.3 主要功能
 
 - 按零件真实外轮廓检测碰撞，不再以矩形包围盒作为最终碰撞边界。
 - 支持零件放入其他零件满足4 mm安全距离的大孔洞中。
@@ -23,6 +23,15 @@
 - 球面、马鞍面等双曲率对象或展开面积变化超过2%的对象不会强制变形，而是在原位置增加黄色问题编号。
 - 每张板显示厚度、板号、零件数和真实轮廓利用率。
 - 命令行列出板材数量、孔洞嵌套、未排入零件和铺平失败对象。
+- Rhino状态栏实时显示铺平、套料和输出进度；计算期间保持界面响应，可按 `Esc` 安全取消。
+- 对轮廓与线段先做边界框粗筛，再进行精确4 mm距离检查；复杂折线会在0.125 mm级误差内自动去除冗余共线点。
+- 每个方向最多检查2200个有效候选位置；超过24个同厚度零件时使用两种主要排序策略，避免无上限穷举。
+
+## 运行速度与取消
+
+运行 `WoodSheetLayout` 后，Rhino底部状态栏会显示0%～100%的进度条：铺平分析约占前30%，真实轮廓排版约占30%～90%，结果输出占最后10%。排版循环会定期处理Rhino界面消息，因此窗口不应再长时间显示“未响应”。
+
+需要停止时直接按 `Esc`。如果尚未进入结果输出阶段，插件会终止计算并提示“用户已取消”，原模型不移动、不删除、不改图层。
 
 ## 边界框
 
@@ -141,9 +150,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\WoodSheetLayout.rhp`：原生Rhino 7版本。
 - `dist\net8.0\WoodSheetLayout.rhp`：原生Rhino 8版本。
-- `dist\WoodSheetLayout-2.0.2-rhino7.zip`。
-- `dist\WoodSheetLayout-2.0.2-rhino8.zip`。
-- `dist\WoodSheetLayout-2.0.2-rhino7-rhino8.zip`。
+- `dist\WoodSheetLayout-2.0.3-rhino7.zip`。
+- `dist\WoodSheetLayout-2.0.3-rhino8.zip`。
+- `dist\WoodSheetLayout-2.0.3-rhino7-rhino8.zip`。
 
 用户安装编译好的 `.rhp` 不需要安装.NET SDK。
 

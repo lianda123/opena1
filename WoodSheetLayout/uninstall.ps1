@@ -9,7 +9,7 @@ foreach ($major in @("7", "8")) {
   }
 }
 
-foreach ($version in @("2.0.0", "2.0.1", "2.0.2")) {
+foreach ($version in @("2.0.0", "2.0.1", "2.0.2", "2.0.3")) {
   $installRoot = Join-Path $env:LOCALAPPDATA "WoodSheetLayout\$version"
   if (Test-Path $installRoot) {
     Remove-Item -LiteralPath $installRoot -Recurse -Force

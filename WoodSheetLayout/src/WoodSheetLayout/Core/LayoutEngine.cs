@@ -36,6 +36,11 @@ namespace WoodSheetLayout.Core
       if (objects.Count == 0)
         return false;
 
+      var progress = new LayoutProgress();
+      progress.Start();
+      try
+      {
+
       settings.ModelUnitsPerMillimeter = RhinoMath.UnitScale(UnitSystem.Millimeters, doc.ModelUnitSystem);
       if (!IsFinitePositive(settings.ModelUnitsPerMillimeter))
       {
@@ -67,6 +72,8 @@ namespace WoodSheetLayout.Core
             SourceBounds = BoardAnalyzer.CombinedBounds(component)
           });
         }
+        if (!progress.ReportAnalysis(sequence, components.Count))
+          throw new OperationCanceledException();
       }
 
       var selectionBounds = BoardAnalyzer.CombinedBounds(objects);
@@ -75,7 +82,7 @@ namespace WoodSheetLayout.Core
         : Point2d.Origin;
       var result = parts.Count == 0
         ? new LayoutResult()
-        : SheetPacker.Pack(parts, settings, origin);
+        : SheetPacker.Pack(parts, settings, origin, progress);
       result.Issues.AddRange(analysisIssues);
       foreach (var oversized in result.OversizedParts)
       {
@@ -97,10 +104,14 @@ namespace WoodSheetLayout.Core
         return false;
       }
 
+      if (progress.IsCancelled)
+        throw new OperationCanceledException();
+
       var undo = doc.BeginUndoRecord("WoodSheetLayout 2.0 真实轮廓铺平排版");
       try
       {
         var layers = new OutputLayerManager(doc);
+        var outputIndex = 0;
         foreach (var sheet in result.Sheets)
         {
           var color = BoundaryColors[(sheet.GlobalIndex - 1) % BoundaryColors.Length];
@@ -109,6 +120,7 @@ namespace WoodSheetLayout.Core
           AddBoundary(doc, sheet, settings, boundaryLayer);
           foreach (var placement in sheet.Placements)
             AddPlacedPart(doc, sheet, placement, layers, sheetLayer);
+          progress.ReportOutput(++outputIndex, result.Sheets.Count);
         }
         AddIssueMarkers(doc, result.Issues, layers);
       }
@@ -121,6 +133,16 @@ namespace WoodSheetLayout.Core
       doc.Views.Redraw();
       ReportSummary(result, settings);
       return result.Sheets.Count > 0;
+      }
+      catch (OperationCanceledException)
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：用户已取消，原模型未修改。");
+        return false;
+      }
+      finally
+      {
+        progress.Dispose();
+      }
     }
 
     private static void AddPlacedPart(

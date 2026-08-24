@@ -104,6 +104,8 @@ namespace WoodSheetLayout.Core
       {
         foreach (var rightLoop in rightLoops)
         {
+          if (BoundsSeparated(leftLoop.Bounds, rightLoop.Bounds, gap))
+            continue;
           if (BoundaryDistanceLessThan(leftLoop, rightLoop, gapSquared))
             return true;
         }
@@ -189,6 +191,7 @@ namespace WoodSheetLayout.Core
       {
         foreach (var point in polyline)
           AddDistinct(loop.Points, new Point2d(point.X, point.Y));
+        SimplifyClosedPolyline(loop.Points, Math.Max(chordTolerance * 0.25, 1e-7));
       }
       else
       {
@@ -225,6 +228,73 @@ namespace WoodSheetLayout.Core
       }
       FinalizeLoop(result);
       return result;
+    }
+
+    private static void SimplifyClosedPolyline(List<Point2d> points, double tolerance)
+    {
+      if (points == null || points.Count < 8)
+        return;
+      if (points[0].DistanceTo(points[points.Count - 1]) <= 1e-9)
+        points.RemoveAt(points.Count - 1);
+      if (points.Count < 7)
+        return;
+
+      var split = 1;
+      var farthest = 0.0;
+      for (var index = 1; index < points.Count; index++)
+      {
+        var distance = SquaredDistance(points[0], points[index]);
+        if (distance <= farthest)
+          continue;
+        farthest = distance;
+        split = index;
+      }
+      if (split <= 0 || split >= points.Count)
+        return;
+
+      var firstChain = points.Take(split + 1).ToList();
+      var secondChain = points.Skip(split).ToList();
+      secondChain.Add(points[0]);
+      var firstSimplified = SimplifyOpenPolyline(firstChain, tolerance);
+      var secondSimplified = SimplifyOpenPolyline(secondChain, tolerance);
+
+      points.Clear();
+      points.AddRange(firstSimplified);
+      points.AddRange(secondSimplified.Skip(1));
+    }
+
+    private static List<Point2d> SimplifyOpenPolyline(IList<Point2d> points, double tolerance)
+    {
+      if (points.Count <= 2)
+        return points.ToList();
+      var keep = new bool[points.Count];
+      keep[0] = true;
+      keep[points.Count - 1] = true;
+      var pending = new Stack<Tuple<int, int>>();
+      pending.Push(Tuple.Create(0, points.Count - 1));
+      var toleranceSquared = tolerance * tolerance;
+
+      while (pending.Count > 0)
+      {
+        var range = pending.Pop();
+        var bestIndex = -1;
+        var bestDistance = toleranceSquared;
+        for (var index = range.Item1 + 1; index < range.Item2; index++)
+        {
+          var distance = PointSegmentDistanceSquared(points[index], points[range.Item1], points[range.Item2]);
+          if (distance <= bestDistance)
+            continue;
+          bestDistance = distance;
+          bestIndex = index;
+        }
+        if (bestIndex < 0)
+          continue;
+        keep[bestIndex] = true;
+        pending.Push(Tuple.Create(range.Item1, bestIndex));
+        pending.Push(Tuple.Create(bestIndex, range.Item2));
+      }
+
+      return points.Where((point, index) => keep[index]).ToList();
     }
 
     private static void FinalizeLoop(PolygonLoop2d loop)
@@ -271,6 +341,7 @@ namespace WoodSheetLayout.Core
 
     private static bool BoundaryDistanceLessThan(PolygonLoop2d left, PolygonLoop2d right, double gapSquared)
     {
+      var gap = Math.Sqrt(Math.Max(0.0, gapSquared));
       for (var leftIndex = 0; leftIndex < left.Points.Count - 1; leftIndex++)
       {
         var a = left.Points[leftIndex];
@@ -279,6 +350,8 @@ namespace WoodSheetLayout.Core
         {
           var c = right.Points[rightIndex];
           var d = right.Points[rightIndex + 1];
+          if (SegmentsSeparated(a, b, c, d, gap))
+            continue;
           if (SegmentsIntersect(a, b, c, d))
             return true;
           if (gapSquared > 0.0 && SegmentDistanceSquared(a, b, c, d) < gapSquared - 1e-10)
@@ -286,6 +359,26 @@ namespace WoodSheetLayout.Core
         }
       }
       return false;
+    }
+
+    private static bool BoundsSeparated(BoundingBox left, BoundingBox right, double gap)
+    {
+      return left.Max.X + gap <= right.Min.X || right.Max.X + gap <= left.Min.X ||
+             left.Max.Y + gap <= right.Min.Y || right.Max.Y + gap <= left.Min.Y;
+    }
+
+    private static bool SegmentsSeparated(Point2d a, Point2d b, Point2d c, Point2d d, double gap)
+    {
+      var leftMinX = Math.Min(a.X, b.X);
+      var leftMaxX = Math.Max(a.X, b.X);
+      var leftMinY = Math.Min(a.Y, b.Y);
+      var leftMaxY = Math.Max(a.Y, b.Y);
+      var rightMinX = Math.Min(c.X, d.X);
+      var rightMaxX = Math.Max(c.X, d.X);
+      var rightMinY = Math.Min(c.Y, d.Y);
+      var rightMaxY = Math.Max(c.Y, d.Y);
+      return leftMaxX + gap <= rightMinX || rightMaxX + gap <= leftMinX ||
+             leftMaxY + gap <= rightMinY || rightMaxY + gap <= leftMinY;
     }
 
     private static bool SegmentsIntersect(Point2d a, Point2d b, Point2d c, Point2d d)
