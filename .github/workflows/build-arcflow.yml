@@ -26,6 +26,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
 
       - uses: actions/setup-dotnet@v6
         with:
@@ -67,6 +69,22 @@ jobs:
           name: ArcFlow-1.2.1-rhino7-rhino8
           path: ArcFlow/dist/ArcFlow-1.2.1-rhino7-rhino8.zip
           if-no-files-found: error
+
+      - name: Publish installer into release PR
+        if: github.event_name == 'pull_request' && github.head_ref == 'arcflow-publish-1.2.1'
+        shell: pwsh
+        run: |
+          if ((git log -1 --pretty=%s) -eq "Publish ArcFlow 1.2.1 installer") {
+            Write-Host "Installer already published in this branch."
+            exit 0
+          }
+          New-Item -ItemType Directory -Path ArcFlow/releases -Force | Out-Null
+          Copy-Item -LiteralPath ArcFlow/dist/ArcFlow-1.2.1-rhino7-rhino8.zip -Destination ArcFlow/releases/ArcFlow-1.2.1-rhino7-rhino8.zip -Force
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ArcFlow/releases/ArcFlow-1.2.1-rhino7-rhino8.zip
+          git commit -m "Publish ArcFlow 1.2.1 installer"
+          git push origin "HEAD:$env:GITHUB_HEAD_REF"
 
       - name: Publish permanent combined installer
         if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'Publish ArcFlow 1.2.1 installer')
