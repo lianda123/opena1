@@ -111,17 +111,22 @@ namespace WoodSheetLayout.Core
         }
       }
 
-      var leftProbe = InteriorProbe(left.Outer);
-      var rightProbe = InteriorProbe(right.Outer);
-      return PointInRegion(left, rightProbe) || PointInRegion(right, leftProbe);
+      Point2d leftProbe;
+      Point2d rightProbe;
+      var hasLeftProbe = TryRegionInteriorProbe(left, out leftProbe);
+      var hasRightProbe = TryRegionInteriorProbe(right, out rightProbe);
+      return (hasRightProbe && PointInRegion(left, rightProbe)) ||
+             (hasLeftProbe && PointInRegion(right, leftProbe));
     }
 
-    public static bool IsNestedInsideHole(PositionedOutline candidate, PositionedOutline container)
+    public static bool IsNestedInsideHole(
+      PositionedOutline candidate,
+      PositionedOutline container,
+      double gap)
     {
       if (candidate == null || container == null)
         return false;
-      var probe = InteriorProbe(candidate.Outer);
-      return container.Holes.Any(hole => PointInLoop(hole, probe));
+      return container.Holes.Any(hole => LoopContainsLoop(hole, candidate.Outer, gap));
     }
 
     public static Point2d InteriorProbe(PolygonLoop2d loop)
@@ -174,6 +179,83 @@ namespace WoodSheetLayout.Core
     private static bool PointInRegion(PositionedOutline outline, Point2d point)
     {
       return PointInLoop(outline.Outer, point) && !outline.Holes.Any(hole => PointInLoop(hole, point));
+    }
+
+    private static bool TryRegionInteriorProbe(PositionedOutline outline, out Point2d point)
+    {
+      point = Point2d.Origin;
+      if (outline == null || outline.Outer == null || !outline.Bounds.IsValid)
+        return false;
+
+      var first = InteriorProbe(outline.Outer);
+      if (PointInRegion(outline, first))
+      {
+        point = first;
+        return true;
+      }
+
+      for (var index = 0; index < outline.Outer.Points.Count - 1; index++)
+      {
+        var a = outline.Outer.Points[index];
+        var b = outline.Outer.Points[index + 1];
+        var midpoint = new Point2d((a.X + b.X) * 0.5, (a.Y + b.Y) * 0.5);
+        foreach (var inset in new[] { 0.01, 0.025, 0.05, 0.1, 0.2 })
+        {
+          var sample = new Point2d(
+            midpoint.X * (1.0 - inset) + first.X * inset,
+            midpoint.Y * (1.0 - inset) + first.Y * inset);
+          if (!PointInRegion(outline, sample))
+            continue;
+          point = sample;
+          return true;
+        }
+      }
+
+      const int divisions = 12;
+      for (var y = 1; y < divisions; y++)
+      {
+        for (var x = 1; x < divisions; x++)
+        {
+          var sample = new Point2d(
+            outline.Bounds.Min.X + outline.Bounds.Diagonal.X * x / divisions,
+            outline.Bounds.Min.Y + outline.Bounds.Diagonal.Y * y / divisions);
+          if (!PointInRegion(outline, sample))
+            continue;
+          point = sample;
+          return true;
+        }
+      }
+      return false;
+    }
+
+    private static bool LoopContainsLoop(
+      PolygonLoop2d container,
+      PolygonLoop2d candidate,
+      double gap)
+    {
+      if (container == null || candidate == null ||
+          !container.Bounds.IsValid || !candidate.Bounds.IsValid)
+        return false;
+
+      if (candidate.Bounds.Min.X < container.Bounds.Min.X + gap - 1e-8 ||
+          candidate.Bounds.Min.Y < container.Bounds.Min.Y + gap - 1e-8 ||
+          candidate.Bounds.Max.X > container.Bounds.Max.X - gap + 1e-8 ||
+          candidate.Bounds.Max.Y > container.Bounds.Max.Y - gap + 1e-8)
+        return false;
+
+      var gapSquared = Math.Max(0.0, gap * gap);
+      if (BoundaryDistanceLessThan(candidate, container, gapSquared))
+        return false;
+
+      for (var index = 0; index < candidate.Points.Count - 1; index++)
+      {
+        var point = candidate.Points[index];
+        var next = candidate.Points[index + 1];
+        if (!PointInLoop(container, point) ||
+            !PointInLoop(container, new Point2d((point.X + next.X) * 0.5, (point.Y + next.Y) * 0.5)))
+          return false;
+      }
+      return true;
     }
 
     private static IEnumerable<PolygonLoop2d> EnumerateLoops(PositionedOutline outline)
