@@ -1,0 +1,12 @@
+name: arcflow
+version: 1.2.1
+authors:
+  - ArcFlow
+description: Rhino 7/8 真圆弧 G1 相切绘制、控制点共线验证与五类参数化螺旋生成器。
+url: https://github.com/lianda123/opena1
+keywords:
+  - arc
+  - tangent
+  - spiral
+  - rhino7
+  - rhino8
