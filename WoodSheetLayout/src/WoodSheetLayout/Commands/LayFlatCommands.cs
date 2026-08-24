@@ -26,18 +26,24 @@ namespace WoodSheetLayout.Commands
       var sheetHeight = new OptionDouble(settings.CustomHeightMillimeters);
       var landscape = new OptionToggle(settings.Landscape, "Portrait", "Landscape");
       var grainLock = new OptionToggle(settings.GrainDirectionLocked, "No", "Yes");
+      var holeNesting = new OptionToggle(settings.EnableHoleNesting, "No", "Yes");
       var partGap = new OptionDouble(settings.PartGapMillimeters);
       var frameMargin = new OptionDouble(settings.FrameMarginMillimeters);
       var neutralFactor = new OptionDouble(settings.NeutralFactor);
 
       var getter = new GetOption();
       getter.SetCommandPrompt(includeNeutralFactor
-        ? "设置折弯件中性层与真实轮廓排版参数，回车开始选择折弯件"
-        : "设置平板真实轮廓排版参数，回车开始选择零件（折弯件自动跳过）");
+        ? "设置折弯件中性层与排版参数，回车开始选择折弯件"
+        : "设置平板排版参数；Fast快速规整，Contour真实轮廓，回车开始选择零件");
       getter.AcceptNothing(true);
       var sheetOption = getter.AddOptionList("Sheet", new[] { "A3", "A4", "Custom" }, 0);
+      var packingOption = getter.AddOptionList(
+        "Mode",
+        new[] { "Fast", "Contour" },
+        settings.Packing == PackingMode.Contour ? 1 : 0);
       var orientationOption = getter.AddOptionToggle("Orientation", ref landscape);
       var grainOption = getter.AddOptionToggle("GrainLock", ref grainLock);
+      var holeOption = getter.AddOptionToggle("HoleNesting", ref holeNesting);
       getter.AddOptionDouble("CustomWidth", ref sheetWidth);
       getter.AddOptionDouble("CustomHeight", ref sheetHeight);
       getter.AddOptionDouble("PartGap", ref partGap);
@@ -57,7 +63,11 @@ namespace WoodSheetLayout.Commands
 
         if (getter.OptionIndex() == sheetOption)
           settings.Sheet = (SheetKind)getter.Option().CurrentListOptionIndex;
-        else if (getter.OptionIndex() != orientationOption && getter.OptionIndex() != grainOption)
+        else if (getter.OptionIndex() == packingOption)
+          settings.Packing = (PackingMode)getter.Option().CurrentListOptionIndex;
+        else if (getter.OptionIndex() != orientationOption &&
+                 getter.OptionIndex() != grainOption &&
+                 getter.OptionIndex() != holeOption)
           continue;
       }
 
@@ -65,6 +75,7 @@ namespace WoodSheetLayout.Commands
       settings.CustomHeightMillimeters = sheetHeight.CurrentValue;
       settings.Landscape = landscape.CurrentValue;
       settings.GrainDirectionLocked = grainLock.CurrentValue;
+      settings.EnableHoleNesting = holeNesting.CurrentValue && settings.Packing == PackingMode.Contour;
       settings.PartGapMillimeters = partGap.CurrentValue;
       settings.FrameMarginMillimeters = frameMargin.CurrentValue;
       settings.NeutralFactor = neutralFactor.CurrentValue;
@@ -113,12 +124,14 @@ namespace WoodSheetLayout.Commands
       return new LayoutSettings
       {
         PartMode = LayoutPartMode.PlanarOnly,
+        Packing = PackingMode.Fast,
         Sheet = sheet,
         PartGapMillimeters = 4.0,
         FrameMarginMillimeters = 4.0,
         ThicknessToleranceMillimeters = 0.15,
         Landscape = true,
         GrainDirectionLocked = false,
+        EnableHoleNesting = false,
         NeutralFactor = 0.5
       };
     }
@@ -153,9 +166,29 @@ namespace WoodSheetLayout.Commands
       var settings = new LayoutSettings
       {
         PartMode = LayoutPartMode.BentOnly,
+        Packing = PackingMode.Fast,
         NeutralFactor = 0.5
       };
       var configurationResult = WoodSheetLayoutCommand.Configure(settings, true);
+      if (configurationResult != Result.Success)
+        return configurationResult;
+      return WoodSheetLayoutCommand.RunLayout(doc, settings);
+    }
+  }
+
+  public sealed class WoodSheetLayoutTightCommand : Command
+  {
+    public override string EnglishName => "WSLayTight";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var settings = new LayoutSettings
+      {
+        PartMode = LayoutPartMode.PlanarOnly,
+        Packing = PackingMode.Contour,
+        EnableHoleNesting = true
+      };
+      var configurationResult = WoodSheetLayoutCommand.Configure(settings, false);
       if (configurationResult != Result.Success)
         return configurationResult;
       return WoodSheetLayoutCommand.RunLayout(doc, settings);
