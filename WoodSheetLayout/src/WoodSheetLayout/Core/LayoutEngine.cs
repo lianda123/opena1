@@ -28,18 +28,22 @@ namespace WoodSheetLayout.Core
       if (doc == null || selection == null || settings == null)
         return false;
 
-      var objects = selection
+      var selectedObjects = selection
         .Where(item => item != null && item.Geometry != null)
-        // 再次运行命令时，配对Group可能把上一次铺平副本也选中；副本不重复排版。
-        .Where(item => !string.Equals(
-          item.Attributes.GetUserString("WoodSheetLayoutRole"),
-          "FlatCopy",
-          StringComparison.Ordinal))
         .GroupBy(item => item.Id)
         .Select(group => group.First())
         .ToList();
+      var objects = BoardAnalyzer.ExpandSelectedGroups(doc, selectedObjects);
       if (objects.Count == 0)
         return false;
+
+      if (objects.Count != selectedObjects.Count)
+      {
+        RhinoApp.WriteLine(
+          "WoodSheetLayout：选中 {0} 个对象，补齐原始组后按 {1} 个对象分析；旧铺平副本和旧输出层已排除。",
+          selectedObjects.Count,
+          objects.Count);
+      }
 
       var progress = new LayoutProgress();
       progress.Start();
@@ -138,9 +142,12 @@ namespace WoodSheetLayout.Core
       if (progress.IsCancelled)
         throw new OperationCanceledException();
 
+      var outputPartCount = 0;
+      var outputObjectCount = 0;
+      var outputFailureCount = 0;
       var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
-        ? "WoodSheetLayout 2.1.5 折弯件中性层展开排版"
-        : "WoodSheetLayout 2.1.5 选择对象全部铺平排版");
+        ? "WoodSheetLayout 2.1.6 折弯件中性层展开排版"
+        : "WoodSheetLayout 2.1.6 选择对象全部铺平排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -152,7 +159,23 @@ namespace WoodSheetLayout.Core
           var boundaryLayer = layers.CreateChildLayer(sheetLayer, "边界框与统计", color, color);
           AddBoundary(doc, sheet, settings, boundaryLayer);
           foreach (var placement in sheet.Placements)
-            AddPlacedPart(doc, sheet, placement, layers, sheetLayer);
+          {
+            int createdObjects;
+            int failedObjects;
+            if (AddPlacedPart(
+              doc,
+              sheet,
+              placement,
+              layers,
+              sheetLayer,
+              out createdObjects,
+              out failedObjects))
+            {
+              outputPartCount++;
+            }
+            outputObjectCount += createdObjects;
+            outputFailureCount += failedObjects;
+          }
           progress.ReportOutput(++outputIndex, result.Sheets.Count);
         }
       }
@@ -163,7 +186,14 @@ namespace WoodSheetLayout.Core
       }
 
       doc.Views.Redraw();
-      ReportSummary(result, settings);
+      ReportSummary(
+        result,
+        settings,
+        components.Count,
+        parts.Count,
+        outputPartCount,
+        outputObjectCount,
+        outputFailureCount);
       return result.Sheets.Count > 0 || result.SkippedParts.Count > 0;
       }
       catch (OperationCanceledException)
@@ -177,13 +207,17 @@ namespace WoodSheetLayout.Core
       }
     }
 
-    private static void AddPlacedPart(
+    private static bool AddPlacedPart(
       RhinoDoc doc,
       PackedSheet sheet,
       PartPlacement placement,
       OutputLayerManager layers,
-      int sheetLayer)
+      int sheetLayer,
+      out int createdCount,
+      out int failedCount)
     {
+      createdCount = 0;
+      failedCount = 0;
       var rotation = Transform.Rotation(placement.RotationRadians, Vector3d.ZAxis, Point3d.Origin);
       var localTranslation = Transform.Translation(placement.TranslationX, placement.TranslationY, 0.0);
       var sheetTranslation = Transform.Translation(sheet.Origin.X, sheet.Origin.Y, 0.0);
@@ -201,11 +235,15 @@ namespace WoodSheetLayout.Core
       foreach (var item in placement.Part.FlatGeometry)
       {
         if (item.Geometry == null)
+        {
+          failedCount++;
           continue;
-        var geometry = item.Geometry.Duplicate();
-        if (geometry == null || !geometry.Transform(finalTransform))
+        }
+        GeometryBase geometry;
+        if (!TryCreatePlacedGeometry(doc, placement.Part, item, finalTransform, out geometry))
         {
           RhinoApp.WriteLine("WoodSheetLayout：对象“{0}”输出变换失败。", item.Name ?? placement.Part.Name);
+          failedCount++;
           continue;
         }
 
@@ -218,11 +256,17 @@ namespace WoodSheetLayout.Core
         attributes.SetUserString("WoodSheetLayoutRole", "FlatCopy");
         attributes.LayerIndex = layers.GetSourceLayer(sheetLayer, item.SourceAttributes);
         attributes.Name = string.IsNullOrWhiteSpace(item.Name) ? placement.Part.Name : item.Name;
-        var newId = doc.Objects.Add(geometry, attributes);
+        var newId = AddGeometryWithFallback(doc, geometry, attributes);
         if (newId == Guid.Empty)
+        {
           RhinoApp.WriteLine("WoodSheetLayout：对象“{0}”复制输出失败。", attributes.Name);
+          failedCount++;
+        }
         else
+        {
           createdIds.Add(newId);
+          createdCount++;
+        }
       }
 
       // 原件和铺平副本进入同一个额外配对Group，同时保留原件已有的Group。
@@ -245,6 +289,72 @@ namespace WoodSheetLayout.Core
           }
         }
       }
+      if (createdCount == 0)
+      {
+        RhinoApp.WriteLine(
+          "WoodSheetLayout：零件“{0}”没有生成任何副本，不能计为完成。",
+          placement.Part.Name);
+      }
+      else if (failedCount > 0)
+      {
+        RhinoApp.WriteLine(
+          "WoodSheetLayout：零件“{0}”生成 {1} 个对象，仍有 {2} 个对象失败。",
+          placement.Part.Name,
+          createdCount,
+          failedCount);
+      }
+      return createdCount > 0 && failedCount == 0;
+    }
+
+    private static bool TryCreatePlacedGeometry(
+      RhinoDoc doc,
+      BoardPart part,
+      FlatGeometryItem item,
+      Transform finalTransform,
+      out GeometryBase geometry)
+    {
+      geometry = item.Geometry == null ? null : item.Geometry.Duplicate();
+      if (geometry != null && geometry.Transform(finalTransform))
+        return true;
+
+      // 某些导入曲线或块实例连续执行两次变换会失败；退回源对象，
+      // 把“铺平＋旋转＋排版平移”合并为一次变换再复制。
+      var source = doc.Objects.FindId(item.SourceObjectId);
+      geometry = source == null || source.Geometry == null ? null : source.Geometry.Duplicate();
+      if (geometry == null)
+        return false;
+      var combined = finalTransform * part.FlattenTransform;
+      return geometry.Transform(combined);
+    }
+
+    private static Guid AddGeometryWithFallback(
+      RhinoDoc doc,
+      GeometryBase geometry,
+      ObjectAttributes attributes)
+    {
+      var result = doc.Objects.Add(geometry, attributes);
+      if (result != Guid.Empty)
+        return result;
+
+      // 通用 Add 在 Rhino 7 对部分导入曲线或块实例可能返回 Guid.Empty。
+      // 使用具体几何重载重试，避免排版统计有零件但文档里没有副本。
+      var curve = geometry as Curve;
+      if (curve != null)
+        return doc.Objects.AddCurve(curve, attributes);
+      var brep = geometry as Brep;
+      if (brep != null)
+        return doc.Objects.AddBrep(brep, attributes);
+      var instance = geometry as InstanceReferenceGeometry;
+      if (instance != null)
+      {
+        for (var index = 0; index < doc.InstanceDefinitions.Count; index++)
+        {
+          var definition = doc.InstanceDefinitions[index];
+          if (definition != null && definition.Id == instance.ParentIdefId)
+            return doc.Objects.AddInstanceObject(index, instance.Xform, attributes);
+        }
+      }
+      return Guid.Empty;
     }
 
     private static void AddBoundary(
@@ -274,6 +384,7 @@ namespace WoodSheetLayout.Core
           sheet.ThicknessMillimeters,
           sheet.IndexWithinThickness)
       };
+      attributes.SetUserString("WoodSheetLayoutRole", "OutputGuide");
       doc.Objects.AddCurve(new PolylineCurve(points), attributes);
 
       var usableArea = Math.Max(1e-12,
@@ -303,6 +414,7 @@ namespace WoodSheetLayout.Core
         LayerIndex = layerIndex,
         Name = "板材统计_" + FormatThickness(sheet.ThicknessMillimeters)
       };
+      labelAttributes.SetUserString("WoodSheetLayoutRole", "OutputGuide");
       doc.Objects.AddText(label, labelAttributes);
     }
 
@@ -340,17 +452,46 @@ namespace WoodSheetLayout.Core
         : thicknessMillimeters.ToString("0.##") + "mm";
     }
 
-    private static void ReportSummary(LayoutResult result, LayoutSettings settings)
+    private static void ReportSummary(
+      LayoutResult result,
+      LayoutSettings settings,
+      int componentCount,
+      int analyzedPartCount,
+      int outputPartCount,
+      int outputObjectCount,
+      int outputFailureCount)
     {
-      var partCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
+      var packedPartCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.1.5：完成 {0} 块{1}、{2} 张 {3}；1.1主路径＋失败强制铺平＋原件/副本配对组＋矩形MaxRects；零件间距 {4:0.##} mm，边框出血 {5:0.##} mm。",
-        partCount,
-        settings.PartMode == LayoutPartMode.BentOnly ? "折弯板" : "平板",
+        "WoodSheetLayout 2.1.6：选中组 {0} 件，识别 {1} 件，排入 {2} 件，实际生成 {3} 件/{4} 个对象，{5} 张 {6}；零件间距 {7:0.##} mm，边框出血 {8:0.##} mm。",
+        componentCount,
+        analyzedPartCount,
+        packedPartCount,
+        outputPartCount,
+        outputObjectCount,
         result.Sheets.Count,
         settings.SheetDescription,
         settings.PartGapMillimeters,
         settings.FrameMarginMillimeters));
+      RhinoApp.WriteLine(string.Format(
+        "  工作方式：1.1矩形MaxRects＋递归补齐原始组＋输出失败重试；当前命令：{0}。",
+        settings.PartMode == LayoutPartMode.BentOnly ? "折弯板" : "平板"));
+
+      if (componentCount != analyzedPartCount || analyzedPartCount != packedPartCount ||
+          packedPartCount != outputPartCount || outputFailureCount > 0)
+      {
+        RhinoApp.WriteLine(string.Format(
+          "WoodSheetLayout：数量校验未通过（组{0}/识别{1}/排入{2}/生成{3}/对象失败{4}），本次不能判定为全部铺平。",
+          componentCount,
+          analyzedPartCount,
+          packedPartCount,
+          outputPartCount,
+          outputFailureCount));
+      }
+      else
+      {
+        RhinoApp.WriteLine("WoodSheetLayout：数量校验通过，所有选中零件均已生成铺平副本。");
+      }
 
       foreach (var sheet in result.Sheets)
       {
@@ -376,11 +517,12 @@ namespace WoodSheetLayout.Core
           RhinoApp.WriteLine("  {0}：{1}", part.Name, note);
       }
 
-      if (result.Issues.Count > 0)
+      if (result.Issues.Count > 0 || outputFailureCount > 0 || outputPartCount != packedPartCount)
       {
         RhinoApp.WriteLine(
-          "WoodSheetLayout：有 {0} 组对象未生成铺平副本；不创建文字标记。移动WSL_PAIR配对组可核对已铺平零件。",
-          result.Issues.Count);
+          "WoodSheetLayout：仍有 {0} 个分析问题、{1} 个输出对象失败；不创建文字标记。移动WSL_PAIR配对组可核对已铺平零件。",
+          result.Issues.Count,
+          outputFailureCount);
         foreach (var issue in result.Issues)
           RhinoApp.WriteLine("  {0}：{1}", issue.PartName, issue.Message);
       }
@@ -423,7 +565,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.1.5_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.1.6_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,
