@@ -834,7 +834,7 @@ namespace WoodSheetLayout.Core
 
     private static bool TryGetConnectedFlatPatch(
       IEnumerable<Brep> flatBreps,
-      double tolerance,
+      double joinTolerance,
       out Brep connected)
     {
       connected = null;
@@ -847,7 +847,7 @@ namespace WoodSheetLayout.Core
         connected = pieces[0];
       else
       {
-        var joined = Brep.JoinBreps(pieces, tolerance * 20.0);
+        var joined = Brep.JoinBreps(pieces, joinTolerance);
         if (joined == null || joined.Length != 1)
           return false;
         connected = joined[0];
