@@ -5,7 +5,7 @@ on:
   push:
     branches:
       - main
-      - woodsheetlayout-2.0.1
+      - woodsheetlayout-2.0.2
     paths:
       - "WoodSheetLayout/**"
       - ".github/workflows/build-wood-sheet-layout.yml"
@@ -48,35 +48,35 @@ jobs:
       - name: Upload Rhino 7 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: WoodSheetLayout-2.0.1-rhino7
-          path: WoodSheetLayout/dist/WoodSheetLayout-2.0.1-rhino7.zip
+          name: WoodSheetLayout-2.0.2-rhino7
+          path: WoodSheetLayout/dist/WoodSheetLayout-2.0.2-rhino7.zip
           if-no-files-found: error
 
       - name: Upload Rhino 8 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: WoodSheetLayout-2.0.1-rhino8
-          path: WoodSheetLayout/dist/WoodSheetLayout-2.0.1-rhino8.zip
+          name: WoodSheetLayout-2.0.2-rhino8
+          path: WoodSheetLayout/dist/WoodSheetLayout-2.0.2-rhino8.zip
           if-no-files-found: error
 
       - name: Upload combined package
         uses: actions/upload-artifact@v4
         with:
-          name: WoodSheetLayout-2.0.1-rhino7-rhino8
-          path: WoodSheetLayout/dist/WoodSheetLayout-2.0.1-rhino7-rhino8.zip
+          name: WoodSheetLayout-2.0.2-rhino7-rhino8
+          path: WoodSheetLayout/dist/WoodSheetLayout-2.0.2-rhino7-rhino8.zip
           if-no-files-found: error
 
       - name: Publish permanent combined installer
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'Publish WoodSheetLayout 2.0.1 installer')
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'Publish WoodSheetLayout 2.0.2 installer')
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path WoodSheetLayout/releases -Force | Out-Null
-          Copy-Item -LiteralPath WoodSheetLayout/dist/WoodSheetLayout-2.0.1-rhino7-rhino8.zip -Destination WoodSheetLayout/releases/WoodSheetLayout-2.0.1-rhino7-rhino8.zip -Force
+          Copy-Item -LiteralPath WoodSheetLayout/dist/WoodSheetLayout-2.0.2-rhino7-rhino8.zip -Destination WoodSheetLayout/releases/WoodSheetLayout-2.0.2-rhino7-rhino8.zip -Force
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add WoodSheetLayout/releases/WoodSheetLayout-2.0.1-rhino7-rhino8.zip
+          git add WoodSheetLayout/releases/WoodSheetLayout-2.0.2-rhino7-rhino8.zip
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
-            git commit -m "Publish WoodSheetLayout 2.0.1 installer"
+            git commit -m "Publish WoodSheetLayout 2.0.2 installer"
             git push
           }

@@ -1,15 +1,15 @@
-# WoodSheetLayout 2.0.1（Rhino 7 / Rhino 8）
+# WoodSheetLayout 2.0.2（Rhino 7 / Rhino 8）
 
-面向木制拼装产品、折弯木板、激光切割刀模和 CAD 出图的一键铺平套料插件。2.0 从矩形包围盒排版升级为真实外轮廓排版，并加入孔洞嵌套、自由旋转、木纹方向锁定和折弯件中性层展开。
+面向木制拼装产品、折弯木板、激光切割刀模和 CAD 出图的一键铺平套料插件。2.0 从矩形包围盒排版升级为真实外轮廓排版，并加入孔洞嵌套、木纹方向锁定和折弯件中性层展开。
 
 插件采用非破坏方式：**不修改原模型，不移动原对象，不删除原对象，也不改变原对象的组、图层和颜色。** 所有结果放入一个新的 `WoodSheetLayout_2.0_日期时间` 独立图层树中。
 
-## 2.0.1 主要功能
+## 2.0.2 主要功能
 
 - 按零件真实外轮廓检测碰撞，不再以矩形包围盒作为最终碰撞边界。
 - 支持零件放入其他零件满足4 mm安全距离的大孔洞中。
 - 一张板排满后自动增加下一张，并继续按相同厚度分页。
-- 支持0°/90°旋转；自由旋转默认按15°步进搜索。
+- 排版固定只尝试0°/90°；不再进行15°自由旋转穷举，减少候选数量和运行时间。
 - `GrainLock=Yes` 时锁定木纹方向，不允许排版算法旋转零件。
 - A3、A4和Custom自定义矩形长宽；支持横向和纵向。
 - `PartGap=4`：零件真实轮廓之间保持4 mm。
@@ -85,14 +85,12 @@ NeutralFactor = 0.5
 | `Orientation` | Landscape / Portrait | Landscape |
 | `CustomWidth` | Custom完整宽度（mm） | 420 |
 | `CustomHeight` | Custom完整高度（mm） | 297 |
-| `Rotation` | ZeroNinety / Free | ZeroNinety |
 | `GrainLock` | 锁定木纹方向，禁止旋转 | No |
 | `PartGap` | 零件真实轮廓间距（mm） | 4 |
 | `FrameMargin` | 零件到边界框距离（mm） | 4 |
 | `NeutralFactor` | 折弯件中性层系数 | 0.5 |
-| `FreeAngleStep` | 自由旋转搜索步长 | 15° |
 
-自由旋转角度越小，排版候选越多，计算时间也越长。木纹方向必须一致的椴木板、胶合板建议设置 `GrainLock=Yes`。
+普通模式只检查0°与90°两个方向。木纹方向必须一致的椴木板、胶合板建议设置 `GrainLock=Yes`，此时只检查0°，速度最快。
 
 ### 快速命令
 
@@ -143,9 +141,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\WoodSheetLayout.rhp`：原生Rhino 7版本。
 - `dist\net8.0\WoodSheetLayout.rhp`：原生Rhino 8版本。
-- `dist\WoodSheetLayout-2.0.1-rhino7.zip`。
-- `dist\WoodSheetLayout-2.0.1-rhino8.zip`。
-- `dist\WoodSheetLayout-2.0.1-rhino7-rhino8.zip`。
+- `dist\WoodSheetLayout-2.0.2-rhino7.zip`。
+- `dist\WoodSheetLayout-2.0.2-rhino8.zip`。
+- `dist\WoodSheetLayout-2.0.2-rhino7-rhino8.zip`。
 
 用户安装编译好的 `.rhp` 不需要安装.NET SDK。
 

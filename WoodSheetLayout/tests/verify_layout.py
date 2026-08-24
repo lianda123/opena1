@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical checks for Wood Sheet Layout 2.0.1."""
+"""Static and mathematical checks for Wood Sheet Layout 2.0.2."""
 
 from pathlib import Path
 import math
@@ -76,9 +76,11 @@ def main():
     for token in [
         "SheetKind.Custom", "CustomWidthMillimeters", "CustomHeightMillimeters",
         "PartGapMillimeters", "FrameMarginMillimeters", "NeutralFactor",
-        "RotationMode", "Free", "GrainDirectionLocked"
+        "GrainDirectionLocked", "yield return Math.PI * 0.5"
     ]:
         assert token in models or token in commands, token
+    for removed_token in ["RotationMode", "FreeRotationStepDegrees", "FreeAngleStep"]:
+        assert removed_token not in models + commands, removed_token
     for token in ["DuplicateNakedEdgeCurves", "TextWouldFaceDown", "BentBoardUnroller.TryCreatePart"]:
         assert token in analyzer, token
     for token in [
@@ -97,7 +99,7 @@ def main():
     for command in ["WoodSheetLayout", "WSLayFlatA3", "WSLayFlatA4"]:
         assert command in commands, command
     assert "net48;net8.0" in project
-    assert "<Version>2.0.1</Version>" in project
+    assert "<Version>2.0.2</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -110,7 +112,7 @@ def main():
         "Rhino 7", "Rhino 8", "不修改原模型"
     ]:
         assert phrase in readme, phrase
-    print("Wood Sheet Layout 2.0.1 static/mathematical checks passed.")
+    print("Wood Sheet Layout 2.0.2 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":
