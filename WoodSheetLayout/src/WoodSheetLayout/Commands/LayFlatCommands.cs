@@ -13,14 +13,14 @@ namespace WoodSheetLayout.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      var settings = new LayoutSettings();
-      var configurationResult = Configure(settings);
+      var settings = new LayoutSettings { PartMode = LayoutPartMode.PlanarOnly };
+      var configurationResult = Configure(settings, false);
       if (configurationResult != Result.Success)
         return configurationResult;
       return RunLayout(doc, settings);
     }
 
-    private static Result Configure(LayoutSettings settings)
+    internal static Result Configure(LayoutSettings settings, bool includeNeutralFactor)
     {
       var sheetWidth = new OptionDouble(settings.CustomWidthMillimeters);
       var sheetHeight = new OptionDouble(settings.CustomHeightMillimeters);
@@ -31,7 +31,9 @@ namespace WoodSheetLayout.Commands
       var neutralFactor = new OptionDouble(settings.NeutralFactor);
 
       var getter = new GetOption();
-      getter.SetCommandPrompt("设置板框与真实轮廓排版参数，回车开始选择零件");
+      getter.SetCommandPrompt(includeNeutralFactor
+        ? "设置折弯件中性层与真实轮廓排版参数，回车开始选择折弯件"
+        : "设置平板真实轮廓排版参数，回车开始选择零件（折弯件自动跳过）");
       getter.AcceptNothing(true);
       var sheetOption = getter.AddOptionList("Sheet", new[] { "A3", "A4", "Custom" }, 0);
       var orientationOption = getter.AddOptionToggle("Orientation", ref landscape);
@@ -40,7 +42,8 @@ namespace WoodSheetLayout.Commands
       getter.AddOptionDouble("CustomHeight", ref sheetHeight);
       getter.AddOptionDouble("PartGap", ref partGap);
       getter.AddOptionDouble("FrameMargin", ref frameMargin);
-      getter.AddOptionDouble("NeutralFactor", ref neutralFactor);
+      if (includeNeutralFactor)
+        getter.AddOptionDouble("NeutralFactor", ref neutralFactor);
 
       while (true)
       {
@@ -76,7 +79,7 @@ namespace WoodSheetLayout.Commands
         RhinoApp.WriteLine("WoodSheetLayout：PartGap 和 FrameMargin 不能为负数。");
         return Result.Failure;
       }
-      if (settings.NeutralFactor < 0.0 || settings.NeutralFactor > 1.0)
+      if (includeNeutralFactor && (settings.NeutralFactor < 0.0 || settings.NeutralFactor > 1.0))
       {
         RhinoApp.WriteLine("WoodSheetLayout：NeutralFactor 必须在0到1之间，默认0.5代表木板厚度中间层。");
         return Result.Failure;
@@ -87,7 +90,9 @@ namespace WoodSheetLayout.Commands
     internal static Result RunLayout(RhinoDoc doc, LayoutSettings settings)
     {
       var getter = new GetObject();
-      getter.SetCommandPrompt("选择木板及与木板打组的刀线/雕刻曲线/文字（可选择多组）");
+      getter.SetCommandPrompt(settings.PartMode == LayoutPartMode.BentOnly
+        ? "选择折弯木板及其同组刀线/雕刻曲线/文字（普通平板自动跳过）"
+        : "选择平板及其同组刀线/雕刻曲线/文字（折弯件自动跳过）");
       getter.GroupSelect = true;
       getter.SubObjectSelect = false;
       getter.GeometryFilter = Rhino.DocObjects.ObjectType.AnyObject;
@@ -107,6 +112,7 @@ namespace WoodSheetLayout.Commands
     {
       return new LayoutSettings
       {
+        PartMode = LayoutPartMode.PlanarOnly,
         Sheet = sheet,
         PartGapMillimeters = 4.0,
         FrameMarginMillimeters = 4.0,
@@ -135,6 +141,24 @@ namespace WoodSheetLayout.Commands
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
       return WoodSheetLayoutCommand.RunLayout(doc, WoodSheetLayoutCommand.FixedSettings(SheetKind.A4));
+    }
+  }
+
+  public sealed class WoodSheetLayoutBendCommand : Command
+  {
+    public override string EnglishName => "WSLayFlatBend";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var settings = new LayoutSettings
+      {
+        PartMode = LayoutPartMode.BentOnly,
+        NeutralFactor = 0.5
+      };
+      var configurationResult = WoodSheetLayoutCommand.Configure(settings, true);
+      if (configurationResult != Result.Success)
+        return configurationResult;
+      return WoodSheetLayoutCommand.RunLayout(doc, settings);
     }
   }
 }
