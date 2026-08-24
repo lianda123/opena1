@@ -1,5 +1,5 @@
 name: WoodSheetLayout
-version: 2.1.7
+version: 2.2.0
 authors:
   - Lianda Design Tools
 description: Classic FlatBounds MaxRects layout with custom sheets and a separate neutral-layer bend command.
