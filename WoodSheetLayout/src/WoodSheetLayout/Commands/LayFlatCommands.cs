@@ -4,6 +4,7 @@ using Rhino;
 using Rhino.Commands;
 using Rhino.Input;
 using Rhino.Input.Custom;
+using Rhino.UI;
 
 namespace WoodSheetLayout.Commands
 {
@@ -13,7 +14,12 @@ namespace WoodSheetLayout.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      var settings = new LayoutSettings { PartMode = LayoutPartMode.PlanarOnly };
+      var settings = new LayoutSettings
+      {
+        PartMode = LayoutPartMode.PlanarOnly,
+        Packing = PackingMode.Fast,
+        EnableHoleNesting = false
+      };
       var configurationResult = Configure(settings, false);
       if (configurationResult != Result.Success)
         return configurationResult;
@@ -24,32 +30,35 @@ namespace WoodSheetLayout.Commands
     {
       var sheetWidth = new OptionDouble(settings.CustomWidthMillimeters);
       var sheetHeight = new OptionDouble(settings.CustomHeightMillimeters);
-      var landscape = new OptionToggle(settings.Landscape, "Portrait", "Landscape");
-      var grainLock = new OptionToggle(settings.GrainDirectionLocked, "No", "Yes");
-      var holeNesting = new OptionToggle(settings.EnableHoleNesting, "No", "Yes");
+      var landscape = new OptionToggle(
+        settings.Landscape,
+        L("Portrait", "纵向"),
+        L("Landscape", "横向"));
+      var grainLock = new OptionToggle(
+        settings.GrainDirectionLocked,
+        L("No", "否"),
+        L("Yes", "是"));
       var partGap = new OptionDouble(settings.PartGapMillimeters);
       var frameMargin = new OptionDouble(settings.FrameMarginMillimeters);
       var neutralFactor = new OptionDouble(settings.NeutralFactor);
 
       var getter = new GetOption();
       getter.SetCommandPrompt(includeNeutralFactor
-        ? "设置折弯件中性层与排版参数，回车开始选择折弯件"
-        : "设置平板排版参数；Fast快速规整，Contour真实轮廓，回车开始选择零件");
+        ? "设置折弯件铺平参数，回车开始选择折弯件"
+        : "设置木板铺平排版参数，回车开始选择零件");
       getter.AcceptNothing(true);
-      var sheetOption = getter.AddOptionList("Sheet", new[] { "A3", "A4", "Custom" }, 0);
-      var packingOption = getter.AddOptionList(
-        "Mode",
-        new[] { "Fast", "Contour" },
-        settings.Packing == PackingMode.Contour ? 1 : 0);
-      var orientationOption = getter.AddOptionToggle("Orientation", ref landscape);
-      var grainOption = getter.AddOptionToggle("GrainLock", ref grainLock);
-      var holeOption = getter.AddOptionToggle("HoleNesting", ref holeNesting);
-      getter.AddOptionDouble("CustomWidth", ref sheetWidth);
-      getter.AddOptionDouble("CustomHeight", ref sheetHeight);
-      getter.AddOptionDouble("PartGap", ref partGap);
-      getter.AddOptionDouble("FrameMargin", ref frameMargin);
+      var sheetOption = getter.AddOptionList(
+        L("Sheet", "边界框"),
+        new[] { L("A3", "A3"), L("A4", "A4"), L("Custom", "自定义") },
+        (int)settings.Sheet);
+      var orientationOption = getter.AddOptionToggle(L("Orientation", "方向"), ref landscape);
+      var grainOption = getter.AddOptionToggle(L("GrainLock", "木纹锁定"), ref grainLock);
+      getter.AddOptionDouble(L("CustomWidth", "自定义宽度"), ref sheetWidth);
+      getter.AddOptionDouble(L("CustomHeight", "自定义高度"), ref sheetHeight);
+      getter.AddOptionDouble(L("PartGap", "零件间距"), ref partGap);
+      getter.AddOptionDouble(L("FrameMargin", "边框出血"), ref frameMargin);
       if (includeNeutralFactor)
-        getter.AddOptionDouble("NeutralFactor", ref neutralFactor);
+        getter.AddOptionDouble(L("NeutralFactor", "中性层系数"), ref neutralFactor);
 
       while (true)
       {
@@ -63,11 +72,7 @@ namespace WoodSheetLayout.Commands
 
         if (getter.OptionIndex() == sheetOption)
           settings.Sheet = (SheetKind)getter.Option().CurrentListOptionIndex;
-        else if (getter.OptionIndex() == packingOption)
-          settings.Packing = (PackingMode)getter.Option().CurrentListOptionIndex;
-        else if (getter.OptionIndex() != orientationOption &&
-                 getter.OptionIndex() != grainOption &&
-                 getter.OptionIndex() != holeOption)
+        else if (getter.OptionIndex() != orientationOption && getter.OptionIndex() != grainOption)
           continue;
       }
 
@@ -75,24 +80,25 @@ namespace WoodSheetLayout.Commands
       settings.CustomHeightMillimeters = sheetHeight.CurrentValue;
       settings.Landscape = landscape.CurrentValue;
       settings.GrainDirectionLocked = grainLock.CurrentValue;
-      settings.EnableHoleNesting = holeNesting.CurrentValue && settings.Packing == PackingMode.Contour;
+      settings.Packing = PackingMode.Fast;
+      settings.EnableHoleNesting = false;
       settings.PartGapMillimeters = partGap.CurrentValue;
       settings.FrameMarginMillimeters = frameMargin.CurrentValue;
       settings.NeutralFactor = neutralFactor.CurrentValue;
 
       if (settings.CustomWidthMillimeters <= 8.0 || settings.CustomHeightMillimeters <= 8.0)
       {
-        RhinoApp.WriteLine("WoodSheetLayout：Custom 长宽必须大于8mm。");
+        RhinoApp.WriteLine("WoodSheetLayout：自定义边界框的宽度和高度必须大于8mm。");
         return Result.Failure;
       }
       if (settings.PartGapMillimeters < 0.0 || settings.FrameMarginMillimeters < 0.0)
       {
-        RhinoApp.WriteLine("WoodSheetLayout：PartGap 和 FrameMargin 不能为负数。");
+        RhinoApp.WriteLine("WoodSheetLayout：零件间距和边框出血不能为负数。");
         return Result.Failure;
       }
       if (includeNeutralFactor && (settings.NeutralFactor < 0.0 || settings.NeutralFactor > 1.0))
       {
-        RhinoApp.WriteLine("WoodSheetLayout：NeutralFactor 必须在0到1之间，默认0.5代表木板厚度中间层。");
+        RhinoApp.WriteLine("WoodSheetLayout：中性层系数必须在0到1之间，默认0.5代表木板厚度中间层。");
         return Result.Failure;
       }
       return Result.Success;
@@ -102,8 +108,8 @@ namespace WoodSheetLayout.Commands
     {
       var getter = new GetObject();
       getter.SetCommandPrompt(settings.PartMode == LayoutPartMode.BentOnly
-        ? "选择折弯木板及其同组刀线/雕刻曲线/文字（普通平板自动跳过）"
-        : "选择平板及其同组刀线/雕刻曲线/文字（折弯件自动跳过）");
+        ? "选择折弯木板及其同组刀线、雕刻线或文字（普通平板自动跳过）"
+        : "选择平板及其同组刀线、雕刻线或文字（折弯件自动跳过）");
       getter.GroupSelect = true;
       getter.SubObjectSelect = false;
       getter.GeometryFilter = Rhino.DocObjects.ObjectType.AnyObject;
@@ -134,6 +140,11 @@ namespace WoodSheetLayout.Commands
         EnableHoleNesting = false,
         NeutralFactor = 0.5
       };
+    }
+
+    private static LocalizeStringPair L(string english, string chinese)
+    {
+      return new LocalizeStringPair(english, chinese);
     }
   }
 
@@ -167,28 +178,10 @@ namespace WoodSheetLayout.Commands
       {
         PartMode = LayoutPartMode.BentOnly,
         Packing = PackingMode.Fast,
+        EnableHoleNesting = false,
         NeutralFactor = 0.5
       };
       var configurationResult = WoodSheetLayoutCommand.Configure(settings, true);
-      if (configurationResult != Result.Success)
-        return configurationResult;
-      return WoodSheetLayoutCommand.RunLayout(doc, settings);
-    }
-  }
-
-  public sealed class WoodSheetLayoutTightCommand : Command
-  {
-    public override string EnglishName => "WSLayTight";
-
-    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
-    {
-      var settings = new LayoutSettings
-      {
-        PartMode = LayoutPartMode.PlanarOnly,
-        Packing = PackingMode.Contour,
-        EnableHoleNesting = true
-      };
-      var configurationResult = WoodSheetLayoutCommand.Configure(settings, false);
       if (configurationResult != Result.Success)
         return configurationResult;
       return WoodSheetLayoutCommand.RunLayout(doc, settings);
