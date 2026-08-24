@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Rhino;
 using Rhino.DocObjects;
 using Rhino.Geometry;
@@ -91,28 +93,45 @@ namespace WoodSheetLayout.Core
         }
       }
 
-      // 普通命令严格走1.1快速路径：找到可测厚度的大平面后立即刚体铺平。
-      // 不扫描曲面、不估算折弯、不提取真实外轮廓；这些重计算只属于
-      // WSLayFlatBend。这样带圆孔、圆角或局部圆柱孔壁的普通板不会被误判跳过。
+      // 普通命令先走1.1板件路径；失败后强制从所选对象自身方向铺平，
+      // 不再因为“不是木板”或厚度识别失败而直接丢弃该组件。
       if (settings.PartMode == LayoutPartMode.PlanarOnly)
       {
-        if (bestObject == null || bestThickness <= tolerance)
+        if (bestObject != null && bestThickness > tolerance &&
+            TryCreatePlanarPart(
+              doc,
+              objects,
+              sequence,
+              settings,
+              bestObject,
+              bestFace,
+              bestPlane,
+              bestThickness,
+              out part,
+              out warning))
         {
-          warning = "未找到具有可测厚度的大平面实体；请确认木板为有真实厚度的 Brep、Extrusion 或 Mesh。";
-          return false;
+          return true;
         }
 
-        return TryCreatePlanarPart(
-          doc,
-          objects,
-          sequence,
-          settings,
-          bestObject,
-          bestFace,
-          bestPlane,
-          bestThickness,
-          out part,
-          out warning);
+        Plane forcedPlane;
+        double forcedThickness;
+        if (TryFindForcedPlane(doc, objects, settings, tolerance, out forcedPlane, out forcedThickness))
+        {
+          return TryCreatePlanarPart(
+            doc,
+            objects,
+            sequence,
+            settings,
+            objects[0],
+            null,
+            forcedPlane,
+            forcedThickness,
+            out part,
+            out warning);
+        }
+
+        warning = "选中组件没有可复制的有效几何，无法生成铺平副本。";
+        return false;
       }
 
       // 只有独立折弯命令才执行下面的曲面分析和中性层展开判定。
@@ -148,6 +167,183 @@ namespace WoodSheetLayout.Core
       }
 
       warning = warning ?? "未找到可以由折弯件命令展开的恒厚板件。";
+      return false;
+    }
+
+    private static bool TryFindForcedPlane(
+      RhinoDoc doc,
+      IList<RhinoObject> objects,
+      LayoutSettings settings,
+      double tolerance,
+      out Plane bestPlane,
+      out double thickness)
+    {
+      bestPlane = Plane.Unset;
+      thickness = 0.0;
+      var candidates = new List<Plane>
+      {
+        Plane.WorldXY,
+        new Plane(Point3d.Origin, Vector3d.YAxis, Vector3d.ZAxis),
+        new Plane(Point3d.Origin, Vector3d.ZAxis, Vector3d.XAxis)
+      };
+
+      foreach (var rhinoObject in objects)
+      {
+        var geometry = rhinoObject.Geometry;
+        var curve = geometry as Curve;
+        if (curve != null)
+        {
+          Plane curvePlane;
+          if (curve.TryGetPlane(out curvePlane, tolerance * 10.0))
+            AddPlaneCandidate(candidates, curvePlane);
+        }
+
+        var text = geometry as TextEntity;
+        if (text != null)
+          AddPlaneCandidate(candidates, text.Plane);
+
+        var instance = geometry as InstanceReferenceGeometry;
+        if (instance != null)
+        {
+          var instancePlane = Plane.WorldXY;
+          if (instancePlane.Transform(instance.Xform))
+            AddPlaneCandidate(candidates, instancePlane);
+        }
+
+        var brep = geometry as Brep;
+        var extrusion = geometry as Extrusion;
+        if (brep == null && extrusion != null)
+          brep = extrusion.ToBrep();
+        var surface = geometry as Surface;
+        if (brep == null && surface != null)
+          brep = surface.ToBrep();
+        if (brep != null)
+          AddBrepPlaneCandidates(candidates, brep, tolerance);
+
+        var mesh = geometry as Mesh;
+        if (mesh != null)
+          AddMeshPlaneCandidates(candidates, mesh);
+      }
+
+      var bestScore = double.MaxValue;
+      var bestArea = 0.0;
+      var bestDepth = 0.0;
+      foreach (var candidate in candidates)
+      {
+        var bounds = BoundingBox.Unset;
+        foreach (var rhinoObject in objects)
+        {
+          var itemBounds = rhinoObject.Geometry.GetBoundingBox(candidate);
+          if (!itemBounds.IsValid)
+            continue;
+          bounds = bounds.IsValid ? BoundingBox.Union(bounds, itemBounds) : itemBounds;
+        }
+        if (!bounds.IsValid)
+          continue;
+
+        var width = Math.Abs(bounds.Max.X - bounds.Min.X);
+        var height = Math.Abs(bounds.Max.Y - bounds.Min.Y);
+        var depth = Math.Abs(bounds.Max.Z - bounds.Min.Z);
+        var safeWidth = Math.Max(width, tolerance);
+        var safeHeight = Math.Max(height, tolerance);
+        var area = safeWidth * safeHeight;
+        var score = depth / Math.Max(Math.Sqrt(area), tolerance);
+        if (score < bestScore - 1e-9 ||
+            (Math.Abs(score - bestScore) <= 1e-9 && area > bestArea))
+        {
+          bestPlane = candidate;
+          bestScore = score;
+          bestArea = area;
+          bestDepth = depth;
+        }
+      }
+
+      if (!bestPlane.IsValid)
+        return false;
+
+      double layerThicknessMillimeters;
+      if (TryReadThicknessFromLayer(doc, objects, out layerThicknessMillimeters))
+        thickness = layerThicknessMillimeters * settings.ModelUnitsPerMillimeter;
+      else
+        thickness = bestDepth;
+      return true;
+    }
+
+    private static void AddBrepPlaneCandidates(List<Plane> candidates, Brep brep, double tolerance)
+    {
+      var relaxedTolerance = Math.Max(tolerance * 10.0, brep.GetBoundingBox(true).Diagonal.Length * 1e-7);
+      foreach (var face in brep.Faces)
+      {
+        Plane plane;
+        if (!face.TryGetPlane(out plane, relaxedTolerance))
+        {
+          var u = face.Domain(0).ParameterAt(0.5);
+          var v = face.Domain(1).ParameterAt(0.5);
+          if (!face.FrameAt(u, v, out plane))
+            continue;
+        }
+        AddPlaneCandidate(candidates, plane);
+      }
+    }
+
+    private static void AddMeshPlaneCandidates(List<Plane> candidates, Mesh mesh)
+    {
+      if (mesh.Faces.Count == 0)
+        return;
+      var step = Math.Max(1, mesh.Faces.Count / 64);
+      for (var index = 0; index < mesh.Faces.Count; index += step)
+      {
+        var face = mesh.Faces[index];
+        var a = (Point3d)mesh.Vertices[face.A];
+        var b = (Point3d)mesh.Vertices[face.B];
+        var c = (Point3d)mesh.Vertices[face.C];
+        var xAxis = b - a;
+        var normal = Vector3d.CrossProduct(xAxis, c - a);
+        if (!xAxis.Unitize() || !normal.Unitize())
+          continue;
+        var yAxis = Vector3d.CrossProduct(normal, xAxis);
+        if (!yAxis.Unitize())
+          continue;
+        AddPlaneCandidate(candidates, new Plane(a, xAxis, yAxis));
+      }
+    }
+
+    private static void AddPlaneCandidate(List<Plane> candidates, Plane plane)
+    {
+      if (!plane.IsValid || candidates.Count >= 256)
+        return;
+      candidates.Add(plane);
+    }
+
+    private static bool TryReadThicknessFromLayer(
+      RhinoDoc doc,
+      IEnumerable<RhinoObject> objects,
+      out double thicknessMillimeters)
+    {
+      thicknessMillimeters = 0.0;
+      var expression = new Regex(
+        @"(?<![0-9])([0-9]+(?:\.[0-9]+)?)\s*mm",
+        RegexOptions.IgnoreCase);
+      foreach (var rhinoObject in objects)
+      {
+        var layerIndex = rhinoObject.Attributes.LayerIndex;
+        if (layerIndex < 0 || layerIndex >= doc.Layers.Count)
+          continue;
+        var layer = doc.Layers[layerIndex];
+        var match = expression.Match(layer == null ? string.Empty : layer.FullPath);
+        double parsed;
+        if (match.Success &&
+            double.TryParse(
+              match.Groups[1].Value,
+              NumberStyles.Float,
+              CultureInfo.InvariantCulture,
+              out parsed) &&
+            parsed > 0.0)
+        {
+          thicknessMillimeters = parsed;
+          return true;
+        }
+      }
       return false;
     }
 
@@ -192,12 +388,30 @@ namespace WoodSheetLayout.Core
         });
       }
 
-      if (!flatBounds.IsValid || flatBounds.Diagonal.X <= doc.ModelAbsoluteTolerance ||
-          flatBounds.Diagonal.Y <= doc.ModelAbsoluteTolerance)
+      if (!flatBounds.IsValid)
       {
         warning = "铺平后的零件边界无效。";
         return false;
       }
+
+      // 线、点或单排文字也必须进入边界框；仅放大排版占位矩形，
+      // 不缩放、不修改实际输出几何。
+      var minimumSize = Math.Max(doc.ModelAbsoluteTolerance * 2.0, settings.ModelUnitsPerMillimeter * 0.1);
+      var minimum = flatBounds.Min;
+      var maximum = flatBounds.Max;
+      if (maximum.X - minimum.X < minimumSize)
+      {
+        var centerX = (minimum.X + maximum.X) * 0.5;
+        minimum.X = centerX - minimumSize * 0.5;
+        maximum.X = centerX + minimumSize * 0.5;
+      }
+      if (maximum.Y - minimum.Y < minimumSize)
+      {
+        var centerY = (minimum.Y + maximum.Y) * 0.5;
+        minimum.Y = centerY - minimumSize * 0.5;
+        maximum.Y = centerY + minimumSize * 0.5;
+      }
+      flatBounds = new BoundingBox(minimum, maximum);
 
       // 普通平板严格恢复1.1的矩形包围盒骨架，不再计算真实轮廓候选。
       // 包围盒包含木板以及同组刀线、雕刻线和文字，因此排版规整且不会互相覆盖。

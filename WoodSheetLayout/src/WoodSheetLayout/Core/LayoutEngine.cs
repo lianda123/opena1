@@ -139,8 +139,8 @@ namespace WoodSheetLayout.Core
         throw new OperationCanceledException();
 
       var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
-        ? "WoodSheetLayout 2.1.4 折弯件中性层展开排版"
-        : "WoodSheetLayout 2.1.4 经典1.1完整铺平排版");
+        ? "WoodSheetLayout 2.1.5 折弯件中性层展开排版"
+        : "WoodSheetLayout 2.1.5 选择对象全部铺平排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -255,12 +255,14 @@ namespace WoodSheetLayout.Core
     {
       var x = sheet.Origin.X;
       var y = sheet.Origin.Y;
+      var sheetWidth = sheet.Width > 0.0 ? sheet.Width : settings.SheetWidth;
+      var sheetHeight = sheet.Height > 0.0 ? sheet.Height : settings.SheetHeight;
       var points = new[]
       {
         new Point3d(x, y, 0.0),
-        new Point3d(x + settings.SheetWidth, y, 0.0),
-        new Point3d(x + settings.SheetWidth, y + settings.SheetHeight, 0.0),
-        new Point3d(x, y + settings.SheetHeight, 0.0),
+        new Point3d(x + sheetWidth, y, 0.0),
+        new Point3d(x + sheetWidth, y + sheetHeight, 0.0),
+        new Point3d(x, y + sheetHeight, 0.0),
         new Point3d(x, y, 0.0)
       };
       var attributes = new ObjectAttributes
@@ -275,23 +277,24 @@ namespace WoodSheetLayout.Core
       doc.Objects.AddCurve(new PolylineCurve(points), attributes);
 
       var usableArea = Math.Max(1e-12,
-        (settings.SheetWidth - 2.0 * settings.FrameMargin) *
-        (settings.SheetHeight - 2.0 * settings.FrameMargin));
+        (sheetWidth - 2.0 * settings.FrameMargin) *
+        (sheetHeight - 2.0 * settings.FrameMargin));
       var utilization = sheet.UsedPartArea / usableArea * 100.0;
       var labelHeight = 6.0 * settings.ModelUnitsPerMillimeter;
       var labelOffset = 2.0 * settings.ModelUnitsPerMillimeter;
       var labelPlane = new Plane(
-        new Point3d(x, y + settings.SheetHeight + labelOffset, 0.0),
+        new Point3d(x, y + sheetHeight + labelOffset, 0.0),
         Vector3d.ZAxis);
       var label = new TextEntity
       {
         Plane = labelPlane,
         PlainText = string.Format(
-          "{0}｜第{1:00}张｜{2}件｜利用率{3:0.0}%",
+          "{0}｜第{1:00}张｜{2}件｜利用率{3:0.0}%{4}",
           FormatThickness(sheet.ThicknessMillimeters),
           sheet.IndexWithinThickness,
           sheet.Placements.Count,
-          utilization),
+          utilization,
+          sheet.AutoExpanded ? "｜自动加大边界框" : string.Empty),
         TextHeight = labelHeight,
         Justification = TextJustification.BottomLeft
       };
@@ -329,6 +332,8 @@ namespace WoodSheetLayout.Core
 
     private static string FormatThickness(double thicknessMillimeters)
     {
+      if (thicknessMillimeters <= 0.001)
+        return "未识别厚度";
       var roundedInteger = Math.Round(thicknessMillimeters);
       return Math.Abs(thicknessMillimeters - roundedInteger) <= 0.05
         ? roundedInteger.ToString("0") + "mm"
@@ -339,7 +344,7 @@ namespace WoodSheetLayout.Core
     {
       var partCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.1.4：完成 {0} 块{1}、{2} 张 {3}；1.1完整铺平＋原件/副本配对组＋矩形包围盒MaxRects；零件间距 {4:0.##} mm，边框出血 {5:0.##} mm。",
+        "WoodSheetLayout 2.1.5：完成 {0} 块{1}、{2} 张 {3}；1.1主路径＋失败强制铺平＋原件/副本配对组＋矩形MaxRects；零件间距 {4:0.##} mm，边框出血 {5:0.##} mm。",
         partCount,
         settings.PartMode == LayoutPartMode.BentOnly ? "折弯板" : "平板",
         result.Sheets.Count,
@@ -349,16 +354,20 @@ namespace WoodSheetLayout.Core
 
       foreach (var sheet in result.Sheets)
       {
+        var sheetWidth = sheet.Width > 0.0 ? sheet.Width : settings.SheetWidth;
+        var sheetHeight = sheet.Height > 0.0 ? sheet.Height : settings.SheetHeight;
         var usableArea = Math.Max(1e-12,
-          (settings.SheetWidth - 2.0 * settings.FrameMargin) *
-          (settings.SheetHeight - 2.0 * settings.FrameMargin));
+          (sheetWidth - 2.0 * settings.FrameMargin) *
+          (sheetHeight - 2.0 * settings.FrameMargin));
         RhinoApp.WriteLine(string.Format(
           "  {0} 第{1:00}张：{2}件，矩形占位利用率 {3:0.0}%{4}",
           FormatThickness(sheet.ThicknessMillimeters),
           sheet.IndexWithinThickness,
           sheet.Placements.Count,
           sheet.UsedPartArea / usableArea * 100.0,
-          sheet.Placements.Any(item => item.NestedInsideHole) ? "（包含孔洞嵌套）" : string.Empty));
+          sheet.AutoExpanded
+            ? "（自动加大边界框）"
+            : sheet.Placements.Any(item => item.NestedInsideHole) ? "（包含孔洞嵌套）" : string.Empty));
       }
 
       foreach (var part in result.Sheets.SelectMany(sheet => sheet.Placements).Select(item => item.Part).Distinct())
@@ -414,7 +423,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.1.4_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.1.5_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,
