@@ -138,6 +138,7 @@ namespace WoodSheetLayout.Core
           rhinoObject.Geometry,
           tolerance,
           annotationSamples,
+          settings.PartMode == LayoutPartMode.BentOnly,
           out candidatePlane,
           out candidateFace,
           out candidateThickness,
@@ -512,6 +513,7 @@ namespace WoodSheetLayout.Core
       GeometryBase geometry,
       double tolerance,
       IList<Point3d> annotationSamples,
+      bool allowApproximatePlane,
       out Plane plane,
       out BrepFace boardFace,
       out double thickness,
@@ -534,6 +536,7 @@ namespace WoodSheetLayout.Core
           brep,
           tolerance,
           annotationSamples,
+          allowApproximatePlane,
           out plane,
           out boardFace,
           out thickness,
@@ -549,6 +552,7 @@ namespace WoodSheetLayout.Core
       Brep brep,
       double tolerance,
       IList<Point3d> annotationSamples,
+      bool allowApproximatePlane,
       out Plane bestPlane,
       out BrepFace bestFace,
       out double bestThickness,
@@ -588,13 +592,12 @@ namespace WoodSheetLayout.Core
         }
       }
 
-      // STEP/IGES 导入、连续布尔或圆角后的大板面有时视觉上是平面，
-      // 但底层NURBS会在文档公差内带有极小起伏，TryGetPlane因此全部失败。
-      // 仅当精确候选不存在或明显不像薄板时，才执行较慢的近似平面回退。
+      // 普通排版到这里即停止，保持 1.1.0 对真实平面的原始判定顺序。
+      // 只有独立折弯命令允许执行较慢的近似平面回退。
       var exactScore = bestPlane.IsValid && bestFootprint > tolerance * tolerance
         ? bestThickness / Math.Max(Math.Sqrt(bestFootprint), tolerance)
         : double.MaxValue;
-      if (!bestPlane.IsValid || exactScore > 0.25)
+      if (allowApproximatePlane && (!bestPlane.IsValid || exactScore > 0.25))
       {
         Plane approximatePlane;
         BrepFace approximateFace;

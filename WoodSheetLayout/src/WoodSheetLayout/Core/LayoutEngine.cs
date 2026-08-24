@@ -33,14 +33,22 @@ namespace WoodSheetLayout.Core
         .GroupBy(item => item.Id)
         .Select(group => group.First())
         .ToList();
-      var objects = BoardAnalyzer.ExpandSelectedGroups(doc, selectedObjects);
+      // 普通排版严格恢复 1.1.0 的选择骨架：GetObject(GroupSelect=true)
+      // 返回哪些对象，就按这些对象现有的 Rhino Group 组装零件，不再递归追踪
+      // 交叉组。递归追踪会把本来独立的板件串成大组件，也是 2.1.6 与
+      // 1.1.0 行为不一致的来源之一。折弯命令仍保留组成员补齐。
+      var objects = settings.PartMode == LayoutPartMode.BentOnly
+        ? BoardAnalyzer.ExpandSelectedGroups(doc, selectedObjects)
+        : selectedObjects
+          .Where(item => !BoardAnalyzer.IsGeneratedOutputObject(doc, item))
+          .ToList();
       if (objects.Count == 0)
         return false;
 
-      if (objects.Count != selectedObjects.Count)
+      if (settings.PartMode == LayoutPartMode.BentOnly && objects.Count != selectedObjects.Count)
       {
         RhinoApp.WriteLine(
-          "WoodSheetLayout：选中 {0} 个对象，补齐原始组后按 {1} 个对象分析；旧铺平副本和旧输出层已排除。",
+          "WSLayFlatBend：选中 {0} 个对象，补齐原始组后按 {1} 个对象分析；旧铺平副本和旧输出层已排除。",
           selectedObjects.Count,
           objects.Count);
       }
@@ -146,8 +154,8 @@ namespace WoodSheetLayout.Core
       var outputObjectCount = 0;
       var outputFailureCount = 0;
       var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
-        ? "WoodSheetLayout 2.1.6 折弯件中性层展开排版"
-        : "WoodSheetLayout 2.1.6 选择对象全部铺平排版");
+        ? "WoodSheetLayout 2.1.7 折弯件中性层展开排版"
+        : "WoodSheetLayout 2.1.7（1.1原生通道）铺平排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -216,6 +224,21 @@ namespace WoodSheetLayout.Core
       out int createdCount,
       out int failedCount)
     {
+      // 普通平板必须走 1.1.0 的原生文档复制通道。这里把铺平、0/90°旋转
+      // 与排版位移合并为一次 Transform，并由 Rhino 返回真实的新对象 GUID。
+      // 折弯件没有单一刚体铺平变换，仍使用已展开的中性层几何输出。
+      if (placement.Part.FlattenKind == FlattenKind.Planar)
+      {
+        return AddClassicPlanarPart(
+          doc,
+          sheet,
+          placement,
+          layers,
+          sheetLayer,
+          out createdCount,
+          out failedCount);
+      }
+
       createdCount = 0;
       failedCount = 0;
       var rotation = Transform.Rotation(placement.RotationRadians, Vector3d.ZAxis, Point3d.Origin);
@@ -299,6 +322,120 @@ namespace WoodSheetLayout.Core
       {
         RhinoApp.WriteLine(
           "WoodSheetLayout：零件“{0}”生成 {1} 个对象，仍有 {2} 个对象失败。",
+          placement.Part.Name,
+          createdCount,
+          failedCount);
+      }
+      return createdCount > 0 && failedCount == 0;
+    }
+
+    private static bool AddClassicPlanarPart(
+      RhinoDoc doc,
+      PackedSheet sheet,
+      PartPlacement placement,
+      OutputLayerManager layers,
+      int sheetLayer,
+      out int createdCount,
+      out int failedCount)
+    {
+      createdCount = 0;
+      failedCount = 0;
+      var rotation = Transform.Rotation(placement.RotationRadians, Vector3d.ZAxis, Point3d.Origin);
+      var localTranslation = Transform.Translation(placement.TranslationX, placement.TranslationY, 0.0);
+      var sheetTranslation = Transform.Translation(sheet.Origin.X, sheet.Origin.Y, 0.0);
+      var finalTransform = sheetTranslation * localTranslation * rotation * placement.Part.FlattenTransform;
+
+      var groupName = string.Format(
+        "WSL_PAIR_{0:0.00}mm_S{1:00}_{2}_{3}",
+        sheet.ThicknessMillimeters,
+        sheet.IndexWithinThickness,
+        placement.Part.Name,
+        Guid.NewGuid().ToString("N").Substring(0, 6));
+      var groupIndex = doc.Groups.Add(groupName);
+      var createdIds = new List<Guid>();
+
+      foreach (var sourceReference in placement.Part.Objects.Where(item => item != null))
+      {
+        // 重新从 RhinoDoc 解析源对象，避免使用选择阶段的陈旧 RhinoObject 包装器。
+        var source = doc.Objects.FindId(sourceReference.Id);
+        if (source == null || source.Geometry == null)
+        {
+          failedCount++;
+          continue;
+        }
+
+        // false = 保留原对象并创建变换后的副本。这是 1.1.0 的核心输出方式。
+        var newId = doc.Objects.Transform(source.Id, finalTransform, false);
+        if (newId == Guid.Empty)
+        {
+          RhinoApp.WriteLine(
+            "WoodSheetLayout：对象“{0}”未能通过1.1原生复制通道铺平。",
+            source.Attributes.Name ?? placement.Part.Name);
+          failedCount++;
+          continue;
+        }
+
+        var duplicate = doc.Objects.FindId(newId);
+        if (duplicate == null)
+        {
+          failedCount++;
+          continue;
+        }
+
+        var attributes = duplicate.Attributes.Duplicate();
+        attributes.RemoveFromAllGroups();
+        if (groupIndex >= 0)
+          attributes.AddToGroup(groupIndex);
+        attributes.SetUserString("WoodSheetLayoutRole", "FlatCopy");
+        attributes.LayerIndex = layers.GetSourceLayer(sheetLayer, source.Attributes);
+        attributes.Name = string.IsNullOrWhiteSpace(source.Attributes.Name)
+          ? placement.Part.Name
+          : source.Attributes.Name;
+        if (!doc.Objects.ModifyAttributes(newId, attributes, true))
+        {
+          RhinoApp.WriteLine(
+            "WoodSheetLayout：对象“{0}”已复制，但输出图层或分组属性设置失败。",
+            attributes.Name);
+          failedCount++;
+          continue;
+        }
+
+        createdIds.Add(newId);
+        createdCount++;
+      }
+
+      // 保留用户要求的“原件 + 铺平件”配对组；不删除原件已有的任何组。
+      if (groupIndex >= 0 && createdIds.Count > 0)
+      {
+        foreach (var sourceReference in placement.Part.Objects.Where(item => item != null))
+        {
+          var source = doc.Objects.FindId(sourceReference.Id);
+          if (source == null)
+            continue;
+          var sourceAttributes = source.Attributes.Duplicate();
+          var existingGroups = sourceAttributes.GetGroupList() ?? new int[0];
+          if (!existingGroups.Contains(groupIndex))
+            sourceAttributes.AddToGroup(groupIndex);
+          sourceAttributes.SetUserString("WoodSheetLayoutRole", "Source");
+          if (!doc.Objects.ModifyAttributes(source.Id, sourceAttributes, true))
+          {
+            RhinoApp.WriteLine(
+              "WoodSheetLayout：原件“{0}”未能加入配对组。",
+              source.Attributes.Name ?? placement.Part.Name);
+          }
+        }
+      }
+
+      if (createdCount == 0)
+      {
+        RhinoApp.WriteLine(
+          "WoodSheetLayout：零件“{0}”没有生成任何副本，不能计为完成。",
+          placement.Part.Name);
+      }
+      else if (failedCount > 0)
+      {
+        RhinoApp.WriteLine(
+          "WoodSheetLayout：零件“{0}”通过1.1原生通道生成 {1} 个对象，仍有 {2} 个对象失败。",
           placement.Part.Name,
           createdCount,
           failedCount);
@@ -463,7 +600,7 @@ namespace WoodSheetLayout.Core
     {
       var packedPartCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.1.6：选中组 {0} 件，识别 {1} 件，排入 {2} 件，实际生成 {3} 件/{4} 个对象，{5} 张 {6}；零件间距 {7:0.##} mm，边框出血 {8:0.##} mm。",
+        "WoodSheetLayout 2.1.7：选中组 {0} 件，识别 {1} 件，排入 {2} 件，实际生成 {3} 件/{4} 个对象，{5} 张 {6}；零件间距 {7:0.##} mm，边框出血 {8:0.##} mm。",
         componentCount,
         analyzedPartCount,
         packedPartCount,
@@ -474,7 +611,7 @@ namespace WoodSheetLayout.Core
         settings.PartGapMillimeters,
         settings.FrameMarginMillimeters));
       RhinoApp.WriteLine(string.Format(
-        "  工作方式：1.1矩形MaxRects＋递归补齐原始组＋输出失败重试；当前命令：{0}。",
+        "  工作方式：1.1选择/分组/FlatBounds矩形MaxRects＋ObjectTable.Transform原生复制；当前命令：{0}。",
         settings.PartMode == LayoutPartMode.BentOnly ? "折弯板" : "平板"));
 
       if (componentCount != analyzedPartCount || analyzedPartCount != packedPartCount ||
@@ -565,7 +702,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.1.6_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.1.7_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,
