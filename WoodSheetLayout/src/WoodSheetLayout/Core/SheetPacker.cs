@@ -230,13 +230,13 @@ namespace WoodSheetLayout.Core
       switch (strategy)
       {
         case SortStrategy.NetArea:
-          return parts.OrderByDescending(BoundingArea).ThenByDescending(MaxSide);
+          return parts.OrderByDescending(BoundingArea).ThenByDescending(FastMaxSide);
         case SortStrategy.Width:
-          return parts.OrderByDescending(item => item.Outline.Bounds.Diagonal.X).ThenByDescending(BoundingArea);
+          return parts.OrderByDescending(item => item.FlatBounds.Diagonal.X).ThenByDescending(BoundingArea);
         case SortStrategy.Height:
-          return parts.OrderByDescending(item => item.Outline.Bounds.Diagonal.Y).ThenByDescending(BoundingArea);
+          return parts.OrderByDescending(item => item.FlatBounds.Diagonal.Y).ThenByDescending(BoundingArea);
         default:
-          return parts.OrderByDescending(MaxSide).ThenByDescending(BoundingArea);
+          return parts.OrderByDescending(FastMaxSide).ThenByDescending(BoundingArea);
       }
     }
 
@@ -297,7 +297,21 @@ namespace WoodSheetLayout.Core
 
     private static bool FitsEmptySheet(BoardPart part, LayoutSettings settings)
     {
-      if (part == null || part.Outline == null)
+      if (part == null)
+        return false;
+      if (settings.Packing == PackingMode.Fast)
+      {
+        foreach (var angle in settings.RotationAnglesRadians())
+        {
+          var bounds = RotatedFlatBounds(part.FlatBounds, angle);
+          if (bounds.IsValid &&
+              bounds.Diagonal.X <= settings.SheetWidth - 2.0 * settings.FrameMargin + 1e-8 &&
+              bounds.Diagonal.Y <= settings.SheetHeight - 2.0 * settings.FrameMargin + 1e-8)
+            return true;
+        }
+        return false;
+      }
+      if (part.Outline == null)
         return false;
       foreach (var angle in settings.RotationAnglesRadians())
       {
@@ -318,9 +332,31 @@ namespace WoodSheetLayout.Core
 
     private static double BoundingArea(BoardPart part)
     {
-      if (part == null || part.Outline == null || !part.Outline.Bounds.IsValid)
+      if (part == null || !part.FlatBounds.IsValid)
         return 0.0;
-      return Math.Abs(part.Outline.Bounds.Diagonal.X * part.Outline.Bounds.Diagonal.Y);
+      return Math.Abs(part.FlatBounds.Diagonal.X * part.FlatBounds.Diagonal.Y);
+    }
+
+    private static double FastMaxSide(BoardPart part)
+    {
+      if (part == null || !part.FlatBounds.IsValid)
+        return 0.0;
+      return Math.Max(part.FlatBounds.Diagonal.X, part.FlatBounds.Diagonal.Y);
+    }
+
+    private static BoundingBox RotatedFlatBounds(BoundingBox bounds, double angle)
+    {
+      if (!bounds.IsValid || Math.Abs(angle) <= 1e-12)
+        return bounds;
+      var rotation = Transform.Rotation(angle, Vector3d.ZAxis, Point3d.Origin);
+      var result = BoundingBox.Unset;
+      foreach (var corner in bounds.GetCorners())
+      {
+        var point = corner;
+        point.Transform(rotation);
+        result = result.IsValid ? BoundingBox.Union(result, point) : new BoundingBox(point, point);
+      }
+      return result;
     }
 
     private static double MaxSide(BoardPart part)
@@ -444,7 +480,7 @@ namespace WoodSheetLayout.Core
         {
           foreach (var angle in _settings.RotationAnglesRadians())
           {
-            var bounds = OutlineGeometry.RotatedBounds(part.Outline, angle);
+            var bounds = RotatedFlatBounds(part.FlatBounds, angle);
             if (!bounds.IsValid)
               continue;
             var width = bounds.Diagonal.X;
