@@ -1,4 +1,4 @@
-# WoodSheetLayout 2.1.4（Rhino 7 / Rhino 8）
+# WoodSheetLayout 2.1.5（Rhino 7 / Rhino 8）
 
 面向木制拼装产品、激光切割刀模和 CAD 出图的一键铺平插件。本版严格回归 1.1.0 的普通排版骨架，只加入自定义边界框、独立折弯件铺平和中文命令选项。
 
@@ -19,6 +19,10 @@
 - 不在原模型旁生成黄色问题编号或缺件文字；移动配对Group即可核对原件与副本。
 - 配对Group只增加组成员关系，不移动原始模型，也不改变原图层和颜色。
 - 再次运行排版时自动忽略带`FlatCopy`标记的旧铺平副本，避免重复排版。
+- `WoodSheetLayout`不再要求对象必须被识别为木板：Brep、Extrusion、Mesh、Surface、曲线、文字、块实例或其他可复制几何都会生成铺平副本。
+- 1.1木板识别失败后，从对象平面、Brep曲面坐标架、网格面、块实例坐标或世界坐标中选择最薄方向，强制刚体放到世界XY。
+- 厚度识别失败时优先读取`2mm`、`2.5mm`等图层名称；没有厚度信息也不会取消铺平。
+- 超过A3/A4/Custom可用范围的对象不缩放、不遗漏，自动生成一张能够完整容纳它的加大边界框。
 
 FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、切割线、孔线、刻线和文字，不会把零件变成矩形。
 
@@ -56,26 +60,26 @@ FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、�
 
 | 命令 | 功能 | 推荐别名 |
 | --- | --- | --- |
-| `WoodSheetLayout` | 普通平板，显示中文参数选项 | `WSL` |
+| `WoodSheetLayout` | 所有选中对象组，显示中文参数选项 | `WSL` |
 | `WSLayFlatA3` | 一键A3横向、4mm间距、4mm边框出血 | `A3P` |
 | `WSLayFlatA4` | 一键A4横向、4mm间距、4mm边框出血 | `A4P` |
 | `WSLayFlatBend` | 单独选择折弯件，中性层展开后按MaxRects排版 | `BFP` |
 
 ## 独立折弯件铺平
 
-普通 `WoodSheetLayout` 为保证1.1速度，不再识别或展开折弯件；运行普通命令时请只选择平板。折弯件单独运行 `WSLayFlatBend`：
+普通 `WoodSheetLayout` 对所有选中对象执行刚体铺平；折弯件如需按中性层真实展开，仍应单独运行 `WSLayFlatBend`：
 
 1. 选择厚度恒定的折弯木板和同组曲线。
 2. 设置边界框、方向、间距、边框出血和`中性层系数`。
 3. 默认 `中性层系数=0.5`，按木板厚度中间层计算展开长度。
 4. 支持圆柱、圆锥和“直面＋弯曲面”的连续可展板件。
 5. 平面段和弯曲段以公共接缝连续展开，铺平后仍然相接。
-6. 球面、马鞍面等双曲率对象不强行展开，使用黄色编号提示。
+6. 球面、马鞍面等双曲率对象不强行展开，只在命令行报告。
 7. 展开后的零件仍使用矩形包围盒MaxRects进行规整排版。
 
 ## 建模准备
 
-1. 每块木板使用有真实厚度的闭合Brep、Extrusion或Mesh。
+1. 推荐每块木板使用有真实厚度的闭合Brep、Extrusion或Mesh；其他可复制对象也会强制铺平。
 2. 一块木板和属于它的切割线、雕刻线、孔位线或文字放入同一个Rhino Group。
 3. 不要把整套产品所有木板放进一个Group。
 4. 普通平板使用 `WoodSheetLayout`；折弯件使用 `WSLayFlatBend`。
@@ -84,16 +88,16 @@ FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、�
 
 - 每个厚度建立独立板框，左上角显示厚度、板号、零件数量和矩形占位利用率。
 - 每个零件和同组曲线在输出区重新组成独立Group。
-- 无法识别、无法展开或超过板框的对象只在Rhino命令行报告，不在模型中生成文字标记。
+- 普通命令仅在对象无效或完全无法复制时才在命令行报告；超过原板框的对象自动进入加大边界框。
 - 整个命令支持一次Rhino撤销。
 
 ## 编译和安装
 
 编译输出：
 
-- `WoodSheetLayout-2.1.4-rhino7.zip`
-- `WoodSheetLayout-2.1.4-rhino8.zip`
-- `WoodSheetLayout-2.1.4-rhino7-rhino8.zip`
+- `WoodSheetLayout-2.1.5-rhino7.zip`
+- `WoodSheetLayout-2.1.5-rhino8.zip`
+- `WoodSheetLayout-2.1.5-rhino7-rhino8.zip`
 
 用户安装编译好的插件不需要安装.NET SDK。完整解压后运行 `install.ps1`；或者在Rhino输入 `_PlugInManager`，Rhino 7选择 `net48/WoodSheetLayout.rhp`，Rhino 8选择 `net8.0/WoodSheetLayout.rhp`。安装后完全重启Rhino。
 
