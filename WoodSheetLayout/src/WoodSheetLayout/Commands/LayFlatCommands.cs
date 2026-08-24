@@ -29,21 +29,18 @@ namespace WoodSheetLayout.Commands
       var partGap = new OptionDouble(settings.PartGapMillimeters);
       var frameMargin = new OptionDouble(settings.FrameMarginMillimeters);
       var neutralFactor = new OptionDouble(settings.NeutralFactor);
-      var rotationStep = new OptionDouble(settings.FreeRotationStepDegrees);
 
       var getter = new GetOption();
       getter.SetCommandPrompt("设置板框与真实轮廓排版参数，回车开始选择零件");
       getter.AcceptNothing(true);
       var sheetOption = getter.AddOptionList("Sheet", new[] { "A3", "A4", "Custom" }, 0);
       var orientationOption = getter.AddOptionToggle("Orientation", ref landscape);
-      var rotationOption = getter.AddOptionList("Rotation", new[] { "ZeroNinety", "Free" }, 0);
       var grainOption = getter.AddOptionToggle("GrainLock", ref grainLock);
       getter.AddOptionDouble("CustomWidth", ref sheetWidth);
       getter.AddOptionDouble("CustomHeight", ref sheetHeight);
       getter.AddOptionDouble("PartGap", ref partGap);
       getter.AddOptionDouble("FrameMargin", ref frameMargin);
       getter.AddOptionDouble("NeutralFactor", ref neutralFactor);
-      getter.AddOptionDouble("FreeAngleStep", ref rotationStep);
 
       while (true)
       {
@@ -57,8 +54,6 @@ namespace WoodSheetLayout.Commands
 
         if (getter.OptionIndex() == sheetOption)
           settings.Sheet = (SheetKind)getter.Option().CurrentListOptionIndex;
-        else if (getter.OptionIndex() == rotationOption)
-          settings.Rotation = (RotationMode)getter.Option().CurrentListOptionIndex;
         else if (getter.OptionIndex() != orientationOption && getter.OptionIndex() != grainOption)
           continue;
       }
@@ -70,7 +65,6 @@ namespace WoodSheetLayout.Commands
       settings.PartGapMillimeters = partGap.CurrentValue;
       settings.FrameMarginMillimeters = frameMargin.CurrentValue;
       settings.NeutralFactor = neutralFactor.CurrentValue;
-      settings.FreeRotationStepDegrees = rotationStep.CurrentValue;
 
       if (settings.CustomWidthMillimeters <= 8.0 || settings.CustomHeightMillimeters <= 8.0)
       {
@@ -85,11 +79,6 @@ namespace WoodSheetLayout.Commands
       if (settings.NeutralFactor < 0.0 || settings.NeutralFactor > 1.0)
       {
         RhinoApp.WriteLine("WoodSheetLayout：NeutralFactor 必须在0到1之间，默认0.5代表木板厚度中间层。");
-        return Result.Failure;
-      }
-      if (settings.FreeRotationStepDegrees < 1.0 || settings.FreeRotationStepDegrees > 90.0)
-      {
-        RhinoApp.WriteLine("WoodSheetLayout：FreeAngleStep 必须在1°到90°之间。");
         return Result.Failure;
       }
       return Result.Success;
@@ -123,7 +112,6 @@ namespace WoodSheetLayout.Commands
         FrameMarginMillimeters = 4.0,
         ThicknessToleranceMillimeters = 0.15,
         Landscape = true,
-        Rotation = RotationMode.ZeroNinety,
         GrainDirectionLocked = false,
         NeutralFactor = 0.5
       };

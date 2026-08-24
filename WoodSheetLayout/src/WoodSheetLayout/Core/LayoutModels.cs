@@ -12,12 +12,6 @@ namespace WoodSheetLayout.Core
     Custom
   }
 
-  internal enum RotationMode
-  {
-    ZeroNinety,
-    Free
-  }
-
   internal enum FlattenKind
   {
     Planar,
@@ -39,9 +33,7 @@ namespace WoodSheetLayout.Core
     public double FrameMarginMillimeters { get; set; } = 4.0;
     public double ThicknessToleranceMillimeters { get; set; } = 0.15;
     public bool Landscape { get; set; } = true;
-    public RotationMode Rotation { get; set; } = RotationMode.ZeroNinety;
     public bool GrainDirectionLocked { get; set; }
-    public double FreeRotationStepDegrees { get; set; } = 15.0;
     public double NeutralFactor { get; set; } = 0.5;
     public double OutlineChordToleranceMillimeters { get; set; } = 0.5;
     public double ModelUnitsPerMillimeter { get; set; } = 1.0;
@@ -90,16 +82,7 @@ namespace WoodSheetLayout.Core
       yield return 0.0;
       if (GrainDirectionLocked)
         yield break;
-
-      if (Rotation == RotationMode.ZeroNinety)
-      {
-        yield return Math.PI * 0.5;
-        yield break;
-      }
-
-      var step = Math.Max(1.0, Math.Min(90.0, FreeRotationStepDegrees));
-      for (var degrees = step; degrees < 360.0 - 1e-8; degrees += step)
-        yield return degrees * Math.PI / 180.0;
+      yield return Math.PI * 0.5;
     }
 
     private void GetBaseSheetSize(out double widthMillimeters, out double heightMillimeters)
