@@ -11,6 +11,70 @@ namespace WoodSheetLayout.Core
 {
   internal static class BoardAnalyzer
   {
+    private const string OutputRoleKey = "WoodSheetLayoutRole";
+
+    public static List<RhinoObject> ExpandSelectedGroups(
+      RhinoDoc doc,
+      IEnumerable<RhinoObject> selectedObjects)
+    {
+      var result = new Dictionary<Guid, RhinoObject>();
+      var pending = new Queue<RhinoObject>();
+      var visitedGroups = new HashSet<int>();
+
+      foreach (var rhinoObject in selectedObjects ?? Enumerable.Empty<RhinoObject>())
+      {
+        if (IsGeneratedOutputObject(doc, rhinoObject) || result.ContainsKey(rhinoObject.Id))
+          continue;
+        result.Add(rhinoObject.Id, rhinoObject);
+        pending.Enqueue(rhinoObject);
+      }
+
+      // Rhino 的框选或嵌套组选择不一定把交叉组的全部成员返回给 GetObject。
+      // 从任意已选成员开始递归补齐原始组，避免一个真实零件被拆成许多曲线碎片。
+      while (pending.Count > 0)
+      {
+        var current = pending.Dequeue();
+        foreach (var groupIndex in current.Attributes.GetGroupList() ?? new int[0])
+        {
+          if (!visitedGroups.Add(groupIndex) || IsOutputPairGroup(doc, groupIndex))
+            continue;
+          foreach (var member in doc.Groups.GroupMembers(groupIndex) ?? new RhinoObject[0])
+          {
+            if (IsGeneratedOutputObject(doc, member) || result.ContainsKey(member.Id))
+              continue;
+            result.Add(member.Id, member);
+            pending.Enqueue(member);
+          }
+        }
+      }
+
+      return result.Values.ToList();
+    }
+
+    public static bool IsGeneratedOutputObject(RhinoDoc doc, RhinoObject rhinoObject)
+    {
+      if (rhinoObject == null || rhinoObject.Geometry == null)
+        return true;
+      var role = rhinoObject.Attributes.GetUserString(OutputRoleKey);
+      if (string.Equals(role, "FlatCopy", StringComparison.Ordinal) ||
+          string.Equals(role, "OutputGuide", StringComparison.Ordinal))
+        return true;
+      if (doc == null || rhinoObject.Attributes.LayerIndex < 0 ||
+          rhinoObject.Attributes.LayerIndex >= doc.Layers.Count)
+        return false;
+      var layer = doc.Layers[rhinoObject.Attributes.LayerIndex];
+      return layer != null && layer.FullPath.StartsWith("WoodSheetLayout_", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOutputPairGroup(RhinoDoc doc, int groupIndex)
+    {
+      if (doc == null || groupIndex < 0 || groupIndex >= doc.Groups.Count)
+        return false;
+      var groupName = doc.Groups.GroupName(groupIndex);
+      return !string.IsNullOrWhiteSpace(groupName) &&
+             groupName.StartsWith("WSL_PAIR_", StringComparison.OrdinalIgnoreCase);
+    }
+
     public static List<List<RhinoObject>> BuildGroupedComponents(IEnumerable<RhinoObject> sourceObjects)
     {
       var objects = sourceObjects

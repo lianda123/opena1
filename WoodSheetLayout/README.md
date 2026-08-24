@@ -1,4 +1,4 @@
-# WoodSheetLayout 2.1.5（Rhino 7 / Rhino 8）
+# WoodSheetLayout 2.1.6（Rhino 7 / Rhino 8）
 
 面向木制拼装产品、激光切割刀模和 CAD 出图的一键铺平插件。本版严格回归 1.1.0 的普通排版骨架，只加入自定义边界框、独立折弯件铺平和中文命令选项。
 
@@ -19,10 +19,14 @@
 - 不在原模型旁生成黄色问题编号或缺件文字；移动配对Group即可核对原件与副本。
 - 配对Group只增加组成员关系，不移动原始模型，也不改变原图层和颜色。
 - 再次运行排版时自动忽略带`FlatCopy`标记的旧铺平副本，避免重复排版。
+- 选中组内任意对象后，插件会从Rhino文档递归补齐原始组成员；交叉组和嵌套组不再把一个零件拆成多个曲线碎片。
+- 递归补组时自动跳过旧`WSL_PAIR`配对组、旧铺平副本和旧`WoodSheetLayout_*`输出图层。
 - `WoodSheetLayout`不再要求对象必须被识别为木板：Brep、Extrusion、Mesh、Surface、曲线、文字、块实例或其他可复制几何都会生成铺平副本。
 - 1.1木板识别失败后，从对象平面、Brep曲面坐标架、网格面、块实例坐标或世界坐标中选择最薄方向，强制刚体放到世界XY。
 - 厚度识别失败时优先读取`2mm`、`2.5mm`等图层名称；没有厚度信息也不会取消铺平。
 - 超过A3/A4/Custom可用范围的对象不缩放、不遗漏，自动生成一张能够完整容纳它的加大边界框。
+- 命令结束时分别核对“组数、识别数、排入数、实际生成数”；只有四项相同才报告全部铺平。
+- Rhino 7通用几何写入失败时会按曲线、Brep或块实例的专用接口重试，不再用排版统计掩盖复制失败。
 
 FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、切割线、孔线、刻线和文字，不会把零件变成矩形。
 
@@ -95,9 +99,9 @@ FlatBounds只用于排版占位；插件复制输出的仍是原木板实体、�
 
 编译输出：
 
-- `WoodSheetLayout-2.1.5-rhino7.zip`
-- `WoodSheetLayout-2.1.5-rhino8.zip`
-- `WoodSheetLayout-2.1.5-rhino7-rhino8.zip`
+- `WoodSheetLayout-2.1.6-rhino7.zip`
+- `WoodSheetLayout-2.1.6-rhino8.zip`
+- `WoodSheetLayout-2.1.6-rhino7-rhino8.zip`
 
 用户安装编译好的插件不需要安装.NET SDK。完整解压后运行 `install.ps1`；或者在Rhino输入 `_PlugInManager`，Rhino 7选择 `net48/WoodSheetLayout.rhp`，Rhino 8选择 `net8.0/WoodSheetLayout.rhp`。安装后完全重启Rhino。
 
