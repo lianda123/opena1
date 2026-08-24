@@ -480,13 +480,13 @@ namespace WoodSheetLayout.Core
       if (componentCount != analyzedPartCount || analyzedPartCount != packedPartCount ||
           packedPartCount != outputPartCount || outputFailureCount > 0)
       {
-        RhinoApp.WriteLine(
+        RhinoApp.WriteLine(string.Format(
           "WoodSheetLayout：数量校验未通过（组{0}/识别{1}/排入{2}/生成{3}/对象失败{4}），本次不能判定为全部铺平。",
           componentCount,
           analyzedPartCount,
           packedPartCount,
           outputPartCount,
-          outputFailureCount);
+          outputFailureCount));
       }
       else
       {
