@@ -24,6 +24,12 @@ namespace WoodSheetLayout.Core
     BentOnly
   }
 
+  internal enum PackingMode
+  {
+    Fast,
+    Contour
+  }
+
   internal enum IssueSeverity
   {
     Warning,
@@ -33,6 +39,7 @@ namespace WoodSheetLayout.Core
   internal sealed class LayoutSettings
   {
     public LayoutPartMode PartMode { get; set; } = LayoutPartMode.PlanarOnly;
+    public PackingMode Packing { get; set; } = PackingMode.Fast;
     public SheetKind Sheet { get; set; } = SheetKind.A3;
     public double CustomWidthMillimeters { get; set; } = 420.0;
     public double CustomHeightMillimeters { get; set; } = 297.0;
@@ -41,6 +48,7 @@ namespace WoodSheetLayout.Core
     public double ThicknessToleranceMillimeters { get; set; } = 0.15;
     public bool Landscape { get; set; } = true;
     public bool GrainDirectionLocked { get; set; }
+    public bool EnableHoleNesting { get; set; }
     public double NeutralFactor { get; set; } = 0.5;
     public double OutlineChordToleranceMillimeters { get; set; } = 0.5;
     public double ModelUnitsPerMillimeter { get; set; } = 1.0;
