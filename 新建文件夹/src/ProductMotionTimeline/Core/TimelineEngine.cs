@@ -458,8 +458,8 @@ namespace ProductMotionTimeline.Core
           return result;
         }
         var axisDistance = Math.Abs((drivenOrigin - driverOrigin) * cross);
-        var tolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, constraint.Module * 0.05);
-        if (axisDistance > tolerance)
+        var bevelTolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, constraint.Module * 0.05);
+        if (axisDistance > bevelTolerance)
         {
           result.Severity = ValidationSeverity.Error;
           result.Message = string.Format("锥齿轮两轴不相交，轴线最短距离 {0:0.###}", axisDistance);

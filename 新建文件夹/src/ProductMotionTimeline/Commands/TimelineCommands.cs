@@ -472,9 +472,6 @@ namespace ProductMotionTimeline.Commands
       var helical = typeGetter.AddOption("HelicalGear");
       var bevel = typeGetter.AddOption("BevelGear");
       var rack = typeGetter.AddOption("RackPinion");
-      var helical = typeGetter.AddOption("HelicalGear");
-      var bevel = typeGetter.AddOption("BevelGear");
-      var rack = typeGetter.AddOption("RackPinion");
       typeGetter.Get();
       if (typeGetter.CommandResult() != Result.Success)
         return typeGetter.CommandResult();
@@ -648,6 +645,9 @@ namespace ProductMotionTimeline.Commands
       var external = typeGetter.AddOption("ExternalGear");
       var internalGear = typeGetter.AddOption("InternalGear");
       var belt = typeGetter.AddOption("Belt");
+      var helical = typeGetter.AddOption("HelicalGear");
+      var bevel = typeGetter.AddOption("BevelGear");
+      var rack = typeGetter.AddOption("RackPinion");
       var typeResult = typeGetter.Get();
       if (typeResult == GetResult.Cancel)
         return Result.Cancel;
