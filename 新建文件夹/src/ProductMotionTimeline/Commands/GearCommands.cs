@@ -59,14 +59,21 @@ namespace ProductMotionTimeline.Commands
         : doc.Views.ActiveView.ActiveViewport.ConstructionPlane();
       plane.Origin = pointGetter.Point();
       string warning;
-      var geometry = GearGeometryGenerator.CreateGearSolid(doc, parameters, plane, out warning);
+      var geometry = GearGeometryGenerator.CreateGearGeometry(doc, parameters, plane, out warning);
       if (geometry == null)
       {
-        RhinoApp.WriteLine("ProductMotion：齿轮几何生成失败，请检查齿数、模数和厚度。");
+        RhinoApp.WriteLine(
+          "ProductMotion：齿轮几何生成失败：{0}。请检查齿数、模数、压力角和厚度。",
+          string.IsNullOrWhiteSpace(warning) ? "没有得到有效轮廓" : warning);
         return Result.Failure;
       }
       var name = BuildName(parameters);
       var instance = TrackFactory.CreateGeneratedPart(doc, geometry, name, parameters);
+      if (instance == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：齿轮几何已经生成，但创建动画块失败。");
+        return Result.Failure;
+      }
       var track = TimelineEngine.AddTrack(doc, instance);
       if (track == null)
         return Result.Failure;

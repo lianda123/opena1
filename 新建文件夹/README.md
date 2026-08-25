@@ -1,10 +1,17 @@
-# ProductMotion Timeline 0.4.1（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.2（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.1 把时间轴、传动网络和齿轮生成器合并为一个工作流：一个主动件可同时驱动多个从动件，从动件又可继续串联下一级；动作模板可自动接在上一段动作后；内齿圈可作为主动件；新增渐开线直齿、内齿、斜齿、锥齿和齿条生成器。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.2 修复齿形轮廓中的连续重复点，并按 RhinoGears 的“先生成有效闭合曲线、再生成曲面/实体”流程重写失败回退；同时保留一主多从、串联动作和五类齿轮生成器。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.4.1 主要改进
+## 0.4.2 主要改进
+
+- 修复每个齿顶和相邻齿之间的连续重复节点；这些节点会使 Rhino 拒绝挤出或放样，表现为命令结束但没有生成对象。
+- 所有齿形在挤出前都会清理无效点并确认轮廓有效、闭合。
+- 直齿、内齿、斜齿、锥齿或齿条实体生成失败时，不再直接终止；会回退输出可见的闭合齿形曲线并自动加入时间轴。
+- 命令行会显示失败发生在轮廓、挤出、放样、封口、布尔孔或动画块中的哪个阶段。
+
+### 0.4.1 传动网络修正
 
 - 内啮合自动识别不再限制内齿圈必须是从动件：内齿圈主动、小齿轮从动同样可以按正确比例联动。
 - 一主多从完成后逐条输出啮合检查结果，便于立即发现中心距、模数、轴向或齿数组合问题。
@@ -150,9 +157,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.1-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.1-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.1-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.2-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.2-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.2-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

@@ -10,6 +10,26 @@ namespace ProductMotionTimeline.Core
   {
     private const double Clearance = 0.167;
 
+    public static GeometryBase CreateGearGeometry(
+      RhinoDoc doc,
+      GearParameters parameters,
+      Plane plane,
+      out string warning)
+    {
+      var solid = CreateGearSolid(doc, parameters, plane, out warning);
+      if (solid != null)
+        return solid;
+
+      var profile = CreateFallbackProfile(parameters);
+      if (profile == null)
+        return null;
+      profile.Transform(Transform.PlaneToPlane(Plane.WorldXY, plane));
+      warning = (string.IsNullOrWhiteSpace(warning)
+        ? "实体生成未完成"
+        : warning) + "；已按 RhinoGears 的曲线工作流回退输出闭合齿形曲线";
+      return profile;
+    }
+
     public static Brep CreateGearSolid(
       RhinoDoc doc,
       GearParameters parameters,
@@ -39,7 +59,11 @@ namespace ProductMotionTimeline.Core
           break;
       }
       if (local == null)
+      {
+        if (string.IsNullOrWhiteSpace(warning))
+          warning = parameters.DisplayName + "实体生成失败";
         return null;
+      }
       local.Transform(Transform.PlaneToPlane(Plane.WorldXY, plane));
       return local;
     }
@@ -93,9 +117,7 @@ namespace ProductMotionTimeline.Core
         points.Add(Polar(rootRadius, center + rootAngle));
         points.Add(Polar(rootRadius, center + pitch * 0.5));
       }
-      if (points.Count > 0)
-        points.Add(points[0]);
-      return new PolylineCurve(points);
+      return CleanClosedPolyline(points);
     }
 
     public static Curve CreateInternalBoundary(int teeth, double module, double pressureAngleDegrees)
@@ -147,9 +169,7 @@ namespace ProductMotionTimeline.Core
         points.Add(Polar(rootRadius, center + rootHalf));
         points.Add(Polar(rootRadius, center + pitch * 0.5));
       }
-      if (points.Count > 0)
-        points.Add(points[0]);
-      return new PolylineCurve(points);
+      return CleanClosedPolyline(points);
     }
 
     public static Curve CreateRackOutline(double length, double module, double pressureAngleDegrees)
@@ -182,16 +202,25 @@ namespace ProductMotionTimeline.Core
         AddClipped(points, center - rootHalf, -dedendum, start, end);
       }
       points.Add(new Point3d(start, -dedendum, 0));
-      points.Add(points[0]);
-      return new PolylineCurve(points);
+      return CleanClosedPolyline(points);
     }
 
     private static Brep CreateSpurSolid(RhinoDoc doc, GearParameters parameters, out string warning)
     {
       warning = string.Empty;
       var outline = CreateExternalOutline(parameters.Teeth, parameters.Module, parameters.PressureAngleDegrees);
+      if (outline == null || !outline.IsValid || !outline.IsClosed)
+      {
+        warning = "渐开线轮廓无效";
+        return null;
+      }
       var extrusion = Extrusion.Create(outline, Math.Max(1e-6, parameters.Thickness), true);
       var body = extrusion?.ToBrep();
+      if (body == null)
+      {
+        warning = "渐开线轮廓挤出失败";
+        return null;
+      }
       return ApplyBore(doc, body, parameters.BoreDiameter, parameters.Thickness, out warning);
     }
 
@@ -206,10 +235,18 @@ namespace ProductMotionTimeline.Core
       var outerRadius = pitchRadius + parameters.Module * 3.0;
       var outer = new Circle(Plane.WorldXY, outerRadius).ToNurbsCurve();
       var height = Math.Max(1e-6, parameters.Thickness);
+      if (inner == null || !inner.IsValid || !inner.IsClosed)
+      {
+        warning = "内齿渐开线轮廓无效";
+        return null;
+      }
       var outerSolid = Extrusion.Create(outer, height, true)?.ToBrep();
       var cutter = Extrusion.Create(inner, height, true)?.ToBrep();
       if (outerSolid == null || cutter == null)
+      {
+        warning = "内齿轮外环或内齿轮廓挤出失败";
         return null;
+      }
       var result = Brep.CreateBooleanDifference(
         new[] { outerSolid }, new[] { cutter }, doc.ModelAbsoluteTolerance);
       if (result != null && result.Length > 0)
@@ -222,6 +259,11 @@ namespace ProductMotionTimeline.Core
     {
       warning = string.Empty;
       var outline = CreateExternalOutline(parameters.Teeth, parameters.Module, parameters.PressureAngleDegrees);
+      if (outline == null || !outline.IsValid || !outline.IsClosed)
+      {
+        warning = "斜齿轮渐开线轮廓无效";
+        return null;
+      }
       var height = Math.Max(1e-6, parameters.Thickness);
       var pitchDiameter = parameters.Module * parameters.Teeth;
       var helix = RhinoMath.ToRadians(parameters.HelixAngleDegrees);
@@ -244,7 +286,10 @@ namespace ProductMotionTimeline.Core
         ? null
         : lofts[0].CapPlanarHoles(doc.ModelAbsoluteTolerance);
       if (body == null)
+      {
+        warning = "斜齿轮放样或封口失败";
         return null;
+      }
       return ApplyBore(doc, body, parameters.BoreDiameter, height, out warning);
     }
 
@@ -252,6 +297,11 @@ namespace ProductMotionTimeline.Core
     {
       warning = string.Empty;
       var outline = CreateExternalOutline(parameters.Teeth, parameters.Module, parameters.PressureAngleDegrees);
+      if (outline == null || !outline.IsValid || !outline.IsClosed)
+      {
+        warning = "锥齿轮渐开线轮廓无效";
+        return null;
+      }
       var pitchRadius = parameters.Module * parameters.Teeth * 0.5;
       var coneHalf = RhinoMath.ToRadians(Math.Max(1.0, Math.Min(179.0, parameters.ConeAngleDegrees)) * 0.5);
       var apexHeight = pitchRadius / Math.Max(1e-6, Math.Tan(coneHalf));
@@ -273,7 +323,10 @@ namespace ProductMotionTimeline.Core
         ? null
         : lofts[0].CapPlanarHoles(doc.ModelAbsoluteTolerance);
       if (body == null)
+      {
+        warning = "锥齿轮放样或封口失败";
         return null;
+      }
       return ApplyBore(doc, body, parameters.BoreDiameter, height, out warning);
     }
 
@@ -283,7 +336,60 @@ namespace ProductMotionTimeline.Core
         parameters.RackLength,
         parameters.Module,
         parameters.PressureAngleDegrees);
+      if (outline == null || !outline.IsValid || !outline.IsClosed)
+        return null;
       return Extrusion.Create(outline, Math.Max(1e-6, parameters.Thickness), true)?.ToBrep();
+    }
+
+    private static Curve CreateFallbackProfile(GearParameters parameters)
+    {
+      if (parameters == null)
+        return null;
+      switch (parameters.Type)
+      {
+        case GearPartType.Internal:
+          return CreateInternalBoundary(
+            parameters.Teeth,
+            parameters.Module,
+            parameters.PressureAngleDegrees);
+        case GearPartType.Rack:
+          return CreateRackOutline(
+            parameters.RackLength,
+            parameters.Module,
+            parameters.PressureAngleDegrees);
+        default:
+          return CreateExternalOutline(
+            parameters.Teeth,
+            parameters.Module,
+            parameters.PressureAngleDegrees);
+      }
+    }
+
+    private static Curve CleanClosedPolyline(IEnumerable<Point3d> source)
+    {
+      if (source == null)
+        return null;
+      var input = source.Where(point => point.IsValid).ToList();
+      if (input.Count < 3)
+        return null;
+      var scale = input.Max(point => Math.Max(Math.Abs(point.X), Math.Abs(point.Y)));
+      var tolerance = Math.Max(1e-10, scale * 1e-12);
+      var cleaned = new List<Point3d>();
+      foreach (var point in input)
+      {
+        if (cleaned.Count == 0 || cleaned[cleaned.Count - 1].DistanceTo(point) > tolerance)
+          cleaned.Add(point);
+      }
+      if (cleaned.Count < 3)
+        return null;
+      if (cleaned[0].DistanceTo(cleaned[cleaned.Count - 1]) <= tolerance)
+        cleaned[cleaned.Count - 1] = cleaned[0];
+      else
+        cleaned.Add(cleaned[0]);
+      if (cleaned.Count < 4)
+        return null;
+      var curve = new PolylineCurve(cleaned);
+      return curve.IsValid && curve.IsClosed ? curve : null;
     }
 
     private static Brep ApplyBore(
