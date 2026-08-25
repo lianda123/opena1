@@ -22,6 +22,8 @@ namespace ProductMotionTimeline.UI
     private readonly CheckBox _loop = new CheckBox { Text = "循环", Checked = true };
     private readonly DropDown _interpolation = new DropDown();
     private readonly DropDown _rotationAxis = new DropDown();
+    private readonly DropDown _templatePlacement = new DropDown();
+    private readonly NumericStepper _templateGap = IntegerStepper(0, 100000, 0);
     private readonly NumericStepper _axisAngle = IntegerStepper(-100000, 100000, 0);
     private readonly TextBox _trackName = new TextBox { Width = 150 };
     private readonly Label _relationship = new Label { TextColor = Color.FromArgb(255, 190, 92) };
@@ -44,6 +46,13 @@ namespace ProductMotionTimeline.UI
       _interpolation.SelectedIndex = 0;
       _rotationAxis.DataStore = new[] { "X", "Y", "Z" };
       _rotationAxis.SelectedIndex = 2;
+      _templatePlacement.DataStore = new[]
+      {
+        "当前帧（可覆盖）",
+        "接在所选轨道末尾",
+        "接在全部动作末尾"
+      };
+      _templatePlacement.SelectedIndex = 2;
       BuildUi();
       WireEvents();
       RefreshFromModel();
@@ -100,6 +109,7 @@ namespace ProductMotionTimeline.UI
         Button("外啮合齿轮", () => RhinoApp.RunScript("_PMTExternalGear", false)),
         Button("内啮合齿轮", () => RhinoApp.RunScript("_PMTInternalGear", false)),
         Button("皮带传动", () => RhinoApp.RunScript("_PMTBelt", false)),
+        Button("一主多从/串联", () => RhinoApp.RunScript("_PMTBindMultiple", false)),
         Button("编辑选中", () => RhinoApp.RunScript("_PMTEditMechanical", false)),
         Button("检查全部", () => RhinoApp.RunScript("_PMTValidateMechanical", false)),
         Button("删除选中", DeleteSelectedConstraint));
@@ -111,10 +121,21 @@ namespace ProductMotionTimeline.UI
 
       var motionTemplates = Horizontal(
         new Label { Text = "动作模板" },
+        new Label { Text = "放置" }, _templatePlacement,
+        new Label { Text = "间隔帧" }, _templateGap,
         Button("往复摆动", () => RhinoApp.RunScript("_PMTReciprocate", false)),
         Button("旋转回弹", () => RhinoApp.RunScript("_PMTRebound", false)),
         Button("曲柄滑块", () => RhinoApp.RunScript("_PMTCrankSlider", false)),
         Button("四连杆", () => RhinoApp.RunScript("_PMTFourBar", false)));
+
+      var gearTools = Horizontal(
+        new Label { Text = "齿轮生成" },
+        Button("综合生成器", () => RhinoApp.RunScript("_PMTGearFactory", false)),
+        Button("渐开线直齿", () => RhinoApp.RunScript("_PMTCreateSpurGear", false)),
+        Button("内齿轮", () => RhinoApp.RunScript("_PMTCreateInternalGear", false)),
+        Button("斜齿轮", () => RhinoApp.RunScript("_PMTCreateHelicalGear", false)),
+        Button("锥齿轮", () => RhinoApp.RunScript("_PMTCreateBevelGear", false)),
+        Button("齿条", () => RhinoApp.RunScript("_PMTCreateRack", false)));
 
       var scroll = new Scrollable { Content = _canvas, Border = BorderType.None };
       var root = new TableLayout
@@ -131,6 +152,7 @@ namespace ProductMotionTimeline.UI
       root.Rows.Add(new TableRow(mechanicalTools));
       root.Rows.Add(new TableRow(constraintSelectionTools));
       root.Rows.Add(new TableRow(_constraints));
+      root.Rows.Add(new TableRow(gearTools));
       root.Rows.Add(new TableRow(motionTemplates));
       root.Rows.Add(new TableRow(_relationship));
       root.Rows.Add(new TableRow(_status));
@@ -156,6 +178,8 @@ namespace ProductMotionTimeline.UI
       _rotationAxis.SelectedIndexChanged += (sender, args) => UpdateRotationChannel();
       _axisAngle.ValueChanged += (sender, args) => UpdateRotationChannel();
       _constraints.SelectedIndexChanged += (sender, args) => ConstraintSelectionChanged();
+      _templatePlacement.SelectedIndexChanged += (sender, args) => UpdateTemplatePlacement();
+      _templateGap.ValueChanged += (sender, args) => UpdateTemplatePlacement();
     }
 
     private void RefreshFromModel()
@@ -173,6 +197,8 @@ namespace ProductMotionTimeline.UI
       _frame.Value = model.CurrentFrame;
       _fps.Value = model.FramesPerSecond;
       _loop.Checked = model.LoopPlayback;
+      _templatePlacement.SelectedIndex = (int)model.TemplatePlacement;
+      _templateGap.Value = model.TemplateGapFrames;
 
       var track = model.SelectedTrack;
       _trackName.Text = track?.Name ?? string.Empty;
@@ -198,7 +224,9 @@ namespace ProductMotionTimeline.UI
       var constraintText = constraint == null
         ? "传动：无"
         : $"传动：{driver?.Name ?? "未知"} → {track.Name}　比例 {constraint.SignedRatio:0.###}　相位 {constraint.PhaseOffsetDegrees:0.###}°";
-      _relationship.Text = parentText + "　　" + constraintText;
+      var branchCount = track == null ? 0 : model.ConstraintsForDriver(track.Id).Count;
+      var branchText = branchCount > 0 ? $"　分支驱动：{branchCount} 个从动件" : string.Empty;
+      _relationship.Text = parentText + "　　" + constraintText + branchText;
       RefreshConstraintList(model, doc, constraint?.Id ?? Guid.Empty);
 
       _status.Text = track == null
@@ -280,6 +308,9 @@ namespace ProductMotionTimeline.UI
       {
         case MechanicalConstraintType.InternalGear: return "内啮合";
         case MechanicalConstraintType.Belt: return "皮带";
+        case MechanicalConstraintType.HelicalGear: return "斜齿";
+        case MechanicalConstraintType.BevelGear: return "锥齿";
+        case MechanicalConstraintType.RackPinion: return "齿轮-齿条";
         default: return "外啮合";
       }
     }
@@ -294,6 +325,17 @@ namespace ProductMotionTimeline.UI
         (int)_end.Value,
         (int)_fps.Value,
         _loop.Checked == true);
+    }
+
+    private void UpdateTemplatePlacement()
+    {
+      if (_suppress)
+        return;
+      var placement = (TemplatePlacementMode)Math.Max(0, Math.Min(2, _templatePlacement.SelectedIndex));
+      TimelineEngine.UpdateTemplatePlacement(
+        RhinoDoc.ActiveDoc,
+        placement,
+        (int)_templateGap.Value);
     }
 
     private void UpdateRotationChannel()

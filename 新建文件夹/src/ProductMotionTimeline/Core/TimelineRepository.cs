@@ -60,6 +60,8 @@ namespace ProductMotionTimeline.Core
           writer.Write(model.FramesPerSecond);
           writer.Write(model.LoopPlayback);
           WriteGuid(writer, model.SelectedTrackId);
+          writer.Write((int)model.TemplatePlacement);
+          writer.Write(model.TemplateGapFrames);
           writer.Write(model.Tracks.Count);
 
           foreach (var track in model.Tracks)
@@ -95,6 +97,9 @@ namespace ProductMotionTimeline.Core
             writer.Write(constraint.Enabled);
             writer.Write(constraint.Module);
             writer.Write(constraint.PressureAngleDegrees);
+            writer.Write(constraint.PhaseOffsetDistance);
+            writer.Write((int)constraint.DrivenLinearAxis);
+            writer.Write(constraint.DirectionMultiplier);
           }
 
           writer.Flush();
@@ -133,6 +138,11 @@ namespace ProductMotionTimeline.Core
             LoopPlayback = reader.ReadBoolean(),
             SelectedTrackId = ReadGuid(reader)
           };
+          if (version >= 5)
+          {
+            model.TemplatePlacement = (TemplatePlacementMode)reader.ReadInt32();
+            model.TemplateGapFrames = reader.ReadInt32();
+          }
 
           var trackCount = reader.ReadInt32();
           for (var i = 0; i < trackCount; i++)
@@ -186,6 +196,12 @@ namespace ProductMotionTimeline.Core
               {
                 constraint.Module = reader.ReadDouble();
                 constraint.PressureAngleDegrees = reader.ReadDouble();
+              }
+              if (version >= 5)
+              {
+                constraint.PhaseOffsetDistance = reader.ReadDouble();
+                constraint.DrivenLinearAxis = (RotationAxis)reader.ReadInt32();
+                constraint.DirectionMultiplier = reader.ReadDouble();
               }
               model.Constraints.Add(constraint);
             }

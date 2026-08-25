@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.3.0."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.0."""
 
 from pathlib import Path
 import re
@@ -26,6 +26,11 @@ def gear_center_distance(kind: str, module: float, driver_teeth: int, driven_tee
 def crank_slider_x(theta: float, radius: float, rod: float) -> float:
     import math
     return radius * math.cos(theta) + math.sqrt(rod * rod - radius * radius * math.sin(theta) ** 2)
+
+
+def rack_travel(driver_angle: float, module: float, driver_teeth: int) -> float:
+    import math
+    return driver_angle / 360.0 * math.pi * module * driver_teeth
 
 
 def translation(x: float, y: float, z: float):
@@ -60,6 +65,7 @@ def main():
     assert gear_center_distance("ExternalGear", 2.0, 10, 30) == 40.0
     assert gear_center_distance("InternalGear", 2.0, 10, 30) == 20.0
     assert crank_slider_x(0.0, 10.0, 30.0) == 40.0
+    assert abs(rack_travel(360.0, 2.0, 20) - 40.0 * 3.141592653589793) < 1e-9
 
     # Parent moved +5; child own target remains +13, so inherited result is +18.
     parent_world = translation(15.0, 0.0, 0.0)
@@ -70,7 +76,7 @@ def main():
 
     data = (SRC / "Core" / "AnimationData.cs").read_text(encoding="utf-8")
     engine = (SRC / "Core" / "TimelineEngine.cs").read_text(encoding="utf-8")
-    commands = (SRC / "Commands" / "TimelineCommands.cs").read_text(encoding="utf-8")
+    commands = "\n".join(path.read_text(encoding="utf-8") for path in (SRC / "Commands").glob("*.cs"))
     project = (SRC / "ProductMotionTimeline.csproj").read_text(encoding="utf-8")
     repository = (SRC / "Core" / "TimelineRepository.cs").read_text(encoding="utf-8")
     animation_math = (SRC / "Core" / "AnimationMath.cs").read_text(encoding="utf-8")
@@ -79,6 +85,8 @@ def main():
     axis_detector = (SRC / "Core" / "AxisDetector.cs").read_text(encoding="utf-8")
     templates = (SRC / "Core" / "MotionTemplateGenerator.cs").read_text(encoding="utf-8")
     conduit = (SRC / "UI" / "MechanicalConstraintConduit.cs").read_text(encoding="utf-8")
+    gear_geometry = (SRC / "Core" / "GearGeometryGenerator.cs").read_text(encoding="utf-8")
+    gear_metadata = (SRC / "Core" / "GearPartMetadata.cs").read_text(encoding="utf-8")
 
     required = [
         "ParentTrackId",
@@ -87,6 +95,7 @@ def main():
         "ExternalGear",
         "InternalGear",
         "Belt",
+        "HelicalGear", "BevelGear", "RackPinion", "TemplatePlacementMode",
         "WouldCreateParentCycle",
         "WouldCreateConstraintCycle",
     ]
@@ -95,7 +104,8 @@ def main():
 
     for token in [
         "EvaluateEffectivePose", "EvaluateWorldTarget", "AddMechanicalConstraint",
-        "SetParent", "EffectiveMechanicalAngle", "UpdateCurrentKeyInterpolation"
+        "SetParent", "EffectiveMechanicalAngle", "UpdateCurrentKeyInterpolation",
+        "TemplateStartFrame", "UpdateTemplatePlacement"
     ]:
         assert token in engine, token
 
@@ -113,7 +123,9 @@ def main():
         "PMTExternalGear",
         "PMTInternalGear",
         "PMTBelt", "PMTAutoPivot", "PMTEditMechanical", "PMTValidateMechanical",
-        "PMTReciprocate", "PMTRebound", "PMTCrankSlider", "PMTFourBar",
+        "PMTReciprocate", "PMTRebound", "PMTCrankSlider", "PMTFourBar", "PMTBindMultiple",
+        "PMTGearFactory", "PMTCreateSpurGear", "PMTCreateInternalGear",
+        "PMTCreateHelicalGear", "PMTCreateBevelGear", "PMTCreateRack",
     ]:
         assert command in command_names, command
 
@@ -125,7 +137,8 @@ def main():
 
     for token in [
         "平滑：缓入缓出", "线性：匀速", "阶梯：保持后跳变",
-        "SelectedIndexChanged", "PMTExternalGear", "PMTInternalGear", "PMTBelt"
+        "SelectedIndexChanged", "PMTExternalGear", "PMTInternalGear", "PMTBelt",
+        "PMTBindMultiple", "PMTGearFactory", "接在全部动作末尾"
     ]:
         assert token in panel, token
     for token in ["_smoothSegmentPen", "_linearSegmentPen", "_constantSegmentPen"]:
@@ -139,11 +152,20 @@ def main():
         assert token in conduit, token
     for token in ["Module", "PressureAngleDegrees", "ExpectedCenterDistance", "ValidateMechanicalConstraint"]:
         assert token in data + engine, token
+    for token in [
+        "CreateExternalOutline", "CreateInternalBoundary", "CreateHelicalSolid",
+        "CreateBevelSolid", "CreateRackOutline", "Brep.CreateBooleanDifference"
+    ]:
+        assert token in gear_geometry, token
+    for token in ["GearPartType", "InferConstraintType", "HelixAngleDegrees", "RackLength"]:
+        assert token in gear_metadata, token
+    assert "ConstraintsForDriver" in data
+    assert "EvaluateRackDistance" in data
 
-    assert "DataVersion = 4" in data
+    assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.3.0</Version>" in project
+    assert "<Version>0.4.0</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -152,11 +174,12 @@ def main():
     for phrase in [
         "组内零件", "父子层级", "外啮合齿轮", "几何/运动学校验",
         "Gumball", "缓入缓出", "保持后跳变",
-        "自动轴孔", "可视化传动图", "真实啮合检查", "动作模板"
+        "一主多从机构网络", "动作自动衔接", "齿轮生成器合并",
+        "渐开线直齿", "斜齿", "锥齿", "齿条"
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.3.0 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.0 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

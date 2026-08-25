@@ -30,6 +30,37 @@ namespace ProductMotionTimeline.Core
       return GetOrCreateAnimationPart(doc, true, prompt, enablePreSelect);
     }
 
+    public static InstanceObject CreateGeneratedPart(
+      RhinoDoc doc,
+      GeometryBase geometry,
+      string name,
+      GearParameters gearParameters)
+    {
+      if (doc == null || geometry == null)
+        return null;
+      var definitionName = NextDefinitionName(doc);
+      var geometryAttributes = new ObjectAttributes { Name = name };
+      var definitionIndex = doc.InstanceDefinitions.Add(
+        definitionName,
+        "ProductMotion 自动生成的机构部件",
+        Point3d.Origin,
+        new[] { geometry },
+        new[] { geometryAttributes });
+      if (definitionIndex < 0)
+        return null;
+      var instanceId = doc.Objects.AddInstanceObject(definitionIndex, Transform.Identity);
+      if (instanceId == Guid.Empty)
+        return null;
+      var attributes = new ObjectAttributes { Name = name };
+      doc.Objects.ModifyAttributes(instanceId, attributes, true);
+      if (gearParameters != null)
+        GearPartMetadata.Write(doc, instanceId, gearParameters);
+      var instance = doc.Objects.FindId(instanceId) as InstanceObject;
+      instance?.Select(true);
+      doc.Views.Redraw();
+      return instance;
+    }
+
     private static InstanceObject GetOrCreateAnimationPart(
       RhinoDoc doc,
       bool selectInsideGroup,

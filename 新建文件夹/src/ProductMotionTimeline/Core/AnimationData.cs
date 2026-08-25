@@ -23,7 +23,17 @@ namespace ProductMotionTimeline.Core
   {
     ExternalGear = 0,
     InternalGear = 1,
-    Belt = 2
+    Belt = 2,
+    HelicalGear = 3,
+    BevelGear = 4,
+    RackPinion = 5
+  }
+
+  internal enum TemplatePlacementMode
+  {
+    CurrentFrame = 0,
+    AfterSelectedTracks = 1,
+    AfterAllActions = 2
   }
 
   internal enum ValidationSeverity
@@ -52,6 +62,9 @@ namespace ProductMotionTimeline.Core
     public double Module { get; set; }
     public double PressureAngleDegrees { get; set; } = 20.0;
     public double PhaseOffsetDegrees { get; set; }
+    public double PhaseOffsetDistance { get; set; }
+    public RotationAxis DrivenLinearAxis { get; set; } = RotationAxis.X;
+    public double DirectionMultiplier { get; set; } = 1.0;
     public bool Enabled { get; set; } = true;
 
     public double SignedRatio
@@ -59,13 +72,25 @@ namespace ProductMotionTimeline.Core
       get
       {
         var ratio = Math.Max(1, DriverTeeth) / (double)Math.Max(1, DrivenTeeth);
-        return Type == MechanicalConstraintType.ExternalGear ? -ratio : ratio;
+        var direction = Type == MechanicalConstraintType.ExternalGear ||
+               Type == MechanicalConstraintType.HelicalGear ||
+               Type == MechanicalConstraintType.BevelGear
+          ? -ratio
+          : ratio;
+        return direction * (DirectionMultiplier < 0.0 ? -1.0 : 1.0);
       }
     }
 
     public double EvaluateDrivenAngle(double driverAngleDegrees)
     {
       return PhaseOffsetDegrees + driverAngleDegrees * SignedRatio;
+    }
+
+    public double EvaluateRackDistance(double driverAngleDegrees)
+    {
+      var travelPerTurn = Math.PI * Math.Max(0.0, Module) * Math.Max(1, DriverTeeth);
+      return PhaseOffsetDistance + driverAngleDegrees / 360.0 * travelPerTurn *
+             (DirectionMultiplier < 0.0 ? -1.0 : 1.0);
     }
   }
 
@@ -272,7 +297,7 @@ namespace ProductMotionTimeline.Core
 
   internal sealed class TimelineDocument
   {
-    public const int DataVersion = 4;
+    public const int DataVersion = 5;
 
     public int StartFrame { get; set; } = 0;
     public int EndFrame { get; set; } = 250;
@@ -280,6 +305,8 @@ namespace ProductMotionTimeline.Core
     public int FramesPerSecond { get; set; } = 30;
     public bool LoopPlayback { get; set; } = true;
     public Guid SelectedTrackId { get; set; } = Guid.Empty;
+    public TemplatePlacementMode TemplatePlacement { get; set; } = TemplatePlacementMode.AfterAllActions;
+    public int TemplateGapFrames { get; set; }
     public List<AnimationTrack> Tracks { get; } = new List<AnimationTrack>();
     public List<MechanicalConstraint> Constraints { get; } = new List<MechanicalConstraint>();
 
@@ -297,6 +324,9 @@ namespace ProductMotionTimeline.Core
       StartFrame = Math.Max(0, StartFrame);
       EndFrame = Math.Max(StartFrame + 1, EndFrame);
       FramesPerSecond = Math.Max(1, Math.Min(120, FramesPerSecond));
+      TemplateGapFrames = Math.Max(0, Math.Min(100000, TemplateGapFrames));
+      if (!Enum.IsDefined(typeof(TemplatePlacementMode), TemplatePlacement))
+        TemplatePlacement = TemplatePlacementMode.AfterAllActions;
       CurrentFrame = Math.Max(StartFrame, Math.Min(EndFrame, CurrentFrame));
       if (SelectedTrack == null)
         SelectedTrackId = Guid.Empty;
@@ -324,6 +354,13 @@ namespace ProductMotionTimeline.Core
     public MechanicalConstraint ConstraintForDriven(Guid trackId)
     {
       return Constraints.FirstOrDefault(constraint => constraint.Enabled && constraint.DrivenTrackId == trackId);
+    }
+
+    public List<MechanicalConstraint> ConstraintsForDriver(Guid trackId)
+    {
+      return Constraints
+        .Where(constraint => constraint.Enabled && constraint.DriverTrackId == trackId)
+        .ToList();
     }
 
     public bool WouldCreateParentCycle(Guid childTrackId, Guid parentTrackId)

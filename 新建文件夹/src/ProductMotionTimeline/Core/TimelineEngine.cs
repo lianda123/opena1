@@ -324,7 +324,10 @@ namespace ProductMotionTimeline.Core
       int drivenTeeth,
       double phaseOffsetDegrees,
       double module,
-      double pressureAngleDegrees)
+      double pressureAngleDegrees,
+      double phaseOffsetDistance = 0.0,
+      RotationAxis drivenLinearAxis = RotationAxis.X,
+      double directionMultiplier = 1.0)
     {
       var model = Model(doc);
       var driver = model.FindTrack(driverTrackId);
@@ -348,6 +351,9 @@ namespace ProductMotionTimeline.Core
         Module = Math.Max(0.0, module),
         PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees),
         PhaseOffsetDegrees = phaseOffsetDegrees,
+        PhaseOffsetDistance = phaseOffsetDistance,
+        DrivenLinearAxis = drivenLinearAxis,
+        DirectionMultiplier = directionMultiplier < 0.0 ? -1.0 : 1.0,
         Enabled = true
       });
       SaveAndNotify(doc);
@@ -368,7 +374,10 @@ namespace ProductMotionTimeline.Core
       int drivenTeeth,
       double module,
       double pressureAngleDegrees,
-      double phaseOffsetDegrees)
+      double phaseOffsetDegrees,
+      double phaseOffsetDistance = 0.0,
+      RotationAxis drivenLinearAxis = RotationAxis.X,
+      double directionMultiplier = 1.0)
     {
       var model = Model(doc);
       var constraint = model.Constraints.FirstOrDefault(item => item.Id == constraintId);
@@ -380,6 +389,9 @@ namespace ProductMotionTimeline.Core
       constraint.Module = module;
       constraint.PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees);
       constraint.PhaseOffsetDegrees = phaseOffsetDegrees;
+      constraint.PhaseOffsetDistance = phaseOffsetDistance;
+      constraint.DrivenLinearAxis = drivenLinearAxis;
+      constraint.DirectionMultiplier = directionMultiplier < 0.0 ? -1.0 : 1.0;
       SaveAndNotify(doc);
       ApplyFrame(doc, model.CurrentFrame, false);
       return true;
@@ -422,6 +434,41 @@ namespace ProductMotionTimeline.Core
       var drivenOrigin = PivotOrigin(driven);
       var driverAxis = PivotAxis(driver);
       var drivenAxis = PivotAxis(driven);
+      if (constraint.Type == MechanicalConstraintType.RackPinion)
+      {
+        if (constraint.Module <= 0.0)
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = "齿轮-齿条传动必须设置模数";
+          return result;
+        }
+        result.Message = string.Format(
+          "齿轮-齿条有效：每转移动 {0:0.###}",
+          Math.PI * constraint.Module * constraint.DriverTeeth);
+        return result;
+      }
+
+      if (constraint.Type == MechanicalConstraintType.BevelGear)
+      {
+        var cross = Vector3d.CrossProduct(driverAxis, drivenAxis);
+        if (!cross.Unitize())
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = "锥齿轮两轴不能平行";
+          return result;
+        }
+        var axisDistance = Math.Abs((drivenOrigin - driverOrigin) * cross);
+        var tolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, constraint.Module * 0.05);
+        if (axisDistance > tolerance)
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = string.Format("锥齿轮两轴不相交，轴线最短距离 {0:0.###}", axisDistance);
+          return result;
+        }
+        result.Message = "锥齿轮轴线相交，传动比有效";
+        return result;
+      }
+
       if (Math.Abs(driverAxis * drivenAxis) < Math.Cos(Math.PI / 90.0))
       {
         result.Severity = ValidationSeverity.Error;
@@ -451,7 +498,8 @@ namespace ProductMotionTimeline.Core
         return result;
       }
 
-      result.ExpectedCenterDistance = constraint.Type == MechanicalConstraintType.ExternalGear
+      result.ExpectedCenterDistance = constraint.Type == MechanicalConstraintType.ExternalGear ||
+                                      constraint.Type == MechanicalConstraintType.HelicalGear
         ? constraint.Module * (constraint.DriverTeeth + constraint.DrivenTeeth) * 0.5
         : constraint.Module * Math.Abs(constraint.DrivenTeeth - constraint.DriverTeeth) * 0.5;
       var tolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, constraint.Module * 0.05);
@@ -465,6 +513,22 @@ namespace ProductMotionTimeline.Core
           result.ExpectedCenterDistance,
           error);
         return result;
+      }
+
+      if (constraint.Type == MechanicalConstraintType.HelicalGear)
+      {
+        GearParameters driverGear;
+        GearParameters drivenGear;
+        var driverInstance = ResolveInstance(doc, driver);
+        var drivenInstance = ResolveInstance(doc, driven);
+        if (GearPartMetadata.TryRead(driverInstance, out driverGear) &&
+            GearPartMetadata.TryRead(drivenInstance, out drivenGear) &&
+            Math.Sign(driverGear.HelixAngleDegrees) == Math.Sign(drivenGear.HelixAngleDegrees))
+        {
+          result.Severity = ValidationSeverity.Warning;
+          result.Message = "中心距正确；平行轴外啮合斜齿轮建议使用相反旋向";
+          return result;
+        }
       }
 
       if (Math.Min(constraint.DriverTeeth, constraint.DrivenTeeth) < 17 &&
@@ -551,6 +615,36 @@ namespace ProductMotionTimeline.Core
       model.LoopPlayback = loop;
       model.ClampSettings();
       SaveAndNotify(doc);
+    }
+
+    public static void UpdateTemplatePlacement(
+      RhinoDoc doc,
+      TemplatePlacementMode placement,
+      int gapFrames)
+    {
+      var model = Model(doc);
+      model.TemplatePlacement = placement;
+      model.TemplateGapFrames = Math.Max(0, gapFrames);
+      model.ClampSettings();
+      SaveAndNotify(doc);
+    }
+
+    public static int TemplateStartFrame(RhinoDoc doc, params AnimationTrack[] tracks)
+    {
+      var model = Model(doc);
+      if (model.TemplatePlacement == TemplatePlacementMode.CurrentFrame)
+        return model.CurrentFrame;
+      IEnumerable<AnimationTrack> candidates = model.TemplatePlacement == TemplatePlacementMode.AfterAllActions
+        ? model.Tracks
+        : tracks?.Where(track => track != null) ?? Enumerable.Empty<AnimationTrack>();
+      var lastFrame = candidates
+        .SelectMany(track => track.Keys)
+        .Select(key => key.Frame)
+        .DefaultIfEmpty(model.StartFrame)
+        .Max();
+      return lastFrame <= model.StartFrame
+        ? model.StartFrame
+        : lastFrame + model.TemplateGapFrames;
     }
 
     public static bool UpdateCurrentKeyRotationChannel(RhinoDoc doc, RotationAxis axis, double angleDegrees)
@@ -659,11 +753,21 @@ namespace ProductMotionTimeline.Core
           var driverAngle = AnimationMath.MechanicalAngleDegrees(
             driverPose,
             driver.RotationAxis);
-          var targetAngle = constraint.EvaluateDrivenAngle(driverAngle);
-          var capturedDrivenTwist = AnimationMath.ExtractAxisRotationDegrees(
-            pose.Rotation,
-            track.RotationAxis);
-          pose.AxisAngleDegrees = targetAngle - capturedDrivenTwist;
+          if (constraint.Type == MechanicalConstraintType.RackPinion)
+          {
+            var axis = AxisVector(constraint.DrivenLinearAxis);
+            var targetDistance = constraint.EvaluateRackDistance(driverAngle);
+            var currentDistance = pose.Translation * axis;
+            pose.Translation += axis * (targetDistance - currentDistance);
+          }
+          else
+          {
+            var targetAngle = constraint.EvaluateDrivenAngle(driverAngle);
+            var capturedDrivenTwist = AnimationMath.ExtractAxisRotationDegrees(
+              pose.Rotation,
+              track.RotationAxis);
+            pose.AxisAngleDegrees = targetAngle - capturedDrivenTwist;
+          }
         }
       }
 
@@ -739,6 +843,16 @@ namespace ProductMotionTimeline.Core
         plane = view.ActiveViewport.ConstructionPlane();
       plane.Origin = instance.Geometry.GetBoundingBox(true).Center;
       return Transform.PlaneToPlane(Plane.WorldXY, plane);
+    }
+
+    private static Vector3d AxisVector(RotationAxis axis)
+    {
+      switch (axis)
+      {
+        case RotationAxis.X: return Vector3d.XAxis;
+        case RotationAxis.Y: return Vector3d.YAxis;
+        default: return Vector3d.ZAxis;
+      }
     }
 
     private static void SetTrackTag(RhinoDoc doc, Guid objectId, Guid trackId)
