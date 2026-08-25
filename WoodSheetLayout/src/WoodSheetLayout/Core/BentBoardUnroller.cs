@@ -165,12 +165,24 @@ namespace WoodSheetLayout.Core
           continue;
         }
 
+        int sourceHoleLoopCount;
+        int mappedHoleLoopCount;
         var boundaryFollowing = BuildBoundaryFollowingCurves(
           boardObject,
           boardBrep,
           patch.FaceIndices,
           offsetByFace,
-          tolerance);
+          tolerance,
+          out sourceHoleLoopCount,
+          out mappedHoleLoopCount);
+        if (mappedHoleLoopCount < sourceHoleLoopCount)
+        {
+          warning = string.Format(
+            "卡扣孔/镂空提取不完整：原主表面有{0}个内环，仅{1}个完整映射到中性层；已停止输出缺孔零件。",
+            sourceHoleLoopCount,
+            mappedHoleLoopCount);
+          return false;
+        }
         var annotationFollowing = BuildFollowingCurves(
           objects,
           boardObject,
@@ -284,25 +296,6 @@ namespace WoodSheetLayout.Core
           continue;
         }
 
-        var joinedFlatBoundaries = JoinClosedLoops(flatBoardBoundaries, seamTolerance);
-        var outlineCurves = joinedFlatBoundaries.Count > 0
-          ? new[]
-          {
-            joinedFlatBoundaries
-              .OrderByDescending(CurvePlanarArea)
-              .ThenByDescending(CurveEnvelopeArea)
-              .First()
-          }
-          : flatBreps
-            .SelectMany(item => item.DuplicateNakedEdgeCurves(true, true) ?? new Curve[0])
-            .ToArray();
-        var outline = OutlineGeometry.Create(outlineCurves, settings.OutlineChordTolerance);
-        if (outline == null)
-        {
-          warning = "无法从中性层展开结果提取外轮廓。";
-          continue;
-        }
-
         var name = objects
           .Select(item => item.Attributes.Name)
           .FirstOrDefault(item => !string.IsNullOrWhiteSpace(item));
@@ -312,8 +305,6 @@ namespace WoodSheetLayout.Core
           Name = string.IsNullOrWhiteSpace(name) ? "折弯板_" + sequence.ToString("000") : name,
           BoardObject = boardObject,
           FlattenKind = FlattenKind.DevelopableMidSurface,
-          Outline = outline,
-          FlatBounds = outline.Bounds,
           SourceBounds = BoardAnalyzer.CombinedBounds(objects),
           ThicknessModelUnits = thickness,
           ThicknessMillimeters = thickness / Math.Max(settings.ModelUnitsPerMillimeter, 1e-12),
@@ -327,6 +318,7 @@ namespace WoodSheetLayout.Core
           boardObject,
           flatBreps,
           flatBoardBoundaries,
+          sourceHoleLoopCount,
           thickness,
           tolerance,
           out rebuiltHoleCount))
@@ -335,6 +327,15 @@ namespace WoodSheetLayout.Core
           return false;
         }
         AddFlatFollowingGeometry(created, matchedFollowing, thickness);
+        var actualFlatBounds = CombinedFlatGeometryBounds(created.FlatGeometry);
+        var outline = OutlineGeometry.CreateRectangle(actualFlatBounds);
+        if (outline == null)
+        {
+          warning = "铺平实体已生成，但无法读取实际输出几何的完整占位范围。";
+          return false;
+        }
+        created.FlatBounds = actualFlatBounds;
+        created.Outline = outline;
         created.Notes.Add(string.Format(
           "折弯件按中性层 K={0:0.###}（厚度×{0:0.###}）展开。",
           settings.NeutralFactor));
@@ -357,6 +358,7 @@ namespace WoodSheetLayout.Core
             rebuiltHoleCount));
         if (annotationFollowing.Count > 0)
           created.Notes.Add("附属曲线已从中性层抬升到铺平实体的上表面。");
+        created.Notes.Add("排版占位由最终铺平实体和上表面曲线的完整包围盒反算，确保全部几何位于边界框内。");
         if (textNeedsMirror)
           created.Notes.Add("已自动修正折弯件文字镜像方向。");
         if (annotationFollowing.Any(item => item.FromText))
@@ -422,6 +424,7 @@ namespace WoodSheetLayout.Core
       RhinoObject boardObject,
       IEnumerable<Brep> flatBreps,
       IEnumerable<Curve> flatBoardBoundaries,
+      int expectedHoleCount,
       double thickness,
       double tolerance,
       out int rebuiltHoleCount)
@@ -434,6 +437,7 @@ namespace WoodSheetLayout.Core
         if (!TryCreatePlanarBoardSolid(
           flatBrep,
           flatBoardBoundaries,
+          expectedHoleCount,
           thickness,
           tolerance,
           out planarSolid,
@@ -454,6 +458,7 @@ namespace WoodSheetLayout.Core
     private static bool TryCreatePlanarBoardSolid(
       Brep flatPatch,
       IEnumerable<Curve> flatBoardBoundaries,
+      int expectedHoleCount,
       double thickness,
       double tolerance,
       out Brep solid,
@@ -499,6 +504,8 @@ namespace WoodSheetLayout.Core
         .Where(item => CurveIsInside(item, outerLoop, loopTolerance))
         .OrderByDescending(CurvePlanarArea)
         .ToList();
+      if (holeLoops.Count < expectedHoleCount)
+        return false;
 
       // 一次性建立带修剪环的平面Brep，并按“外轮廓范围匹配＋内环最多”
       // 选择结果，不能再像2.2.1那样只按最大面积选到填满孔洞的面。
@@ -520,12 +527,12 @@ namespace WoodSheetLayout.Core
         .ThenByDescending(ComputeArea)
         .FirstOrDefault();
       if (planar != null &&
-          CountMaximumPlanarFaceInnerLoops(planar, loopTolerance) >= holeLoops.Count &&
+          CountMaximumPlanarFaceInnerLoops(planar, loopTolerance) >= Math.Max(holeLoops.Count, expectedHoleCount) &&
           TryCreateSymmetricSolid(planar, thickness, tolerance, out solid) &&
           BrepSharesExtents(solid, patchOuter, loopTolerance))
       {
         rebuiltHoleCount = CountMaximumPlanarFaceInnerLoops(solid, loopTolerance);
-        if (rebuiltHoleCount >= holeLoops.Count)
+        if (rebuiltHoleCount >= Math.Max(holeLoops.Count, expectedHoleCount))
           return true;
       }
 
@@ -538,7 +545,9 @@ namespace WoodSheetLayout.Core
         loopTolerance,
         out solid,
         out rebuiltHoleCount);
-      return rebuilt && BrepSharesExtents(solid, patchOuter, loopTolerance);
+      return rebuilt &&
+             rebuiltHoleCount >= expectedHoleCount &&
+             BrepSharesExtents(solid, patchOuter, loopTolerance);
     }
 
     private static bool TryCreateSymmetricSolid(
@@ -825,6 +834,22 @@ namespace WoodSheetLayout.Core
       }
     }
 
+    private static BoundingBox CombinedFlatGeometryBounds(
+      IEnumerable<FlatGeometryItem> flatGeometry)
+    {
+      var result = BoundingBox.Unset;
+      foreach (var item in flatGeometry ?? Enumerable.Empty<FlatGeometryItem>())
+      {
+        if (item == null || item.Geometry == null || !item.Geometry.IsValid)
+          continue;
+        var bounds = item.Geometry.GetBoundingBox(true);
+        if (!bounds.IsValid)
+          continue;
+        result = result.IsValid ? BoundingBox.Union(result, bounds) : bounds;
+      }
+      return result;
+    }
+
     private static List<FlatFollowingCurve> MatchFlatFollowingGeometry(
       IList<FollowingCurve> following,
       IEnumerable<Curve> flatCurves,
@@ -871,14 +896,100 @@ namespace WoodSheetLayout.Core
       Brep sourceBrep,
       IList<int> faceIndices,
       IDictionary<int, Brep> offsetByFace,
-      double tolerance)
+      double tolerance,
+      out int sourceHoleLoopCount,
+      out int mappedHoleLoopCount)
     {
       var result = new List<FollowingCurve>();
       var patchFaces = new HashSet<int>(faceIndices);
-      // 恢复2.2.1已经验证可铺平的逐边提取：外轮廓、开口卡槽和
-      // 封闭镂空都先保持为原修剪边，展开后再Join成完整闭合环。
+      var innerEdgeIndices = new HashSet<int>();
+      sourceHoleLoopCount = 0;
+      mappedHoleLoopCount = 0;
+      var loopTolerance = Math.Max(tolerance * 20.0, 1e-7);
+
+      // 封闭卡扣孔必须按原Brep内环完整映射。2.2.4逐边映射时，复杂孔
+      // 只要有一小段Pullback失败，该孔就会静默消失。边界展开现已与
+      // 压痕/图案隔离，因此可安全恢复完整内环；完整曲线映射失败时，
+      // 才逐Trim回退，并且只有所有片段重新闭合后才计为成功。
+      foreach (var faceIndex in faceIndices)
+      {
+        var sourceFace = sourceBrep.Faces[faceIndex];
+        Brep offsetFaceBrep;
+        var hasOffsetFace = offsetByFace.TryGetValue(faceIndex, out offsetFaceBrep) &&
+          offsetFaceBrep != null && offsetFaceBrep.Faces.Count > 0;
+        foreach (var loop in sourceFace.Loops.Where(item =>
+          item.LoopType == BrepLoopType.Inner))
+        {
+          sourceHoleLoopCount++;
+          foreach (var trim in loop.Trims)
+          {
+            if (trim.Edge != null)
+              innerEdgeIndices.Add(trim.Edge.EdgeIndex);
+          }
+          if (!hasOffsetFace)
+            continue;
+
+          Curve sourceLoop;
+          try
+          {
+            sourceLoop = loop.To3dCurve();
+          }
+          catch
+          {
+            sourceLoop = null;
+          }
+          Curve mappedLoop;
+          if (TryMapCurveToOffsetFace(
+            sourceLoop,
+            sourceFace,
+            offsetFaceBrep,
+            tolerance,
+            out mappedLoop) &&
+            JoinClosedLoops(new[] { mappedLoop }, loopTolerance).Count == 1)
+          {
+            result.Add(CreateBoundaryFollowingCurve(boardObject, mappedLoop, true));
+            mappedHoleLoopCount++;
+            continue;
+          }
+
+          var mappedSegments = new List<Curve>();
+          var complete = true;
+          foreach (var trim in loop.Trims)
+          {
+            if (trim.Edge == null)
+            {
+              complete = false;
+              break;
+            }
+            Curve mappedSegment;
+            if (!TryMapCurveToOffsetFace(
+              trim.Edge.DuplicateCurve(),
+              sourceFace,
+              offsetFaceBrep,
+              tolerance,
+              out mappedSegment))
+            {
+              complete = false;
+              break;
+            }
+            mappedSegments.Add(mappedSegment);
+          }
+          if (!complete ||
+              mappedSegments.Count == 0 ||
+              JoinClosedLoops(mappedSegments, loopTolerance).Count != 1)
+            continue;
+          foreach (var mappedSegment in mappedSegments)
+            result.Add(CreateBoundaryFollowingCurve(boardObject, mappedSegment, true));
+          mappedHoleLoopCount++;
+        }
+      }
+
+      // 外轮廓及开口卡槽仍按边逐段提取；内环边已在上方完整处理，
+      // 不能重复加入。直面与弯曲面之间的公共边仍只作为展开接缝。
       foreach (var edge in sourceBrep.Edges)
       {
+        if (innerEdgeIndices.Contains(edge.EdgeIndex))
+          continue;
         var selectedFaces = edge.AdjacentFaces()
           .Where(patchFaces.Contains)
           .Distinct()
@@ -899,16 +1010,25 @@ namespace WoodSheetLayout.Core
           tolerance,
           out mapped))
           continue;
-        result.Add(new FollowingCurve
-        {
-          Curve = mapped,
-          Attributes = boardObject.Attributes.Duplicate(),
-          SourceObjectId = boardObject.Id,
-          Name = boardObject.Attributes.Name,
-          IsBoardBoundary = true
-        });
+        result.Add(CreateBoundaryFollowingCurve(boardObject, mapped, false));
       }
       return result;
+    }
+
+    private static FollowingCurve CreateBoundaryFollowingCurve(
+      RhinoObject boardObject,
+      Curve curve,
+      bool isHoleBoundary)
+    {
+      return new FollowingCurve
+      {
+        Curve = curve,
+        Attributes = boardObject.Attributes.Duplicate(),
+        SourceObjectId = boardObject.Id,
+        Name = boardObject.Attributes.Name,
+        IsBoardBoundary = true,
+        IsHoleBoundary = isHoleBoundary
+      };
     }
 
     private static bool TryMapCurveToOffsetFace(
@@ -1520,6 +1640,7 @@ namespace WoodSheetLayout.Core
       public string Name { get; set; }
       public bool FromText { get; set; }
       public bool IsBoardBoundary { get; set; }
+      public bool IsHoleBoundary { get; set; }
     }
 
     private sealed class FlatFollowingCurve
