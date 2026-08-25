@@ -219,8 +219,14 @@ namespace ProductMotionTimeline.Commands
       if (drivenCount < 1)
         return Result.Cancel;
 
-      var driverAngle = TimelineEngine.EffectivePose(doc, driver, TimelineEngine.Model(doc).CurrentFrame).AxisAngleDegrees;
-      var drivenAngle = TimelineEngine.EffectivePose(doc, driven, TimelineEngine.Model(doc).CurrentFrame).AxisAngleDegrees;
+      var driverAngle = TimelineEngine.EffectiveMechanicalAngle(
+        doc,
+        driver,
+        TimelineEngine.Model(doc).CurrentFrame);
+      var drivenAngle = TimelineEngine.EffectiveMechanicalAngle(
+        doc,
+        driven,
+        TimelineEngine.Model(doc).CurrentFrame);
       var defaultConstraint = new MechanicalConstraint
       {
         Type = selectedType,
@@ -255,6 +261,119 @@ namespace ProductMotionTimeline.Commands
       getter.SetDefaultInteger(defaultValue);
       getter.Get();
       return getter.CommandResult() == Result.Success ? getter.Number() : -1;
+    }
+  }
+
+  internal static class QuickMechanicalBinding
+  {
+    internal static Result Run(RhinoDoc doc, MechanicalConstraintType type)
+    {
+      var driverInstance = TrackFactory.GetOrCreateGroupPart(
+        doc,
+        "选择主动件（可在现有Rhino组内单独选择；多选后按回车）",
+        false);
+      if (driverInstance == null)
+        return Result.Cancel;
+      var driver = TimelineEngine.AddTrack(doc, driverInstance);
+      if (driver == null)
+        return Result.Failure;
+      driverInstance.Select(false);
+
+      var drivenInstance = TrackFactory.GetOrCreateGroupPart(
+        doc,
+        "选择从动件（可在现有Rhino组内单独选择；多选后按回车）",
+        false);
+      if (drivenInstance == null)
+        return Result.Cancel;
+      var driven = TimelineEngine.AddTrack(doc, drivenInstance);
+      if (driven == null || driven.Id == driver.Id)
+      {
+        RhinoApp.WriteLine("ProductMotion：主动件和从动件必须是两个不同的动画部件。");
+        return Result.Nothing;
+      }
+
+      var driverCount = GetPositiveInteger(
+        type == MechanicalConstraintType.Belt
+          ? "输入主动轮齿数/直径比例"
+          : "输入主动齿轮齿数",
+        20);
+      if (driverCount < 1)
+        return Result.Cancel;
+      var drivenCount = GetPositiveInteger(
+        type == MechanicalConstraintType.Belt
+          ? "输入从动轮齿数/直径比例"
+          : "输入从动齿轮齿数",
+        20);
+      if (drivenCount < 1)
+        return Result.Cancel;
+
+      var frame = TimelineEngine.Model(doc).CurrentFrame;
+      var driverAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driver, frame);
+      var drivenAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driven, frame);
+      var template = new MechanicalConstraint
+      {
+        Type = type,
+        DriverTeeth = driverCount,
+        DrivenTeeth = drivenCount
+      };
+      var automaticPhase = drivenAngle - driverAngle * template.SignedRatio;
+
+      // 完成后重新选中主动轨道，用户只需给主动件卡帧。
+      TimelineEngine.SelectTrack(doc, driver.Id);
+      if (!TimelineEngine.AddMechanicalConstraint(
+        doc,
+        driver.Id,
+        driven.Id,
+        type,
+        driverCount,
+        drivenCount,
+        automaticPhase))
+        return Result.Failure;
+
+      Panels.OpenPanel(TimelinePanel.PanelId);
+      RhinoApp.WriteLine(
+        "ProductMotion：快速传动已完成。只需给主动件设置关键帧；普通Gumball绕轴旋转和连续转角都可驱动从动件。");
+      return Result.Success;
+    }
+
+    private static int GetPositiveInteger(string prompt, int defaultValue)
+    {
+      var getter = new GetInteger();
+      getter.SetCommandPrompt(prompt);
+      getter.SetLowerLimit(1, false);
+      getter.SetDefaultInteger(defaultValue);
+      getter.Get();
+      return getter.CommandResult() == Result.Success ? getter.Number() : -1;
+    }
+  }
+
+  public sealed class QuickExternalGearCommand : Command
+  {
+    public override string EnglishName => "PMTExternalGear";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      return QuickMechanicalBinding.Run(doc, MechanicalConstraintType.ExternalGear);
+    }
+  }
+
+  public sealed class QuickInternalGearCommand : Command
+  {
+    public override string EnglishName => "PMTInternalGear";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      return QuickMechanicalBinding.Run(doc, MechanicalConstraintType.InternalGear);
+    }
+  }
+
+  public sealed class QuickBeltCommand : Command
+  {
+    public override string EnglishName => "PMTBelt";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      return QuickMechanicalBinding.Run(doc, MechanicalConstraintType.Belt);
     }
   }
 

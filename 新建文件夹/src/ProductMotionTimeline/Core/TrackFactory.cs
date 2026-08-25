@@ -14,23 +14,38 @@ namespace ProductMotionTimeline.Core
   {
     public static InstanceObject GetOrCreateAnimationPart(RhinoDoc doc)
     {
-      return GetOrCreateAnimationPart(doc, false);
+      return GetOrCreateAnimationPart(doc, false, null, true);
     }
 
     public static InstanceObject GetOrCreateGroupPart(RhinoDoc doc)
     {
-      return GetOrCreateAnimationPart(doc, true);
+      return GetOrCreateAnimationPart(doc, true, null, true);
     }
 
-    private static InstanceObject GetOrCreateAnimationPart(RhinoDoc doc, bool selectInsideGroup)
+    public static InstanceObject GetOrCreateGroupPart(
+      RhinoDoc doc,
+      string prompt,
+      bool enablePreSelect)
+    {
+      return GetOrCreateAnimationPart(doc, true, prompt, enablePreSelect);
+    }
+
+    private static InstanceObject GetOrCreateAnimationPart(
+      RhinoDoc doc,
+      bool selectInsideGroup,
+      string prompt,
+      bool enablePreSelect)
     {
       var getter = new GetObject();
-      getter.SetCommandPrompt(selectInsideGroup
-        ? "选择组内需要单独运动的零件（不会自动选中整组，可多选）"
-        : "选择一个完整运动部件（可多选，插件会合并为动画块）");
+      getter.SetCommandPrompt(string.IsNullOrWhiteSpace(prompt)
+        ? (selectInsideGroup
+          ? "选择组内需要单独运动的零件（不会自动选中整组，可多选）"
+          : "选择一个完整运动部件（可多选，插件会合并为动画块）")
+        : prompt);
       getter.GroupSelect = !selectInsideGroup;
       getter.SubObjectSelect = false;
       getter.GeometryFilter = ObjectType.AnyObject;
+      getter.EnablePreSelect(enablePreSelect, true);
       getter.GetMultiple(1, 0);
       if (getter.CommandResult() != Result.Success)
         return null;

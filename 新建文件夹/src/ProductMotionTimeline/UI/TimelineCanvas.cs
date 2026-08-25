@@ -19,8 +19,13 @@ namespace ProductMotionTimeline.UI
     private readonly SolidBrush _selectedRow = new SolidBrush(Color.FromArgb(52, 58, 68));
     private readonly SolidBrush _text = new SolidBrush(Color.FromArgb(220, 223, 228));
     private readonly SolidBrush _mutedText = new SolidBrush(Color.FromArgb(145, 150, 158));
-    private readonly SolidBrush _keyBrush = new SolidBrush(Color.FromArgb(255, 177, 58));
+    private readonly SolidBrush _smoothKeyBrush = new SolidBrush(Color.FromArgb(255, 177, 58));
+    private readonly SolidBrush _linearKeyBrush = new SolidBrush(Color.FromArgb(76, 184, 255));
+    private readonly SolidBrush _constantKeyBrush = new SolidBrush(Color.FromArgb(205, 126, 255));
     private readonly SolidBrush _selectedKeyBrush = new SolidBrush(Color.FromArgb(255, 226, 124));
+    private readonly Pen _smoothSegmentPen = new Pen(Color.FromArgb(207, 140, 47), 2f);
+    private readonly Pen _linearSegmentPen = new Pen(Color.FromArgb(58, 145, 204), 2f);
+    private readonly Pen _constantSegmentPen = new Pen(Color.FromArgb(151, 87, 194), 2f);
     private readonly Pen _gridPen = new Pen(Color.FromArgb(67, 70, 77), 1f);
     private readonly Pen _minorGridPen = new Pen(Color.FromArgb(49, 52, 58), 1f);
     private readonly Pen _playheadPen = new Pen(Color.FromArgb(255, 86, 77), 2f);
@@ -101,6 +106,18 @@ namespace ProductMotionTimeline.UI
           new PointF(10 + depth * 13, y + 6),
           prefix + TrimName(track.Name, depth, driven));
 
+        for (var keyIndex = 0; keyIndex < track.Keys.Count - 1; keyIndex++)
+        {
+          var left = track.Keys[keyIndex];
+          var right = track.Keys[keyIndex + 1];
+          graphics.DrawLine(
+            SegmentPen(left.Interpolation),
+            FrameToX(left.Frame, model, width),
+            y + RowHeight / 2f,
+            FrameToX(right.Frame, model, width),
+            y + RowHeight / 2f);
+        }
+
         foreach (var key in track.Keys)
         {
           var frame = track.Id == _dragTrackId && key.Frame == _dragOriginalFrame
@@ -108,8 +125,38 @@ namespace ProductMotionTimeline.UI
             : key.Frame;
           var x = FrameToX(frame, model, width);
           var keySelected = selected && frame == model.CurrentFrame;
-          DrawDiamond(graphics, x, y + RowHeight / 2f, keySelected ? _selectedKeyBrush : _keyBrush);
+          DrawDiamond(
+            graphics,
+            x,
+            y + RowHeight / 2f,
+            keySelected ? _selectedKeyBrush : KeyBrush(key.Interpolation));
         }
+      }
+    }
+
+    private Brush KeyBrush(InterpolationMode mode)
+    {
+      switch (mode)
+      {
+        case InterpolationMode.Linear:
+          return _linearKeyBrush;
+        case InterpolationMode.Constant:
+          return _constantKeyBrush;
+        default:
+          return _smoothKeyBrush;
+      }
+    }
+
+    private Pen SegmentPen(InterpolationMode mode)
+    {
+      switch (mode)
+      {
+        case InterpolationMode.Linear:
+          return _linearSegmentPen;
+        case InterpolationMode.Constant:
+          return _constantSegmentPen;
+        default:
+          return _smoothSegmentPen;
       }
     }
 

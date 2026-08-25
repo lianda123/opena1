@@ -1,10 +1,19 @@
-# ProductMotion Timeline 0.2（Rhino 7 / 8）
+# ProductMotion Timeline 0.2.1（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。交互方式接近 Blender：在某一帧摆好部件姿态、插入关键帧，再播放或拖动时间轴查看结果。0.2 新增父子层级、Rhino 组内零件独立动画，以及齿轮/皮带机械传动约束。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。交互方式接近 Blender：在某一帧摆好部件姿态、插入关键帧，再播放或拖动时间轴查看结果。0.2.1 让插值切换即时生效，并补通普通 Gumball 旋转到齿轮/皮带从动件的驱动链，同时增加三种直接传动命令。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.2 主要能力
+## 0.2.1 主要改进
+
+- 插值不再只是插帧前的选项：在某个关键帧上切换后立即修改“当前关键帧→下一关键帧”的运动。
+- `平滑：缓入缓出`为起步慢、中段快、到达前减速；`线性：匀速`为恒定速度；`阶梯：保持后跳变`会保持当前姿态，到下一关键帧瞬间切换。
+- 时间轴用橙色、蓝色、紫色线段分别显示平滑、线性、阶梯段。
+- 外啮合齿轮、内啮合齿轮、皮带传动分别提供直接按钮；依次选择主动件、从动件并输入齿数/比例即可，相位自动保持当前姿态。
+- 主动件可直接使用普通 Gumball 绕连续轴旋转后卡帧，不再强制手动填写“连续转角”；多圈旋转仍可输入 `360°`、`720°`。
+- 串联齿轮会读取上一级从动件的真实有效角度，继续驱动下一级；循环驱动仍会被拒绝。
+
+## 主要能力
 
 - Rhino 7：`.NET Framework 4.8`；Rhino 8：`.NET 8.0`；同一套源码多目标编译。
 - Rhino 停靠面板：播放、暂停、逐帧、首尾帧、拖动时间轴、循环、FPS、起止帧。
@@ -43,11 +52,13 @@
 
 ### 齿轮自动传动
 
-1. 主动齿轮和从动齿轮分别建立轨道，分别设置真实轴心和连续旋转轴。
-2. 只给主动齿轮设置连续轴转角关键帧，例如 0 帧 `0°`、60 帧 `360°`。
-3. 在时间轴中选中**主动件轨道**，点击“绑定传动”。
-4. 在视口选择从动件，选择 `ExternalGear`、`InternalGear` 或 `Belt`。
-5. 输入主动/从动齿数（皮带可输入对应节数或等比例整数）。默认相位会保持绑定瞬间的当前姿态。
+1. 点击时间轴里的“外啮合齿轮”“内啮合齿轮”或“皮带传动”。
+2. 选择主动件；零件处于 Rhino Group 内也只会采用本次选择的对象。
+3. 选择从动件。
+4. 输入主动/从动齿数；皮带可输入齿数、直径比例或任意等比例整数。插件自动保持当前相位。
+5. 只给主动件设置关键帧。普通旋转可直接用 Gumball 绕所选连续轴旋转；需要整圈或多圈时输入 `360°`、`720°`。
+
+新建轨道的默认轴心是零件包围盒中心、默认连续轴为当前工作平面 Z。齿轮孔不在包围盒中心时，再使用“设轴心”捕捉真实轴孔中心。
 
 外啮合齿轮使用：
 
@@ -68,6 +79,9 @@
 | `PMTSetParent` | 给当前选中轨道设置父级 |
 | `PMTClearParent` | 清除当前轨道的父级关系 |
 | `PMTBindMechanical` | 建立齿轮/皮带主动—从动约束 |
+| `PMTExternalGear` | 快速建立外啮合齿轮传动 |
+| `PMTInternalGear` | 快速建立内啮合齿轮传动 |
+| `PMTBelt` | 快速建立皮带传动 |
 | `PMTDeleteMechanical` | 解除当前轨道的从动约束 |
 | `PMTRebind` | 将丢失的轨道重新绑定到块实例 |
 | `PMTPlay` | 播放/暂停 |
@@ -91,9 +105,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.2.0-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.2.0-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.2.0-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.2.1-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.2.1-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.2.1-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

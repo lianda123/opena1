@@ -32,7 +32,12 @@ namespace ProductMotionTimeline.UI
     public TimelinePanel()
     {
       _instance = this;
-      _interpolation.DataStore = new[] { "平滑", "线性", "阶梯" };
+      _interpolation.DataStore = new[]
+      {
+        "平滑：缓入缓出",
+        "线性：匀速",
+        "阶梯：保持后跳变"
+      };
       _interpolation.SelectedIndex = 0;
       _rotationAxis.DataStore = new[] { "X", "Y", "Z" };
       _rotationAxis.SelectedIndex = 2;
@@ -81,12 +86,16 @@ namespace ProductMotionTimeline.UI
         new Label { Text = "转角°" }, _axisAngle,
         Button("删除轨道", DeleteTrack));
 
-      var relationshipTools = Horizontal(
+      var hierarchyTools = Horizontal(
         new Label { Text = "父子层级" },
         Button("设父级", () => RhinoApp.RunScript("_PMTSetParent", false)),
-        Button("清除父级", () => RhinoApp.RunScript("_PMTClearParent", false)),
+        Button("清除父级", () => RhinoApp.RunScript("_PMTClearParent", false)));
+
+      var mechanicalTools = Horizontal(
         new Label { Text = "机械约束" },
-        Button("绑定传动", () => RhinoApp.RunScript("_PMTBindMechanical", false)),
+        Button("外啮合齿轮", () => RhinoApp.RunScript("_PMTExternalGear", false)),
+        Button("内啮合齿轮", () => RhinoApp.RunScript("_PMTInternalGear", false)),
+        Button("皮带传动", () => RhinoApp.RunScript("_PMTBelt", false)),
         Button("解除从动", () => RhinoApp.RunScript("_PMTDeleteMechanical", false)));
 
       var scroll = new Scrollable { Content = _canvas, Border = BorderType.None };
@@ -100,7 +109,8 @@ namespace ProductMotionTimeline.UI
       root.Rows.Add(new TableRow(settings));
       root.Rows.Add(new TableRow(new TableCell(scroll, true)) { ScaleHeight = true });
       root.Rows.Add(new TableRow(trackTools));
-      root.Rows.Add(new TableRow(relationshipTools));
+      root.Rows.Add(new TableRow(hierarchyTools));
+      root.Rows.Add(new TableRow(mechanicalTools));
       root.Rows.Add(new TableRow(_relationship));
       root.Rows.Add(new TableRow(_status));
       Content = root;
@@ -121,6 +131,7 @@ namespace ProductMotionTimeline.UI
       _end.ValueChanged += (sender, args) => UpdateSettings();
       _fps.ValueChanged += (sender, args) => UpdateSettings();
       _loop.CheckedChanged += (sender, args) => UpdateSettings();
+      _interpolation.SelectedIndexChanged += (sender, args) => UpdateInterpolation();
       _rotationAxis.SelectedIndexChanged += (sender, args) => UpdateRotationChannel();
       _axisAngle.ValueChanged += (sender, args) => UpdateRotationChannel();
     }
@@ -150,7 +161,7 @@ namespace ProductMotionTimeline.UI
         _interpolation.SelectedIndex = ToDropDownIndex(key.Interpolation);
         _axisAngle.Value = constraint == null
           ? key.Pose.AxisAngleDegrees
-          : TimelineEngine.EffectivePose(doc, track, model.CurrentFrame).AxisAngleDegrees;
+          : TimelineEngine.EffectiveMechanicalAngle(doc, track, model.CurrentFrame);
       }
       else
       {
@@ -199,6 +210,19 @@ namespace ProductMotionTimeline.UI
       var axis = (RotationAxis)Math.Max(0, Math.Min(2, _rotationAxis.SelectedIndex));
       if (!TimelineEngine.UpdateCurrentKeyRotationChannel(RhinoDoc.ActiveDoc, axis, _axisAngle.Value))
         _status.Text = "请先在当前帧插入关键帧，再设置连续轴转角。";
+    }
+
+    private void UpdateInterpolation()
+    {
+      if (_suppress)
+        return;
+      var mode = SelectedInterpolation();
+      if (!TimelineEngine.UpdateCurrentKeyInterpolation(RhinoDoc.ActiveDoc, mode))
+      {
+        _status.Text = "当前帧没有关键帧；所选插值会在下一次插入关键帧时使用。";
+        return;
+      }
+      _status.Text = InterpolationDescription(mode) + "，已应用到当前关键帧至下一关键帧。";
     }
 
     private void InsertKey()
@@ -330,6 +354,19 @@ namespace ProductMotionTimeline.UI
         case InterpolationMode.Linear: return 1;
         case InterpolationMode.Constant: return 2;
         default: return 0;
+      }
+    }
+
+    private static string InterpolationDescription(InterpolationMode mode)
+    {
+      switch (mode)
+      {
+        case InterpolationMode.Linear:
+          return "线性：全程匀速运动";
+        case InterpolationMode.Constant:
+          return "阶梯：保持当前姿态，到下一关键帧瞬间跳变";
+        default:
+          return "平滑：起步慢、中段快、到达前减速";
       }
     }
 

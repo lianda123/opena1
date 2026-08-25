@@ -220,5 +220,44 @@ namespace ProductMotionTimeline.Core
       t = Math.Max(0.0, Math.Min(1.0, t));
       return t * t * (3.0 - 2.0 * t);
     }
+
+    public static double ExtractAxisRotationDegrees(
+      QuaternionValue rotation,
+      RotationAxis axis)
+    {
+      var q = rotation.Normalized();
+      double component;
+      switch (axis)
+      {
+        case RotationAxis.Y:
+          component = q.Y;
+          break;
+        case RotationAxis.Z:
+          component = q.Z;
+          break;
+        default:
+          component = q.X;
+          break;
+      }
+
+      var twistLength = Math.Sqrt(q.W * q.W + component * component);
+      if (twistLength < 1e-12)
+        return 0.0;
+      var angle = 2.0 * Math.Atan2(
+        component / twistLength,
+        q.W / twistLength) * 180.0 / Math.PI;
+      while (angle > 180.0)
+        angle -= 360.0;
+      while (angle <= -180.0)
+        angle += 360.0;
+      return angle;
+    }
+
+    public static double MechanicalAngleDegrees(Pose pose, RotationAxis axis)
+    {
+      if (pose == null)
+        return 0.0;
+      return pose.AxisAngleDegrees + ExtractAxisRotationDegrees(pose.Rotation, axis);
+    }
   }
 }

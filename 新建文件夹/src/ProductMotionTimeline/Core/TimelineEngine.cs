@@ -379,6 +379,20 @@ namespace ProductMotionTimeline.Core
       return true;
     }
 
+    public static bool UpdateCurrentKeyInterpolation(
+      RhinoDoc doc,
+      InterpolationMode interpolation)
+    {
+      var model = Model(doc);
+      var key = model.SelectedTrack?.FindKey(model.CurrentFrame);
+      if (key == null)
+        return false;
+      key.Interpolation = interpolation;
+      TimelineRepository.Save(doc);
+      Notify();
+      return true;
+    }
+
     public static AnimationTrack FindTrackForInstance(RhinoDoc doc, InstanceObject instance)
     {
       if (doc == null || instance == null)
@@ -393,6 +407,17 @@ namespace ProductMotionTimeline.Core
     {
       var model = Model(doc);
       return EvaluateEffectivePose(model, track, frame, new Dictionary<Guid, Pose>(), new HashSet<Guid>());
+    }
+
+    public static double EffectiveMechanicalAngle(
+      RhinoDoc doc,
+      AnimationTrack track,
+      double frame)
+    {
+      if (track == null)
+        return 0.0;
+      var pose = EffectivePose(doc, track, frame);
+      return AnimationMath.MechanicalAngleDegrees(pose, track.RotationAxis);
     }
 
     public static InstanceObject ResolveInstance(RhinoDoc doc, AnimationTrack track)
@@ -443,7 +468,14 @@ namespace ProductMotionTimeline.Core
         if (driver != null)
         {
           var driverPose = EvaluateEffectivePose(model, driver, frame, cache, visiting);
-          pose.AxisAngleDegrees = constraint.EvaluateDrivenAngle(driverPose.AxisAngleDegrees);
+          var driverAngle = AnimationMath.MechanicalAngleDegrees(
+            driverPose,
+            driver.RotationAxis);
+          var targetAngle = constraint.EvaluateDrivenAngle(driverAngle);
+          var capturedDrivenTwist = AnimationMath.ExtractAxisRotationDegrees(
+            pose.Rotation,
+            track.RotationAxis);
+          pose.AxisAngleDegrees = targetAngle - capturedDrivenTwist;
         }
       }
 

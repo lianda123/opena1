@@ -10,6 +10,7 @@
 | MechanismMaker 1.0.0 | 齿轮、齿条、凸轮、曲柄、四连杆、棘轮和日内瓦机构 | [下载 MechanismMaker 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/MechanismMaker-1.0.0-rhino7-rhino8.zip) |
 | WoodExport 1.0.0 | 零件编号、刻字、BOM、按厚度输出 DXF/DWG | [下载 WoodExport 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/WoodExport-1.0.0-rhino7-rhino8.zip) |
 | ExplodeBook 1.0.0 | 爆炸图、装配顺序、箭头、编号和 A4/A3 说明书页面 | [下载 ExplodeBook 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/ExplodeBook-1.0.0-rhino7-rhino8.zip) |
+| ProductMotion Timeline 0.2.1 | 关键帧时间轴、父子级及快速齿轮/皮带联动 | [下载 ProductMotion Timeline 双版本安装包](https://github.com/lianda123/opena1/raw/main/downloads/ProductMotionTimeline-0.2.1-rhino7-rhino8.zip) |
 | WoodThicknessAdjuster 1.0.1 | 点击木板自动调整为1.5/2/2.5/3/4/5mm板厚，并锁定实际点击面 | [下载 WoodThicknessAdjuster 双版本安装包](https://github.com/lianda123/opena1/raw/main/WoodThicknessAdjuster/releases/WoodThicknessAdjuster-1.0.1-rhino7-rhino8.zip) |
 
 ## 安装方法
@@ -30,3 +31,4 @@
 - [MechanismMaker](./MechanismMaker)
 - [WoodSheetLayout](./WoodSheetLayout)
 - [WoodThicknessAdjuster](./WoodThicknessAdjuster)
+- [ProductMotion Timeline](./新建文件夹)
