@@ -55,13 +55,13 @@ $common = @(
   (Join-Path $dist "manifest.yml")
 )
 
-$rhino7Zip = Join-Path $dist "WoodThicknessAdjuster-1.0.0-rhino7.zip"
+$rhino7Zip = Join-Path $dist "WoodThicknessAdjuster-1.0.1-rhino7.zip"
 Compress-Archive -Path (@((Join-Path $dist "net48")) + $common) -DestinationPath $rhino7Zip -Force
 
-$rhino8Zip = Join-Path $dist "WoodThicknessAdjuster-1.0.0-rhino8.zip"
+$rhino8Zip = Join-Path $dist "WoodThicknessAdjuster-1.0.1-rhino8.zip"
 Compress-Archive -Path (@((Join-Path $dist "net8.0")) + $common) -DestinationPath $rhino8Zip -Force
 
-$combinedZip = Join-Path $dist "WoodThicknessAdjuster-1.0.0-rhino7-rhino8.zip"
+$combinedZip = Join-Path $dist "WoodThicknessAdjuster-1.0.1-rhino7-rhino8.zip"
 Compress-Archive -Path @(
   (Join-Path $dist "net48"),
   (Join-Path $dist "net8.0"),
@@ -71,7 +71,7 @@ Compress-Archive -Path @(
   (Join-Path $dist "manifest.yml")
 ) -DestinationPath $combinedZip -Force
 
-Write-Host "WoodThicknessAdjuster 1.0.0编译完成。" -ForegroundColor Green
+Write-Host "WoodThicknessAdjuster 1.0.1编译完成。" -ForegroundColor Green
 Write-Host "Rhino 7: $rhino7Zip"
 Write-Host "Rhino 8: $rhino8Zip"
 Write-Host "双版本: $combinedZip"

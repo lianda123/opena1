@@ -12,6 +12,7 @@ namespace WoodThicknessAdjuster.Core
   {
     public int FirstFaceIndex { get; set; }
     public int SecondFaceIndex { get; set; }
+    public int PreferredAnchorFaceIndex { get; set; } = -1;
     public Plane FirstPlane { get; set; }
     public Plane SecondPlane { get; set; }
     public Point3d FirstCentroid { get; set; }

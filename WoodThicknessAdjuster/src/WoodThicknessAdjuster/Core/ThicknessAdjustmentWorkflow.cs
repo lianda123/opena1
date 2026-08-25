@@ -72,15 +72,6 @@ namespace WoodThicknessAdjuster.Core
           if (clickedObject == null)
             continue;
 
-          PartTarget part;
-          if (!TryResolvePart(doc, clickedObject, tolerance, out part))
-          {
-            RhinoApp.WriteLine(
-              "WoodThicknessAdjuster：未找到具有两张平行主表面的平直闭合Brep/Extrusion木板；折弯板不会强制缩放。");
-            clickedObject.Select(false);
-            continue;
-          }
-
           Point3d selectionPoint;
           try
           {
@@ -89,6 +80,20 @@ namespace WoodThicknessAdjuster.Core
           catch
           {
             selectionPoint = Point3d.Unset;
+          }
+
+          PartTarget part;
+          if (!TryResolvePart(
+            doc,
+            clickedObject,
+            tolerance,
+            selectionPoint,
+            out part))
+          {
+            RhinoApp.WriteLine(
+              "WoodThicknessAdjuster：未找到具有两张平行主表面的平直闭合Brep/Extrusion木板；折弯板不会强制缩放。");
+            clickedObject.Select(false);
+            continue;
           }
 
           var currentMillimeters = part.Analysis.ThicknessModelUnits /
@@ -161,6 +166,7 @@ namespace WoodThicknessAdjuster.Core
       RhinoDoc doc,
       RhinoObject clickedObject,
       double tolerance,
+      Point3d selectionPoint,
       out PartTarget target)
     {
       target = null;
@@ -181,7 +187,7 @@ namespace WoodThicknessAdjuster.Core
           continue;
 
         var boards = members
-          .Select(item => AnalyzeObject(item, tolerance))
+          .Select(item => AnalyzeObject(item, tolerance, selectionPoint))
           .Where(item => item != null)
           .OrderByDescending(item => item.Analysis.Score)
           .ToList();
@@ -211,7 +217,7 @@ namespace WoodThicknessAdjuster.Core
         return true;
       }
 
-      var clicked = AnalyzeObject(clickedObject, tolerance);
+      var clicked = AnalyzeObject(clickedObject, tolerance, selectionPoint);
       if (clicked == null)
         return false;
       target = new PartTarget
@@ -223,12 +229,19 @@ namespace WoodThicknessAdjuster.Core
       return true;
     }
 
-    private static AnalyzedObject AnalyzeObject(RhinoObject rhinoObject, double tolerance)
+    private static AnalyzedObject AnalyzeObject(
+      RhinoObject rhinoObject,
+      double tolerance,
+      Point3d selectionPoint)
     {
       if (rhinoObject == null)
         return null;
       ThicknessAnalysis analysis;
-      if (!ThicknessAnalyzer.TryAnalyze(rhinoObject.Geometry, tolerance, out analysis))
+      if (!ThicknessAnalyzer.TryAnalyze(
+        rhinoObject.Geometry,
+        tolerance,
+        selectionPoint,
+        out analysis))
         return null;
       return new AnalyzedObject
       {
@@ -269,17 +282,22 @@ namespace WoodThicknessAdjuster.Core
       }
       else
       {
-        var useFirst = true;
-        if (selectionPoint.IsValid)
+        var useFirst = analysis.PreferredAnchorFaceIndex == analysis.FirstFaceIndex;
+        if (analysis.PreferredAnchorFaceIndex != analysis.FirstFaceIndex &&
+          analysis.PreferredAnchorFaceIndex != analysis.SecondFaceIndex)
         {
-          var firstDistance = Math.Abs(analysis.FirstPlane.DistanceTo(selectionPoint));
-          var secondDistance = Math.Abs(analysis.SecondPlane.DistanceTo(selectionPoint));
-          if (Math.Abs(firstDistance - secondDistance) <= 1e-9)
+          useFirst = true;
+          if (selectionPoint.IsValid)
           {
-            firstDistance = selectionPoint.DistanceTo(analysis.FirstCentroid);
-            secondDistance = selectionPoint.DistanceTo(analysis.SecondCentroid);
+            var firstDistance = Math.Abs(analysis.FirstPlane.DistanceTo(selectionPoint));
+            var secondDistance = Math.Abs(analysis.SecondPlane.DistanceTo(selectionPoint));
+            if (Math.Abs(firstDistance - secondDistance) <= 1e-9)
+            {
+              firstDistance = selectionPoint.DistanceTo(analysis.FirstCentroid);
+              secondDistance = selectionPoint.DistanceTo(analysis.SecondCentroid);
+            }
+            useFirst = firstDistance <= secondDistance;
           }
-          useFirst = firstDistance <= secondDistance;
         }
         var anchor = useFirst ? analysis.FirstPlane : analysis.SecondPlane;
         scalingPlane = new Plane(anchor.Origin, anchor.XAxis, anchor.YAxis);

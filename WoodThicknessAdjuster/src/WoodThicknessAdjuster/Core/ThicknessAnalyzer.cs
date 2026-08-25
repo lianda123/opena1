@@ -10,6 +10,7 @@ namespace WoodThicknessAdjuster.Core
     internal static bool TryAnalyze(
       GeometryBase geometry,
       double tolerance,
+      Point3d selectionPoint,
       out ThicknessAnalysis analysis)
     {
       analysis = null;
@@ -40,7 +41,7 @@ namespace WoodThicknessAdjuster.Core
       var diagonal = brep.GetBoundingBox(true).Diagonal.Length;
       var maximumArea = faces.Max(item => item.Area);
       var minimumParallel = Math.Cos(2.0 * Math.PI / 180.0);
-      ThicknessAnalysis best = null;
+      var candidates = new List<PairCandidate>();
 
       for (var leftIndex = 0; leftIndex < faces.Count - 1; leftIndex++)
       {
@@ -68,25 +69,83 @@ namespace WoodThicknessAdjuster.Core
           // 排除窄侧壁，同时允许布尔孔洞造成上下表面面积略有差异。
           var score = smallerArea * (0.5 + 0.5 * areaBalance) /
             Math.Max(distance, tolerance);
-          if (best != null && score <= best.Score)
-            continue;
+          var firstSelectionDistance = DistanceToTrimmedFace(
+            brep.Faces[left.FaceIndex],
+            left.Plane,
+            selectionPoint);
+          var secondSelectionDistance = DistanceToTrimmedFace(
+            brep.Faces[right.FaceIndex],
+            right.Plane,
+            selectionPoint);
+          var useFirstAsAnchor = firstSelectionDistance <= secondSelectionDistance;
 
-          best = new ThicknessAnalysis
+          candidates.Add(new PairCandidate
           {
-            FirstFaceIndex = left.FaceIndex,
-            SecondFaceIndex = right.FaceIndex,
-            FirstPlane = left.Plane,
-            SecondPlane = right.Plane,
-            FirstCentroid = left.Centroid,
-            SecondCentroid = right.Centroid,
-            ThicknessModelUnits = distance,
-            Score = score
-          };
+            Analysis = new ThicknessAnalysis
+            {
+              FirstFaceIndex = left.FaceIndex,
+              SecondFaceIndex = right.FaceIndex,
+              FirstPlane = left.Plane,
+              SecondPlane = right.Plane,
+              FirstCentroid = left.Centroid,
+              SecondCentroid = right.Centroid,
+              ThicknessModelUnits = distance,
+              Score = score
+            },
+            SelectionDistance = Math.Min(
+              firstSelectionDistance,
+              secondSelectionDistance),
+            PreferredAnchorFaceIndex = useFirstAsAnchor
+              ? left.FaceIndex
+              : right.FaceIndex,
+            PreferredAnchorArea = useFirstAsAnchor ? left.Area : right.Area
+          });
         }
       }
 
-      analysis = best;
+      if (candidates.Count == 0)
+        return false;
+
+      // 先使用真正包含点击点的修剪面，再在该面的平行候选中选主表面对。
+      // 这样即使大板面被卡扣孔切碎，也不会退回到面积完整的侧面。
+      var selectionTolerance = Math.Max(tolerance * 25.0, diagonal * 1e-7);
+      var clickedCandidate = candidates
+        .Where(item => item.SelectionDistance <= selectionTolerance)
+        .OrderBy(item => item.SelectionDistance)
+        .ThenByDescending(item => item.PreferredAnchorArea)
+        .ThenByDescending(item => item.Analysis.Score)
+        .FirstOrDefault();
+      if (clickedCandidate != null)
+      {
+        analysis = clickedCandidate.Analysis;
+        analysis.PreferredAnchorFaceIndex = clickedCandidate.PreferredAnchorFaceIndex;
+        return true;
+      }
+
+      // 曲线、文字等组内附属对象的点击点不一定落在板面上，此时保留旧的
+      // 主表面自动识别作为安全回退。
+      analysis = candidates
+        .OrderByDescending(item => item.Analysis.Score)
+        .Select(item => item.Analysis)
+        .First();
       return analysis != null;
+    }
+
+    private static double DistanceToTrimmedFace(
+      BrepFace face,
+      Plane plane,
+      Point3d point)
+    {
+      if (face == null || !point.IsValid)
+        return double.MaxValue;
+
+      var projected = plane.ClosestPoint(point);
+      double u;
+      double v;
+      if (!face.ClosestPoint(projected, out u, out v) ||
+        face.IsPointOnFace(u, v) == PointFaceRelation.Exterior)
+        return double.MaxValue;
+      return point.DistanceTo(projected);
     }
 
     private static Brep ToBrep(GeometryBase geometry)
@@ -104,6 +163,14 @@ namespace WoodThicknessAdjuster.Core
       public Plane Plane { get; set; }
       public Point3d Centroid { get; set; }
       public double Area { get; set; }
+    }
+
+    private sealed class PairCandidate
+    {
+      public ThicknessAnalysis Analysis { get; set; }
+      public double SelectionDistance { get; set; }
+      public int PreferredAnchorFaceIndex { get; set; }
+      public double PreferredAnchorArea { get; set; }
     }
   }
 }

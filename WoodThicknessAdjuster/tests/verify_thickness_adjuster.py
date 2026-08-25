@@ -28,7 +28,9 @@ def main():
     for token in [
         "AreaMassProperties.Compute", "TryGetPlane", "Vector3d.Multiply",
         "left.Area", "right.Area", "smallerArea", "ThicknessModelUnits",
-        "Extrusion", "IsSolid", "Math.Cos(2.0 * Math.PI / 180.0)"
+        "Extrusion", "IsSolid", "Math.Cos(2.0 * Math.PI / 180.0)",
+        "DistanceToTrimmedFace", "face.IsPointOnFace", "PointFaceRelation.Exterior",
+        "PreferredAnchorFaceIndex", "selectionPoint"
     ]:
         assert token in analyzer, token
 
@@ -52,7 +54,7 @@ def main():
 
     assert "net48;net8.0" in project
     assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3001"' in project
-    assert '<Version>1.0.0</Version>' in project
+    assert '<Version>1.0.1</Version>' in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -62,7 +64,7 @@ def main():
     for token in ["保持点击面", "中心对称", "1.5mm", "2.5mm", "5mm", "Group"]:
         assert token in readme, token
 
-    print("WoodThicknessAdjuster 1.0.0 workflow checks passed.")
+    print("WoodThicknessAdjuster 1.0.1 workflow checks passed.")
 
 
 if __name__ == "__main__":
