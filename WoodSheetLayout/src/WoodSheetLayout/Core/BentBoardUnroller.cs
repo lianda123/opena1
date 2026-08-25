@@ -172,6 +172,7 @@ namespace WoodSheetLayout.Core
           boardBrep,
           patch.FaceIndices,
           offsetByFace,
+          neutralBrep,
           tolerance,
           out sourceHoleLoopCount,
           out mappedHoleLoopCount);
@@ -896,6 +897,7 @@ namespace WoodSheetLayout.Core
       Brep sourceBrep,
       IList<int> faceIndices,
       IDictionary<int, Brep> offsetByFace,
+      Brep neutralBrep,
       double tolerance,
       out int sourceHoleLoopCount,
       out int mappedHoleLoopCount)
@@ -917,6 +919,7 @@ namespace WoodSheetLayout.Core
         Brep offsetFaceBrep;
         var hasOffsetFace = offsetByFace.TryGetValue(faceIndex, out offsetFaceBrep) &&
           offsetFaceBrep != null && offsetFaceBrep.Faces.Count > 0;
+        var mappingBrep = hasOffsetFace ? offsetFaceBrep : neutralBrep;
         foreach (var loop in sourceFace.Loops.Where(item =>
           item.LoopType == BrepLoopType.Inner))
         {
@@ -926,7 +929,11 @@ namespace WoodSheetLayout.Core
             if (trim.Edge != null)
               innerEdgeIndices.Add(trim.Edge.EdgeIndex);
           }
-          if (!hasOffsetFace)
+          // 某些窄长修剪面虽然能随整片成功偏移，但单独
+          // CreateFromOffsetFace会因采样点落在孔洞/修剪区外而被拒绝。
+          // 2.2.6因此正好跳过该面上的整组孔。单面偏移缺失时，直接
+          // 映射到已成功创建并用于Unroller的整体中性层面片。
+          if (mappingBrep == null || mappingBrep.Faces.Count == 0)
             continue;
 
           Curve sourceLoop;
@@ -942,7 +949,7 @@ namespace WoodSheetLayout.Core
           if (TryMapCurveToOffsetFace(
             sourceLoop,
             sourceFace,
-            offsetFaceBrep,
+            mappingBrep,
             tolerance,
             out mappedLoop) &&
             JoinClosedLoops(new[] { mappedLoop }, loopTolerance).Count == 1)
@@ -956,17 +963,18 @@ namespace WoodSheetLayout.Core
           var complete = true;
           foreach (var trim in loop.Trims)
           {
-            Curve mappedSegment;
-            if (!TryMapTrimToOffsetFace(
+            Curve mappedSegment = null;
+            var mappedFromTrim = hasOffsetFace && TryMapTrimToOffsetFace(
                 trim,
                 offsetFaceBrep,
                 tolerance,
-                out mappedSegment) &&
+                out mappedSegment);
+            if (!mappedFromTrim &&
               (trim.Edge == null ||
                !TryMapCurveToOffsetFace(
                  trim.Edge.DuplicateCurve(),
                  sourceFace,
-                 offsetFaceBrep,
+                 mappingBrep,
                  tolerance,
                  out mappedSegment)))
             {
@@ -998,16 +1006,18 @@ namespace WoodSheetLayout.Core
         // 两个已选面的公共边是展开接缝，不是板材的卡口/孔洞边界。
         if (selectedFaces.Length != 1)
           continue;
-        Brep offsetFaceBrep;
-        if (!offsetByFace.TryGetValue(selectedFaces[0], out offsetFaceBrep) ||
-            offsetFaceBrep == null || offsetFaceBrep.Faces.Count == 0)
+        Brep mappingBrep;
+        if (!offsetByFace.TryGetValue(selectedFaces[0], out mappingBrep) ||
+            mappingBrep == null || mappingBrep.Faces.Count == 0)
+          mappingBrep = neutralBrep;
+        if (mappingBrep == null || mappingBrep.Faces.Count == 0)
           continue;
         var sourceCurve = edge.DuplicateCurve();
         Curve mapped;
         if (!TryMapCurveToOffsetFace(
           sourceCurve,
           sourceBrep.Faces[selectedFaces[0]],
-          offsetFaceBrep,
+          mappingBrep,
           tolerance,
           out mapped))
           continue;
@@ -1092,6 +1102,8 @@ namespace WoodSheetLayout.Core
       Plane sourcePlane;
       if (sourceFace.TryGetPlane(out sourcePlane, tolerance * 10.0))
       {
+        Curve nearestMapped = null;
+        var nearestDistance = double.MaxValue;
         foreach (var targetFace in offsetFaceBrep.Faces)
         {
           Plane targetPlane;
@@ -1108,8 +1120,15 @@ namespace WoodSheetLayout.Core
           if (translated == null ||
               !translated.Transform(Transform.Translation(translation)))
             continue;
-          mapped = translated;
-          return mapped.IsValid;
+          if (!translated.IsValid || translation.Length >= nearestDistance)
+            continue;
+          nearestMapped = translated;
+          nearestDistance = translation.Length;
+        }
+        if (nearestMapped != null)
+        {
+          mapped = nearestMapped;
+          return true;
         }
       }
 

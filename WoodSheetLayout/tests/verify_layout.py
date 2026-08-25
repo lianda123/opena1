@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks the 1.1 planar workflow and 2.2.6 trim-mapped bend workflow."""
+"""Checks the 1.1 planar workflow and 2.2.7 neutral-patch bend workflow."""
 
 from pathlib import Path
 import math
@@ -141,14 +141,17 @@ def main():
         "OutlineGeometry.CreateRectangle(actualFlatBounds)",
         "created.FlatBounds = actualFlatBounds", "TryMapTrimToOffsetFace",
         "sourceTrim.DuplicateCurve()", "targetFace.Pushup(trimCurve2d",
-        "targetPlane.ClosestPoint(sample)"
+        "targetPlane.ClosestPoint(sample)", "Brep neutralBrep",
+        "var mappingBrep = hasOffsetFace ? offsetFaceBrep : neutralBrep",
+        "mappingBrep = neutralBrep", "nearestDistance = double.MaxValue",
+        "translation.Length >= nearestDistance"
     ]:
         assert token in bent, token
     assert "faceAreas[adjacent] < maximumArea * 0.015" not in bent
     for token in ["ShowProgressMeter", "EscapeKeyPressed", "RhinoApp.Wait"]:
         assert token in progress, token
     for token in [
-        "WoodSheetLayout_2.2.6", "矩形MaxRects", "边框出血",
+        "WoodSheetLayout_2.2.7", "矩形MaxRects", "边框出血",
         "WSL_PAIR_", "WoodSheetLayoutRole", "FlatCopy", "Source",
         "OutputGuide", "doc.Objects.ModifyAttributes",
         "AddClassicPlanarPart", "doc.Objects.Transform(source.Id, finalTransform, false)",
@@ -171,7 +174,7 @@ def main():
     assert "net48;net8.0" in project
     assert "<Prefer32Bit>false</Prefer32Bit>" in project
     assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3001"' in project
-    assert "<Version>2.2.6</Version>" in project
+    assert "<Version>2.2.7</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -185,7 +188,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("WoodSheetLayout 2.2.6 planar/bend workflow checks passed.")
+    print("WoodSheetLayout 2.2.7 planar/bend workflow checks passed.")
 
 
 if __name__ == "__main__":
