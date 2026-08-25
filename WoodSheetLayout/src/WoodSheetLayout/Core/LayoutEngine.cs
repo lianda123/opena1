@@ -154,8 +154,8 @@ namespace WoodSheetLayout.Core
       var outputObjectCount = 0;
       var outputFailureCount = 0;
       var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
-        ? "WoodSheetLayout 2.2.3 折弯件中性层展开排版"
-        : "WoodSheetLayout 2.2.3（1.1原生通道）铺平排版");
+        ? "WoodSheetLayout 2.2.4 折弯件中性层展开排版"
+        : "WoodSheetLayout 2.2.4（1.1原生通道）铺平排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -604,7 +604,7 @@ namespace WoodSheetLayout.Core
     {
       var packedPartCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.2.3：选中组 {0} 件，识别 {1} 件，排入 {2} 件，实际生成 {3} 件/{4} 个对象，{5} 张 {6}；零件间距 {7:0.##} mm，边框出血 {8:0.##} mm。",
+        "WoodSheetLayout 2.2.4：选中组 {0} 件，识别 {1} 件，排入 {2} 件，实际生成 {3} 件/{4} 个对象，{5} 张 {6}；零件间距 {7:0.##} mm，边框出血 {8:0.##} mm。",
         componentCount,
         analyzedPartCount,
         packedPartCount,
@@ -706,7 +706,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.2.3_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.2.4_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,

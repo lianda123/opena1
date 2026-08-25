@@ -477,15 +477,25 @@ namespace WoodSheetLayout.Core
       // 混进主Unroller后会跳到侧面。现在恢复逐边边界，并在独立Unroller
       // 中把碎边重新Join为“最大外环＋其内部的孔环”。
       var mappedLoops = JoinClosedLoops(flatBoardBoundaries, loopTolerance);
-      var reconstructionLoops = mappedLoops.Count > 0
-        ? mappedLoops
-        : patchLoops;
-      var outerLoop = reconstructionLoops
+      var patchOuter = patchLoops
         .OrderByDescending(CurvePlanarArea)
         .ThenByDescending(CurveEnvelopeArea)
         .First();
-      var holeLoops = reconstructionLoops
-        .Where(item => !ReferenceEquals(item, outerLoop))
+
+      // 2.2.3错误地只要存在任意闭合随动环，就把其中面积最大的环
+      // 当成整块板。zhewan4中真正的板外环未能Join，而一个约
+      // 145.63×42.84mm的内部卡槽成功闭合，于是卡槽被拉成了整板。
+      // 继续以2.2.1展开面片的最大裸边环作为尺寸基准；只有随动环与
+      // 该基准四周范围一致时，才允许它替换外环并带回开口卡槽细节。
+      var mappedOuter = mappedLoops
+        .Where(item => CurvesShareExtents(item, patchOuter, loopTolerance))
+        .OrderByDescending(CurvePlanarArea)
+        .ThenByDescending(CurveEnvelopeArea)
+        .FirstOrDefault();
+      var outerLoop = mappedOuter ?? patchOuter;
+      var holeLoops = mappedLoops
+        .Where(item => !ReferenceEquals(item, mappedOuter))
+        .Where(item => !CurvesShareExtents(item, outerLoop, loopTolerance))
         .Where(item => CurveIsInside(item, outerLoop, loopTolerance))
         .OrderByDescending(CurvePlanarArea)
         .ToList();
@@ -511,7 +521,8 @@ namespace WoodSheetLayout.Core
         .FirstOrDefault();
       if (planar != null &&
           CountMaximumPlanarFaceInnerLoops(planar, loopTolerance) >= holeLoops.Count &&
-          TryCreateSymmetricSolid(planar, thickness, tolerance, out solid))
+          TryCreateSymmetricSolid(planar, thickness, tolerance, out solid) &&
+          BrepSharesExtents(solid, patchOuter, loopTolerance))
       {
         rebuiltHoleCount = CountMaximumPlanarFaceInnerLoops(solid, loopTolerance);
         if (rebuiltHoleCount >= holeLoops.Count)
@@ -520,13 +531,14 @@ namespace WoodSheetLayout.Core
 
       // 某些Rhino 7修剪方向会让CreatePlanarBreps返回独立填充面。
       // 仅在这种情况下，以已经确认的最大外环建立整板，再逐孔布尔差。
-      return TryBooleanRebuildBoard(
+      var rebuilt = TryBooleanRebuildBoard(
         outerLoop,
         holeLoops,
         thickness,
         loopTolerance,
         out solid,
         out rebuiltHoleCount);
+      return rebuilt && BrepSharesExtents(solid, patchOuter, loopTolerance);
     }
 
     private static bool TryCreateSymmetricSolid(
@@ -706,6 +718,16 @@ namespace WoodSheetLayout.Core
     {
       if (candidate == null || outer == null || !candidate.IsClosed || !outer.IsClosed)
         return false;
+      var candidateBounds = candidate.GetBoundingBox(true);
+      var outerBounds = outer.GetBoundingBox(true);
+      var allowance = Math.Max(
+        tolerance * 2.0,
+        outerBounds.Diagonal.Length * 0.0025);
+      if (candidateBounds.Min.X < outerBounds.Min.X - allowance ||
+          candidateBounds.Min.Y < outerBounds.Min.Y - allowance ||
+          candidateBounds.Max.X > outerBounds.Max.X + allowance ||
+          candidateBounds.Max.Y > outerBounds.Max.Y + allowance)
+        return false;
       Point3d sample;
       try
       {
@@ -732,6 +754,24 @@ namespace WoodSheetLayout.Core
 
     private static bool BrepSharesExtents(
       Brep candidate,
+      Curve reference,
+      double tolerance)
+    {
+      if (candidate == null || reference == null)
+        return false;
+      var candidateBounds = candidate.GetBoundingBox(true);
+      var referenceBounds = reference.GetBoundingBox(true);
+      var allowance = Math.Max(
+        tolerance * 2.0,
+        referenceBounds.Diagonal.Length * 0.01);
+      return Math.Abs(candidateBounds.Min.X - referenceBounds.Min.X) <= allowance &&
+             Math.Abs(candidateBounds.Min.Y - referenceBounds.Min.Y) <= allowance &&
+             Math.Abs(candidateBounds.Max.X - referenceBounds.Max.X) <= allowance &&
+             Math.Abs(candidateBounds.Max.Y - referenceBounds.Max.Y) <= allowance;
+    }
+
+    private static bool CurvesShareExtents(
+      Curve candidate,
       Curve reference,
       double tolerance)
     {
