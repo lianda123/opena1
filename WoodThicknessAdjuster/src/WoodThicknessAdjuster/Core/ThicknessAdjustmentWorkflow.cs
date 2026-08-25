@@ -131,13 +131,14 @@ namespace WoodThicknessAdjuster.Core
           }
 
           adjustedCount++;
-          RhinoApp.WriteLine(
+          RhinoApp.WriteLine(string.Format(
+            CultureInfo.InvariantCulture,
             "WoodThicknessAdjuster：{0:0.###}mm → {1:0.###}mm；{2}；同步{3}个对象{4}。",
             currentMillimeters,
             targetThicknessMillimeters,
             anchorMode == ThicknessAnchorMode.ClickedFace ? "保持点击面" : "中心对称调整",
             transformedCount,
-            skippedFollowers > 0 ? "，另有不支持的组内对象已跳过" : string.Empty);
+            skippedFollowers > 0 ? "，另有不支持的组内对象已跳过" : string.Empty));
           clickedObject.Select(false);
           doc.Views.Redraw();
         }
@@ -299,7 +300,7 @@ namespace WoodThicknessAdjuster.Core
     {
       transformedCount = 0;
       skippedFollowers = 0;
-      var prepared = new List<ReplacementGeometry>();
+      var prepared = new List<TransformTarget>();
       foreach (var rhinoObject in target.Objects
         .OrderByDescending(item => item.Id == target.BoardObject.Id))
       {
@@ -319,29 +320,30 @@ namespace WoodThicknessAdjuster.Core
           skippedFollowers++;
           continue;
         }
-        prepared.Add(new ReplacementGeometry
+        prepared.Add(new TransformTarget
         {
           ObjectId = rhinoObject.Id,
-          Geometry = geometry,
           IsBoard = rhinoObject.Id == target.BoardObject.Id
         });
       }
 
-      var boardReplacement = prepared.FirstOrDefault(item => item.IsBoard);
-      if (boardReplacement == null ||
-          !doc.Objects.Replace(boardReplacement.ObjectId, boardReplacement.Geometry))
+      var boardTarget = prepared.FirstOrDefault(item => item.IsBoard);
+      if (boardTarget == null)
+        return false;
+      var newBoardId = doc.Objects.Transform(boardTarget.ObjectId, transform, true);
+      if (newBoardId == Guid.Empty)
         return false;
       transformedCount++;
 
       foreach (var item in prepared.Where(item => !item.IsBoard))
       {
-        if (doc.Objects.Replace(item.ObjectId, item.Geometry))
+        if (doc.Objects.Transform(item.ObjectId, transform, true) != Guid.Empty)
           transformedCount++;
         else
           skippedFollowers++;
       }
 
-      var board = doc.Objects.FindId(target.BoardObject.Id);
+      var board = doc.Objects.FindId(newBoardId);
       if (board != null)
       {
         var attributes = board.Attributes.Duplicate();
@@ -366,10 +368,9 @@ namespace WoodThicknessAdjuster.Core
       public List<RhinoObject> Objects { get; set; }
     }
 
-    private sealed class ReplacementGeometry
+    private sealed class TransformTarget
     {
       public Guid ObjectId { get; set; }
-      public GeometryBase Geometry { get; set; }
       public bool IsBoard { get; set; }
     }
   }

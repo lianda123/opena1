@@ -37,7 +37,7 @@ def main():
         "ThicknessAnchorMode.ClickedFace", "ThicknessAnchorMode.Center",
         "Transform.Scale(scalingPlane, 1.0, 1.0, factor)",
         "doc.Groups.GroupMembers", "ShouldFollowBoard", "DuplicateGeometry",
-        "doc.Objects.Replace", "BeginUndoRecord", "EndUndoRecord",
+        "doc.Objects.Transform", "BeginUndoRecord", "EndUndoRecord",
         "TargetMillimeters", "保持点击面", "折弯板不会强制缩放"
     ]:
         assert token in workflow, token
