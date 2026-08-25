@@ -11,6 +11,7 @@ namespace ProductMotionTimeline
   public sealed class ProductMotionPlugin : PlugIn
   {
     public static ProductMotionPlugin Instance { get; private set; }
+    private MechanicalConstraintConduit _mechanicalConduit;
 
     public ProductMotionPlugin()
     {
@@ -21,12 +22,15 @@ namespace ProductMotionTimeline
     {
       TimelineRepository.Initialize();
       Panels.RegisterPanel(this, typeof(TimelinePanel), "产品动态时间轴", null);
+      _mechanicalConduit = new MechanicalConstraintConduit { Enabled = true };
       return LoadReturnCode.Success;
     }
 
     protected override void OnShutdown()
     {
       TimelineRepository.Shutdown();
+      if (_mechanicalConduit != null)
+        _mechanicalConduit.Enabled = false;
       base.OnShutdown();
     }
   }

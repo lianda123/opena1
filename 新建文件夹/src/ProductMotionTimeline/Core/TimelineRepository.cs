@@ -93,6 +93,8 @@ namespace ProductMotionTimeline.Core
             writer.Write(constraint.DrivenTeeth);
             writer.Write(constraint.PhaseOffsetDegrees);
             writer.Write(constraint.Enabled);
+            writer.Write(constraint.Module);
+            writer.Write(constraint.PressureAngleDegrees);
           }
 
           writer.Flush();
@@ -169,7 +171,7 @@ namespace ProductMotionTimeline.Core
             var constraintCount = reader.ReadInt32();
             for (var i = 0; i < constraintCount; i++)
             {
-              model.Constraints.Add(new MechanicalConstraint
+              var constraint = new MechanicalConstraint
               {
                 Id = ReadGuid(reader),
                 DriverTrackId = ReadGuid(reader),
@@ -179,7 +181,13 @@ namespace ProductMotionTimeline.Core
                 DrivenTeeth = reader.ReadInt32(),
                 PhaseOffsetDegrees = reader.ReadDouble(),
                 Enabled = reader.ReadBoolean()
-              });
+              };
+              if (version >= 4)
+              {
+                constraint.Module = reader.ReadDouble();
+                constraint.PressureAngleDegrees = reader.ReadDouble();
+              }
+              model.Constraints.Add(constraint);
             }
           }
           model.ClampSettings();

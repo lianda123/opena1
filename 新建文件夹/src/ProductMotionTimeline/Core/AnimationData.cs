@@ -26,6 +26,21 @@ namespace ProductMotionTimeline.Core
     Belt = 2
   }
 
+  internal enum ValidationSeverity
+  {
+    Ok = 0,
+    Warning = 1,
+    Error = 2
+  }
+
+  internal sealed class MechanicalValidationResult
+  {
+    public ValidationSeverity Severity { get; set; } = ValidationSeverity.Ok;
+    public string Message { get; set; } = "动画比例有效";
+    public double ExpectedCenterDistance { get; set; }
+    public double ActualCenterDistance { get; set; }
+  }
+
   internal sealed class MechanicalConstraint
   {
     public Guid Id { get; set; } = Guid.NewGuid();
@@ -34,6 +49,8 @@ namespace ProductMotionTimeline.Core
     public MechanicalConstraintType Type { get; set; } = MechanicalConstraintType.ExternalGear;
     public int DriverTeeth { get; set; } = 20;
     public int DrivenTeeth { get; set; } = 20;
+    public double Module { get; set; }
+    public double PressureAngleDegrees { get; set; } = 20.0;
     public double PhaseOffsetDegrees { get; set; }
     public bool Enabled { get; set; } = true;
 
@@ -255,7 +272,7 @@ namespace ProductMotionTimeline.Core
 
   internal sealed class TimelineDocument
   {
-    public const int DataVersion = 3;
+    public const int DataVersion = 4;
 
     public int StartFrame { get; set; } = 0;
     public int EndFrame { get; set; } = 250;

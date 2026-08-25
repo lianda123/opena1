@@ -7,6 +7,8 @@ using Rhino.Geometry;
 using Rhino.Input;
 using Rhino.Input.Custom;
 using Rhino.UI;
+using System;
+using System.Linq;
 
 namespace ProductMotionTimeline.Commands
 {
@@ -96,6 +98,25 @@ namespace ProductMotionTimeline.Commands
       if (getter.CommandResult() != Result.Success)
         return getter.CommandResult();
       return TimelineEngine.SetPivot(doc, getter.Point()) ? Result.Success : Result.Failure;
+    }
+  }
+
+  public sealed class AutoPivotCommand : Command
+  {
+    public override string EnglishName => "PMTAutoPivot";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var track = TimelineEngine.Model(doc).SelectedTrack;
+      if (track == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：请先选中一条动画轨道。");
+        return Result.Nothing;
+      }
+      string description;
+      var found = TimelineEngine.TryAutoSetPivot(doc, track, out description);
+      RhinoApp.WriteLine("ProductMotion：{0}。", description);
+      return found ? Result.Success : Result.Nothing;
     }
   }
 
@@ -241,6 +262,12 @@ namespace ProductMotionTimeline.Commands
       if (phaseGetter.CommandResult() != Result.Success)
         return phaseGetter.CommandResult();
 
+      var module = selectedType == MechanicalConstraintType.Belt
+        ? 0.0
+        : CommandInput.GetPositiveNumber("输入齿轮模数（0=仅动画比例）", 0.0, true);
+      if (module < 0.0)
+        return Result.Cancel;
+
       return TimelineEngine.AddMechanicalConstraint(
         doc,
         driver.Id,
@@ -248,7 +275,9 @@ namespace ProductMotionTimeline.Commands
         selectedType,
         driverCount,
         drivenCount,
-        phaseGetter.Number())
+        phaseGetter.Number(),
+        module,
+        20.0)
         ? Result.Success
         : Result.Failure;
     }
@@ -292,6 +321,12 @@ namespace ProductMotionTimeline.Commands
         return Result.Nothing;
       }
 
+      string driverAxis;
+      string drivenAxis;
+      TimelineEngine.TryAutoSetPivot(doc, driver, out driverAxis);
+      TimelineEngine.TryAutoSetPivot(doc, driven, out drivenAxis);
+      RhinoApp.WriteLine("ProductMotion：主动件 {0}；从动件 {1}。", driverAxis, drivenAxis);
+
       var driverCount = GetPositiveInteger(
         type == MechanicalConstraintType.Belt
           ? "输入主动轮齿数/直径比例"
@@ -317,6 +352,21 @@ namespace ProductMotionTimeline.Commands
         DrivenTeeth = drivenCount
       };
       var automaticPhase = drivenAngle - driverAngle * template.SignedRatio;
+      var module = 0.0;
+      if (type != MechanicalConstraintType.Belt)
+      {
+        var divisor = type == MechanicalConstraintType.ExternalGear
+          ? driverCount + drivenCount
+          : Math.Abs(drivenCount - driverCount);
+        var centerDistance = (TimelineEngine.PivotOrigin(driver) - TimelineEngine.PivotOrigin(driven)).Length;
+        var estimatedModule = divisor > 0 ? centerDistance * 2.0 / divisor : 1.0;
+        module = CommandInput.GetPositiveNumber(
+          "输入齿轮模数（默认按当前中心距反算，0=只做动画）",
+          Math.Max(0.001, estimatedModule),
+          true);
+        if (module < 0.0)
+          return Result.Cancel;
+      }
 
       // 完成后重新选中主动轨道，用户只需给主动件卡帧。
       TimelineEngine.SelectTrack(doc, driver.Id);
@@ -327,8 +377,14 @@ namespace ProductMotionTimeline.Commands
         type,
         driverCount,
         drivenCount,
-        automaticPhase))
+        automaticPhase,
+        module,
+        20.0))
         return Result.Failure;
+
+      var added = TimelineEngine.Model(doc).ConstraintForDriven(driven.Id);
+      var validation = TimelineEngine.ValidateMechanicalConstraint(doc, added);
+      RhinoApp.WriteLine("ProductMotion：啮合检查：{0}。", validation.Message);
 
       Panels.OpenPanel(TimelinePanel.PanelId);
       RhinoApp.WriteLine(
@@ -387,6 +443,271 @@ namespace ProductMotionTimeline.Commands
       return driven != null && TimelineEngine.DeleteConstraintForDriven(doc, driven.Id)
         ? Result.Success
         : Result.Nothing;
+    }
+  }
+
+  public sealed class EditMechanicalConstraintCommand : Command
+  {
+    public override string EnglishName => "PMTEditMechanical";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var model = TimelineEngine.Model(doc);
+      var selectedTrack = model.SelectedTrack;
+      var constraint = selectedTrack == null ? null : model.ConstraintForDriven(selectedTrack.Id);
+      if (constraint == null && selectedTrack != null)
+        constraint = model.Constraints.FirstOrDefault(item => item.DriverTrackId == selectedTrack.Id);
+      if (constraint == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：请先在传动关系列表中选中一项。");
+        return Result.Nothing;
+      }
+
+      var type = constraint.Type;
+      var typeGetter = new GetOption();
+      typeGetter.SetCommandPrompt("修改传动类型（按回车保留当前类型）");
+      typeGetter.AcceptNothing(true);
+      var external = typeGetter.AddOption("ExternalGear");
+      var internalGear = typeGetter.AddOption("InternalGear");
+      var belt = typeGetter.AddOption("Belt");
+      var typeResult = typeGetter.Get();
+      if (typeResult == GetResult.Cancel)
+        return Result.Cancel;
+      if (typeResult == GetResult.Option)
+      {
+        if (typeGetter.OptionIndex() == internalGear) type = MechanicalConstraintType.InternalGear;
+        else if (typeGetter.OptionIndex() == belt) type = MechanicalConstraintType.Belt;
+        else if (typeGetter.OptionIndex() == external) type = MechanicalConstraintType.ExternalGear;
+      }
+
+      var driverCount = CommandInput.GetPositiveInteger("主动齿数/皮带轮比例", constraint.DriverTeeth);
+      if (driverCount < 1) return Result.Cancel;
+      var drivenCount = CommandInput.GetPositiveInteger("从动齿数/皮带轮比例", constraint.DrivenTeeth);
+      if (drivenCount < 1) return Result.Cancel;
+      var module = type == MechanicalConstraintType.Belt
+        ? 0.0
+        : CommandInput.GetPositiveNumber("模数（0=跳过中心距检查）", constraint.Module, true);
+      if (module < 0.0) return Result.Cancel;
+      var pressureAngle = type == MechanicalConstraintType.Belt
+        ? constraint.PressureAngleDegrees
+        : CommandInput.GetPositiveNumber("压力角°", constraint.PressureAngleDegrees, false);
+      if (pressureAngle < 0.0) return Result.Cancel;
+      var phase = CommandInput.GetNumber("相位角°", constraint.PhaseOffsetDegrees);
+      if (double.IsNaN(phase)) return Result.Cancel;
+
+      if (!TimelineEngine.UpdateMechanicalConstraint(
+        doc, constraint.Id, type, driverCount, drivenCount, module, pressureAngle, phase))
+        return Result.Failure;
+      var validation = TimelineEngine.ValidateMechanicalConstraint(doc, constraint);
+      RhinoApp.WriteLine("ProductMotion：更新完成，{0}。", validation.Message);
+      return Result.Success;
+    }
+  }
+
+  public sealed class ValidateMechanicalConstraintsCommand : Command
+  {
+    public override string EnglishName => "PMTValidateMechanical";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var model = TimelineEngine.Model(doc);
+      if (model.Constraints.Count == 0)
+      {
+        RhinoApp.WriteLine("ProductMotion：当前没有机械传动关系。");
+        return Result.Nothing;
+      }
+      foreach (var constraint in model.Constraints)
+      {
+        var driver = model.FindTrack(constraint.DriverTrackId);
+        var driven = model.FindTrack(constraint.DrivenTrackId);
+        var validation = TimelineEngine.ValidateMechanicalConstraint(doc, constraint);
+        RhinoApp.WriteLine(
+          "ProductMotion：{0} → {1}：{2}",
+          driver?.Name ?? "?",
+          driven?.Name ?? "?",
+          validation.Message);
+      }
+      return Result.Success;
+    }
+  }
+
+  public sealed class ReciprocateTemplateCommand : Command
+  {
+    public override string EnglishName => "PMTReciprocate";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var track = TemplateCommandInput.SelectedIndependentTrack(doc);
+      if (track == null) return Result.Nothing;
+      var amplitude = CommandInput.GetPositiveNumber("单侧摆角°", 30.0, false);
+      if (amplitude < 0.0) return Result.Cancel;
+      var duration = CommandInput.GetPositiveInteger("总帧数", 120);
+      if (duration < 1) return Result.Cancel;
+      var cycles = CommandInput.GetPositiveInteger("往复次数", 1);
+      if (cycles < 1) return Result.Cancel;
+      MotionTemplateGenerator.GenerateReciprocation(
+        doc, track, TimelineEngine.Model(doc).CurrentFrame, duration, cycles, amplitude);
+      RhinoApp.WriteLine("ProductMotion：已生成往复摆动关键帧，可继续拖动修改。");
+      return Result.Success;
+    }
+  }
+
+  public sealed class ReboundTemplateCommand : Command
+  {
+    public override string EnglishName => "PMTRebound";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var track = TemplateCommandInput.SelectedIndependentTrack(doc);
+      if (track == null) return Result.Nothing;
+      var angle = CommandInput.GetNumber("拨动角度°（可输入负数改变方向）", 90.0);
+      if (double.IsNaN(angle)) return Result.Cancel;
+      var duration = CommandInput.GetPositiveInteger("总帧数", 90);
+      if (duration < 1) return Result.Cancel;
+      MotionTemplateGenerator.GenerateRebound(
+        doc, track, TimelineEngine.Model(doc).CurrentFrame, duration, angle);
+      RhinoApp.WriteLine("ProductMotion：已生成“快速拨动—短暂停留—平滑回弹”动作。");
+      return Result.Success;
+    }
+  }
+
+  public sealed class CrankSliderTemplateCommand : Command
+  {
+    public override string EnglishName => "PMTCrankSlider";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var crank = TemplateCommandInput.SelectPart(doc, "选择曲柄/偏心轮主动件");
+      if (crank == null) return Result.Cancel;
+      var crankObject = TimelineEngine.ResolveInstance(doc, crank);
+      crankObject?.Select(false);
+      var slider = TemplateCommandInput.SelectPart(doc, "选择直线往复的滑块");
+      if (slider == null || slider.Id == crank.Id) return Result.Cancel;
+      string ignored;
+      TimelineEngine.TryAutoSetPivot(doc, crank, out ignored);
+      var radius = CommandInput.GetPositiveNumber("曲柄半径", 10.0, false);
+      if (radius <= 0.0) return Result.Cancel;
+      var rod = CommandInput.GetPositiveNumber("连杆长度（必须大于等于曲柄半径）", Math.Max(30.0, radius), false);
+      if (rod < radius) return Result.Cancel;
+      var axis = CommandInput.GetAxis("选择滑块运动轴", RotationAxis.X);
+      var duration = CommandInput.GetPositiveInteger("曲柄转一圈的帧数", 120);
+      if (duration < 1) return Result.Cancel;
+      MotionTemplateGenerator.GenerateCrankSlider(
+        doc, crank, slider, TimelineEngine.Model(doc).CurrentFrame, duration, radius, rod, axis);
+      RhinoApp.WriteLine("ProductMotion：已按真实曲柄-连杆公式生成滑块位移。");
+      return Result.Success;
+    }
+  }
+
+  public sealed class FourBarTemplateCommand : Command
+  {
+    public override string EnglishName => "PMTFourBar";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var crank = TemplateCommandInput.SelectPart(doc, "选择四连杆的主动曲柄");
+      if (crank == null) return Result.Cancel;
+      TimelineEngine.ResolveInstance(doc, crank)?.Select(false);
+      var rocker = TemplateCommandInput.SelectPart(doc, "选择四连杆的输出摇杆");
+      if (rocker == null || rocker.Id == crank.Id) return Result.Cancel;
+      string ignored;
+      TimelineEngine.TryAutoSetPivot(doc, crank, out ignored);
+      TimelineEngine.TryAutoSetPivot(doc, rocker, out ignored);
+      var measuredGround = TimelineEngine.PivotOrigin(crank).DistanceTo(TimelineEngine.PivotOrigin(rocker));
+      var ground = CommandInput.GetPositiveNumber("两固定轴中心距", Math.Max(1.0, measuredGround), false);
+      if (ground <= 0.0) return Result.Cancel;
+      var crankLength = CommandInput.GetPositiveNumber("主动曲柄长度", ground * 0.25, false);
+      if (crankLength <= 0.0) return Result.Cancel;
+      var couplerLength = CommandInput.GetPositiveNumber("中间连杆长度", ground * 0.75, false);
+      if (couplerLength <= 0.0) return Result.Cancel;
+      var rockerLength = CommandInput.GetPositiveNumber("输出摇杆长度", ground * 0.5, false);
+      if (rockerLength <= 0.0) return Result.Cancel;
+      var duration = CommandInput.GetPositiveInteger("主动曲柄转一圈的帧数", 120);
+      if (duration < 1) return Result.Cancel;
+      string error;
+      if (!MotionTemplateGenerator.GenerateFourBar(
+        doc, crank, rocker, TimelineEngine.Model(doc).CurrentFrame, duration,
+        ground, crankLength, couplerLength, rockerLength, out error))
+      {
+        RhinoApp.WriteLine("ProductMotion：{0}", error);
+        return Result.Nothing;
+      }
+      RhinoApp.WriteLine("ProductMotion：已按四杆闭环几何生成主动曲柄和输出摇杆关键帧。");
+      return Result.Success;
+    }
+  }
+
+  internal static class TemplateCommandInput
+  {
+    internal static AnimationTrack SelectedIndependentTrack(RhinoDoc doc)
+    {
+      var model = TimelineEngine.Model(doc);
+      var track = model.SelectedTrack;
+      if (track == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：请先在时间轴中选中一条轨道。");
+        return null;
+      }
+      if (model.ConstraintForDriven(track.Id) != null)
+      {
+        RhinoApp.WriteLine("ProductMotion：当前轨道是机械从动件，请对主动件使用动作模板。");
+        return null;
+      }
+      return track;
+    }
+
+    internal static AnimationTrack SelectPart(RhinoDoc doc, string prompt)
+    {
+      var instance = TrackFactory.GetOrCreateGroupPart(doc, prompt, false);
+      return instance == null ? null : TimelineEngine.AddTrack(doc, instance);
+    }
+  }
+
+  internal static class CommandInput
+  {
+    internal static int GetPositiveInteger(string prompt, int defaultValue)
+    {
+      var getter = new GetInteger();
+      getter.SetCommandPrompt(prompt);
+      getter.SetLowerLimit(1, false);
+      getter.SetDefaultInteger(Math.Max(1, defaultValue));
+      getter.Get();
+      return getter.CommandResult() == Result.Success ? getter.Number() : -1;
+    }
+
+    internal static double GetPositiveNumber(string prompt, double defaultValue, bool allowZero)
+    {
+      var getter = new GetNumber();
+      getter.SetCommandPrompt(prompt);
+      getter.SetLowerLimit(allowZero ? 0.0 : 1e-9, false);
+      getter.SetDefaultNumber(Math.Max(allowZero ? 0.0 : 1e-9, defaultValue));
+      getter.Get();
+      return getter.CommandResult() == Result.Success ? getter.Number() : -1.0;
+    }
+
+    internal static double GetNumber(string prompt, double defaultValue)
+    {
+      var getter = new GetNumber();
+      getter.SetCommandPrompt(prompt);
+      getter.SetDefaultNumber(defaultValue);
+      getter.Get();
+      return getter.CommandResult() == Result.Success ? getter.Number() : double.NaN;
+    }
+
+    internal static RotationAxis GetAxis(string prompt, RotationAxis defaultAxis)
+    {
+      var getter = new GetOption();
+      getter.SetCommandPrompt(prompt);
+      getter.AcceptNothing(true);
+      var x = getter.AddOption("X");
+      var y = getter.AddOption("Y");
+      var z = getter.AddOption("Z");
+      var result = getter.Get();
+      if (result != GetResult.Option)
+        return defaultAxis;
+      if (getter.OptionIndex() == y) return RotationAxis.Y;
+      if (getter.OptionIndex() == z) return RotationAxis.Z;
+      return getter.OptionIndex() == x ? RotationAxis.X : defaultAxis;
     }
   }
 

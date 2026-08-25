@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using Eto.Drawing;
 using Eto.Forms;
@@ -24,6 +25,8 @@ namespace ProductMotionTimeline.UI
     private readonly NumericStepper _axisAngle = IntegerStepper(-100000, 100000, 0);
     private readonly TextBox _trackName = new TextBox { Width = 150 };
     private readonly Label _relationship = new Label { TextColor = Color.FromArgb(255, 190, 92) };
+    private readonly ListBox _constraints = new ListBox { Height = 72 };
+    private readonly List<MechanicalConstraint> _constraintItems = new List<MechanicalConstraint>();
     private readonly Label _status = new Label { TextColor = Color.FromArgb(180, 185, 194) };
     private readonly Button _play = new Button { Text = "▶ 播放" };
     private readonly UITimer _timer = new UITimer();
@@ -80,6 +83,7 @@ namespace ProductMotionTimeline.UI
         new Label { Text = "轨道名" }, _trackName,
         Button("改名", RenameTrack),
         Button("设轴心", () => RhinoApp.RunScript("_PMTSetPivot", false)),
+        Button("自动找轴孔", () => RhinoApp.RunScript("_PMTAutoPivot", false)),
         Button("重绑定", () => RhinoApp.RunScript("_PMTRebind", false)),
         new Label { Text = "插值" }, _interpolation,
         new Label { Text = "连续轴" }, _rotationAxis,
@@ -96,7 +100,21 @@ namespace ProductMotionTimeline.UI
         Button("外啮合齿轮", () => RhinoApp.RunScript("_PMTExternalGear", false)),
         Button("内啮合齿轮", () => RhinoApp.RunScript("_PMTInternalGear", false)),
         Button("皮带传动", () => RhinoApp.RunScript("_PMTBelt", false)),
-        Button("解除从动", () => RhinoApp.RunScript("_PMTDeleteMechanical", false)));
+        Button("编辑选中", () => RhinoApp.RunScript("_PMTEditMechanical", false)),
+        Button("检查全部", () => RhinoApp.RunScript("_PMTValidateMechanical", false)),
+        Button("删除选中", DeleteSelectedConstraint));
+
+      var constraintSelectionTools = Horizontal(
+        new Label { Text = "传动关系图" },
+        Button("定位主动件", () => SelectConstraintTrack(true)),
+        Button("定位从动件", () => SelectConstraintTrack(false)));
+
+      var motionTemplates = Horizontal(
+        new Label { Text = "动作模板" },
+        Button("往复摆动", () => RhinoApp.RunScript("_PMTReciprocate", false)),
+        Button("旋转回弹", () => RhinoApp.RunScript("_PMTRebound", false)),
+        Button("曲柄滑块", () => RhinoApp.RunScript("_PMTCrankSlider", false)),
+        Button("四连杆", () => RhinoApp.RunScript("_PMTFourBar", false)));
 
       var scroll = new Scrollable { Content = _canvas, Border = BorderType.None };
       var root = new TableLayout
@@ -111,6 +129,9 @@ namespace ProductMotionTimeline.UI
       root.Rows.Add(new TableRow(trackTools));
       root.Rows.Add(new TableRow(hierarchyTools));
       root.Rows.Add(new TableRow(mechanicalTools));
+      root.Rows.Add(new TableRow(constraintSelectionTools));
+      root.Rows.Add(new TableRow(_constraints));
+      root.Rows.Add(new TableRow(motionTemplates));
       root.Rows.Add(new TableRow(_relationship));
       root.Rows.Add(new TableRow(_status));
       Content = root;
@@ -134,6 +155,7 @@ namespace ProductMotionTimeline.UI
       _interpolation.SelectedIndexChanged += (sender, args) => UpdateInterpolation();
       _rotationAxis.SelectedIndexChanged += (sender, args) => UpdateRotationChannel();
       _axisAngle.ValueChanged += (sender, args) => UpdateRotationChannel();
+      _constraints.SelectedIndexChanged += (sender, args) => ConstraintSelectionChanged();
     }
 
     private void RefreshFromModel()
@@ -177,12 +199,89 @@ namespace ProductMotionTimeline.UI
         ? "传动：无"
         : $"传动：{driver?.Name ?? "未知"} → {track.Name}　比例 {constraint.SignedRatio:0.###}　相位 {constraint.PhaseOffsetDegrees:0.###}°";
       _relationship.Text = parentText + "　　" + constraintText;
+      RefreshConstraintList(model, doc, constraint?.Id ?? Guid.Empty);
 
       _status.Text = track == null
         ? "先点“添加部件”；若对象已打组但只想动画其中一部分，请点“组内零件”。"
         : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　提示：父级继承运动，子级仍可单独卡帧。";
       _canvas.RefreshHeight();
       _suppress = false;
+    }
+
+    private void RefreshConstraintList(TimelineDocument model, RhinoDoc doc, Guid preferredId)
+    {
+      var previouslySelected = SelectedConstraint()?.Id ?? preferredId;
+      _constraintItems.Clear();
+      _constraintItems.AddRange(model.Constraints);
+      var rows = new List<string>();
+      foreach (var item in _constraintItems)
+      {
+        var driver = model.FindTrack(item.DriverTrackId);
+        var driven = model.FindTrack(item.DrivenTrackId);
+        var validation = TimelineEngine.ValidateMechanicalConstraint(doc, item);
+        var mark = validation.Severity == ValidationSeverity.Ok ? "✓" : "⚠";
+        rows.Add(string.Format(
+          "{0}  {1} → {2}  {3}  {4}:{5}  比例 {6:0.###}  {7}",
+          mark,
+          driver?.Name ?? "?",
+          driven?.Name ?? "?",
+          MechanicalTypeName(item.Type),
+          item.DriverTeeth,
+          item.DrivenTeeth,
+          item.SignedRatio,
+          validation.Message));
+      }
+      _constraints.DataStore = rows;
+      var index = _constraintItems.FindIndex(item => item.Id == previouslySelected);
+      if (index >= 0)
+        _constraints.SelectedIndex = index;
+    }
+
+    private MechanicalConstraint SelectedConstraint()
+    {
+      var index = _constraints.SelectedIndex;
+      return index >= 0 && index < _constraintItems.Count ? _constraintItems[index] : null;
+    }
+
+    private void ConstraintSelectionChanged()
+    {
+      if (_suppress)
+        return;
+      var selected = SelectedConstraint();
+      if (selected != null)
+        TimelineEngine.SelectTrack(RhinoDoc.ActiveDoc, selected.DrivenTrackId);
+    }
+
+    private void SelectConstraintTrack(bool driver)
+    {
+      var doc = RhinoDoc.ActiveDoc;
+      var selected = SelectedConstraint();
+      if (doc == null || selected == null)
+        return;
+      var trackId = driver ? selected.DriverTrackId : selected.DrivenTrackId;
+      TimelineEngine.SelectTrack(doc, trackId);
+      var track = TimelineEngine.Model(doc).FindTrack(trackId);
+      var instance = TimelineEngine.ResolveInstance(doc, track);
+      doc.Objects.UnselectAll();
+      instance?.Select(true);
+      doc.Views.Redraw();
+    }
+
+    private void DeleteSelectedConstraint()
+    {
+      var selected = SelectedConstraint();
+      if (selected != null)
+        TimelineEngine.DeleteMechanicalConstraint(RhinoDoc.ActiveDoc, selected.Id);
+    }
+
+    private static string MechanicalTypeName(MechanicalConstraintType type)
+    {
+      switch (type)
+      {
+        case MechanicalConstraintType.InternalGear: return "内啮合";
+        case MechanicalConstraintType.Belt: return "皮带";
+        default: return "外啮合";
+      }
     }
 
     private void UpdateSettings()

@@ -183,10 +183,34 @@ namespace ProductMotionTimeline.Core
         plane.Origin = point;
       }
 
+      return SetPivotPlane(doc, track, plane);
+    }
+
+    public static bool SetPivotPlane(RhinoDoc doc, AnimationTrack track, Plane plane)
+    {
+      if (doc == null || track == null || !plane.IsValid)
+        return false;
       var pivot = Transform.PlaneToPlane(Plane.WorldXY, plane);
       if (!track.TryRebasePivot(pivot))
         return false;
+      track.RotationAxis = RotationAxis.Z;
       SaveAndNotify(doc);
+      return true;
+    }
+
+    public static bool TryAutoSetPivot(RhinoDoc doc, AnimationTrack track, out string description)
+    {
+      description = "未找到可靠的圆孔，已保留当前轴心";
+      var instance = ResolveInstance(doc, track);
+      AxisDetectionResult detection;
+      if (instance == null || !AxisDetector.TryDetect(doc, instance, out detection))
+        return false;
+      if (!SetPivotPlane(doc, track, detection.Plane))
+        return false;
+      description = string.Format(
+        "已识别轴孔：半径 {0:0.###}，共轴圆边 {1} 条",
+        detection.Radius,
+        detection.MatchingCircularEdges);
       return true;
     }
 
@@ -279,6 +303,29 @@ namespace ProductMotionTimeline.Core
       int drivenTeeth,
       double phaseOffsetDegrees)
     {
+      return AddMechanicalConstraint(
+        doc,
+        driverTrackId,
+        drivenTrackId,
+        type,
+        driverTeeth,
+        drivenTeeth,
+        phaseOffsetDegrees,
+        0.0,
+        20.0);
+    }
+
+    public static bool AddMechanicalConstraint(
+      RhinoDoc doc,
+      Guid driverTrackId,
+      Guid drivenTrackId,
+      MechanicalConstraintType type,
+      int driverTeeth,
+      int drivenTeeth,
+      double phaseOffsetDegrees,
+      double module,
+      double pressureAngleDegrees)
+    {
       var model = Model(doc);
       var driver = model.FindTrack(driverTrackId);
       var driven = model.FindTrack(drivenTrackId);
@@ -298,6 +345,8 @@ namespace ProductMotionTimeline.Core
         Type = type,
         DriverTeeth = driverTeeth,
         DrivenTeeth = drivenTeeth,
+        Module = Math.Max(0.0, module),
+        PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees),
         PhaseOffsetDegrees = phaseOffsetDegrees,
         Enabled = true
       });
@@ -309,6 +358,145 @@ namespace ProductMotionTimeline.Core
         driven.Name,
         model.ConstraintForDriven(drivenTrackId).SignedRatio);
       return true;
+    }
+
+    public static bool UpdateMechanicalConstraint(
+      RhinoDoc doc,
+      Guid constraintId,
+      MechanicalConstraintType type,
+      int driverTeeth,
+      int drivenTeeth,
+      double module,
+      double pressureAngleDegrees,
+      double phaseOffsetDegrees)
+    {
+      var model = Model(doc);
+      var constraint = model.Constraints.FirstOrDefault(item => item.Id == constraintId);
+      if (constraint == null || driverTeeth < 1 || drivenTeeth < 1 || module < 0.0)
+        return false;
+      constraint.Type = type;
+      constraint.DriverTeeth = driverTeeth;
+      constraint.DrivenTeeth = drivenTeeth;
+      constraint.Module = module;
+      constraint.PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees);
+      constraint.PhaseOffsetDegrees = phaseOffsetDegrees;
+      SaveAndNotify(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
+      return true;
+    }
+
+    public static bool DeleteMechanicalConstraint(RhinoDoc doc, Guid constraintId)
+    {
+      var model = Model(doc);
+      var removed = model.Constraints.RemoveAll(item => item.Id == constraintId) > 0;
+      if (!removed)
+        return false;
+      SaveAndNotify(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
+      return true;
+    }
+
+    public static MechanicalValidationResult ValidateMechanicalConstraint(
+      RhinoDoc doc,
+      MechanicalConstraint constraint)
+    {
+      var result = new MechanicalValidationResult();
+      if (doc == null || constraint == null)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "传动数据不完整";
+        return result;
+      }
+
+      var model = Model(doc);
+      var driver = model.FindTrack(constraint.DriverTrackId);
+      var driven = model.FindTrack(constraint.DrivenTrackId);
+      if (driver == null || driven == null)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "找不到主动件或从动件";
+        return result;
+      }
+
+      var driverOrigin = PivotOrigin(driver);
+      var drivenOrigin = PivotOrigin(driven);
+      var driverAxis = PivotAxis(driver);
+      var drivenAxis = PivotAxis(driven);
+      if (Math.Abs(driverAxis * drivenAxis) < Math.Cos(Math.PI / 90.0))
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "两转轴不平行（偏差超过 2°）";
+        return result;
+      }
+
+      var delta = drivenOrigin - driverOrigin;
+      result.ActualCenterDistance = (delta - driverAxis * (delta * driverAxis)).Length;
+      if (constraint.Type == MechanicalConstraintType.Belt)
+      {
+        result.Message = "转轴平行，皮带传动比有效";
+        return result;
+      }
+
+      if (constraint.Type == MechanicalConstraintType.InternalGear &&
+          constraint.DrivenTeeth <= constraint.DriverTeeth)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "内齿轮齿数必须大于外齿主动轮";
+        return result;
+      }
+      if (constraint.Module <= 0.0)
+      {
+        result.Severity = ValidationSeverity.Warning;
+        result.Message = "未设置模数：已校验轴向，仅按齿数比动画";
+        return result;
+      }
+
+      result.ExpectedCenterDistance = constraint.Type == MechanicalConstraintType.ExternalGear
+        ? constraint.Module * (constraint.DriverTeeth + constraint.DrivenTeeth) * 0.5
+        : constraint.Module * Math.Abs(constraint.DrivenTeeth - constraint.DriverTeeth) * 0.5;
+      var tolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, constraint.Module * 0.05);
+      var error = Math.Abs(result.ActualCenterDistance - result.ExpectedCenterDistance);
+      if (error > tolerance)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = string.Format(
+          "中心距 {0:0.###}，按模数应为 {1:0.###}，差 {2:0.###}",
+          result.ActualCenterDistance,
+          result.ExpectedCenterDistance,
+          error);
+        return result;
+      }
+
+      if (Math.Min(constraint.DriverTeeth, constraint.DrivenTeeth) < 17 &&
+          constraint.PressureAngleDegrees >= 19.0 &&
+          constraint.PressureAngleDegrees <= 21.0)
+      {
+        result.Severity = ValidationSeverity.Warning;
+        result.Message = "中心距正确；小齿轮少于 17 齿，20°标准齿形可能根切";
+        return result;
+      }
+
+      result.Message = string.Format(
+        "真实啮合通过：中心距 {0:0.###}，模数 {1:0.###}",
+        result.ActualCenterDistance,
+        constraint.Module);
+      return result;
+    }
+
+    public static Point3d PivotOrigin(AnimationTrack track)
+    {
+      var origin = Point3d.Origin;
+      origin.Transform(track.PivotTransform);
+      return origin;
+    }
+
+    public static Vector3d PivotAxis(AnimationTrack track)
+    {
+      var axis = Vector3d.ZAxis;
+      axis.Transform(track.PivotTransform);
+      if (!axis.Unitize())
+        return Vector3d.ZAxis;
+      return axis;
     }
 
     public static bool DeleteConstraintForDriven(RhinoDoc doc, Guid drivenTrackId)
