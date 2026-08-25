@@ -1,0 +1,82 @@
+name: Build Wood Thickness Adjuster for Rhino 7 and 8
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - wood-thickness-adjuster-1.0.0
+    paths:
+      - "WoodThicknessAdjuster/**"
+      - ".github/workflows/build-wood-thickness-adjuster.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "WoodThicknessAdjuster/**"
+      - ".github/workflows/build-wood-thickness-adjuster.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify thickness adjustment logic
+        shell: pwsh
+        working-directory: WoodThicknessAdjuster
+        run: python tests/verify_thickness_adjuster.py
+
+      - name: Build Wood Thickness Adjuster
+        shell: pwsh
+        working-directory: WoodThicknessAdjuster
+        run: ./build.ps1 -Configuration Release
+
+      - name: Upload Rhino 7 plug-in
+        uses: actions/upload-artifact@v4
+        with:
+          name: WoodThicknessAdjuster-1.0.0-rhino7
+          path: WoodThicknessAdjuster/dist/WoodThicknessAdjuster-1.0.0-rhino7.zip
+          if-no-files-found: error
+
+      - name: Upload Rhino 8 plug-in
+        uses: actions/upload-artifact@v4
+        with:
+          name: WoodThicknessAdjuster-1.0.0-rhino8
+          path: WoodThicknessAdjuster/dist/WoodThicknessAdjuster-1.0.0-rhino8.zip
+          if-no-files-found: error
+
+      - name: Upload combined package
+        uses: actions/upload-artifact@v4
+        with:
+          name: WoodThicknessAdjuster-1.0.0-rhino7-rhino8
+          path: WoodThicknessAdjuster/dist/WoodThicknessAdjuster-1.0.0-rhino7-rhino8.zip
+          if-no-files-found: error
+
+      - name: Publish permanent combined installer
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'Publish WoodThicknessAdjuster 1.0.0 installer')
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path WoodThicknessAdjuster/releases -Force | Out-Null
+          Copy-Item -LiteralPath WoodThicknessAdjuster/dist/WoodThicknessAdjuster-1.0.0-rhino7-rhino8.zip -Destination WoodThicknessAdjuster/releases/WoodThicknessAdjuster-1.0.0-rhino7-rhino8.zip -Force
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add WoodThicknessAdjuster/releases/WoodThicknessAdjuster-1.0.0-rhino7-rhino8.zip
+          git diff --cached --quiet
+          if ($LASTEXITCODE -ne 0) {
+            git commit -m "Publish WoodThicknessAdjuster 1.0.0 installer"
+            git push
+          }

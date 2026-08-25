@@ -1,0 +1,12 @@
+name: WoodThicknessAdjuster
+version: 1.0.0
+authors:
+  - Lianda Design Tools
+description: Click planar wooden parts to set common plywood thicknesses while preserving the clicked face.
+url: https://github.com/lianda123/opena1
+keywords:
+  - wood
+  - plywood
+  - thickness
+  - laser-cut
+  - rhino
