@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 
 $pluginId = "F9A7EFD6-7BBE-4E9D-A7C6-4BBE9B7DE101"
 $pluginName = "ProductMotion Timeline"
-$version = "0.4.0"
+$version = "0.4.1"
 $sourceRoot = if (Test-Path (Join-Path $PSScriptRoot "dist")) { Join-Path $PSScriptRoot "dist" } else { $PSScriptRoot }
 $installRoot = Join-Path $env:LOCALAPPDATA "ProductMotionTimeline\$version"
 

@@ -497,8 +497,15 @@ namespace ProductMotionTimeline.Commands
       var driverInstance = TimelineEngine.ResolveInstance(doc, driver);
       GearParameters driverGear;
       var hasDriverGear = GearPartMetadata.TryRead(driverInstance, out driverGear);
+      if (hasDriverGear && driverGear.Type == GearPartType.Rack)
+      {
+        RhinoApp.WriteLine(
+          "ProductMotion：当前版本只支持齿轮驱动齿条；请把齿轮设为主动件、齿条设为从动件。");
+        return Result.Nothing;
+      }
       var manualDriverTeeth = 0;
       var successCount = 0;
+      var warningCount = 0;
       for (var index = 0; index < getter.ObjectCount; index++)
       {
         var drivenInstance = getter.Object(index).Object() as InstanceObject;
@@ -516,6 +523,14 @@ namespace ProductMotionTimeline.Commands
           TimelineEngine.TryAutoSetPivot(doc, driven, out ignored);
 
         var type = fixedType ?? GearPartMetadata.InferConstraintType(driverGear, drivenGear);
+        if (hasDrivenGear && drivenGear.Type == GearPartType.Rack &&
+            type != MechanicalConstraintType.RackPinion)
+        {
+          RhinoApp.WriteLine(
+            "ProductMotion：跳过“{0}”：已识别为齿条，请使用 Auto 或 RackPinion。",
+            driven.Name);
+          continue;
+        }
         if (type == MechanicalConstraintType.RackPinion &&
             (!hasDrivenGear || drivenGear.Type != GearPartType.Rack))
         {
@@ -585,15 +600,28 @@ namespace ProductMotionTimeline.Commands
           phaseDistance,
           RotationAxis.X,
           1.0))
+        {
           successCount++;
+          var added = model.ConstraintForDriven(driven.Id);
+          var validation = TimelineEngine.ValidateMechanicalConstraint(doc, added);
+          if (validation.Severity != ValidationSeverity.Ok)
+          {
+            warningCount++;
+            RhinoApp.WriteLine(
+              "ProductMotion：“{0}”传动检查：{1}。",
+              driven.Name,
+              validation.Message);
+          }
+        }
       }
 
       TimelineEngine.SelectTrack(doc, driver.Id);
       Panels.OpenPanel(TimelinePanel.PanelId);
       RhinoApp.WriteLine(
-        "ProductMotion：已从“{0}”建立 {1} 条分支传动；这些从动件仍可继续驱动下一级。",
+        "ProductMotion：已从“{0}”建立 {1} 条分支传动（{2} 条需要检查）；这些从动件仍可继续驱动下一级。",
         driver.Name,
-        successCount);
+        successCount,
+        warningCount);
       return successCount > 0 ? Result.Success : Result.Nothing;
     }
 

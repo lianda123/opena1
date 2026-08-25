@@ -484,12 +484,37 @@ namespace ProductMotionTimeline.Core
         return result;
       }
 
-      if (constraint.Type == MechanicalConstraintType.InternalGear &&
-          constraint.DrivenTeeth <= constraint.DriverTeeth)
+      if (constraint.Type == MechanicalConstraintType.InternalGear)
       {
-        result.Severity = ValidationSeverity.Error;
-        result.Message = "内齿轮齿数必须大于外齿主动轮";
-        return result;
+        GearParameters driverGear;
+        GearParameters drivenGear;
+        var driverIsGenerated = GearPartMetadata.TryRead(ResolveInstance(doc, driver), out driverGear);
+        var drivenIsGenerated = GearPartMetadata.TryRead(ResolveInstance(doc, driven), out drivenGear);
+        if (driverIsGenerated && drivenIsGenerated)
+        {
+          var driverIsInternal = driverGear.Type == GearPartType.Internal;
+          var drivenIsInternal = drivenGear.Type == GearPartType.Internal;
+          if (driverIsInternal == drivenIsInternal)
+          {
+            result.Severity = ValidationSeverity.Error;
+            result.Message = "内啮合需要一个内齿圈和一个外齿轮";
+            return result;
+          }
+          var internalTeeth = driverIsInternal ? constraint.DriverTeeth : constraint.DrivenTeeth;
+          var externalTeeth = driverIsInternal ? constraint.DrivenTeeth : constraint.DriverTeeth;
+          if (internalTeeth <= externalTeeth)
+          {
+            result.Severity = ValidationSeverity.Error;
+            result.Message = "内齿圈齿数必须大于配对的外齿轮";
+            return result;
+          }
+        }
+        else if (constraint.DriverTeeth == constraint.DrivenTeeth)
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = "内啮合两齿轮齿数不能相同";
+          return result;
+        }
       }
       if (constraint.Module <= 0.0)
       {

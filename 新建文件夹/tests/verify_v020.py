@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.0."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.1."""
 
 from pathlib import Path
 import re
@@ -159,13 +159,16 @@ def main():
         assert token in gear_geometry, token
     for token in ["GearPartType", "InferConstraintType", "HelixAngleDegrees", "RackLength"]:
         assert token in gear_metadata, token
+    assert "driver?.Type == GearPartType.Internal || driven?.Type == GearPartType.Internal" in gear_metadata
+    assert "当前版本只支持齿轮驱动齿条" in commands
+    assert "内齿圈齿数必须大于配对的外齿轮" in engine
     assert "ConstraintsForDriver" in data
     assert "EvaluateRackDistance" in data
 
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.0</Version>" in project
+    assert "<Version>0.4.1</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -179,7 +182,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.0 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.1 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

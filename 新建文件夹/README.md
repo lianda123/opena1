@@ -1,10 +1,16 @@
-# ProductMotion Timeline 0.4.0（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.1（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.0 把时间轴、传动网络和齿轮生成器合并为一个工作流：一个主动件可同时驱动多个从动件，从动件又可继续串联下一级；动作模板可自动接在上一段动作后；新增渐开线直齿、内齿、斜齿、锥齿和齿条生成器。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.1 把时间轴、传动网络和齿轮生成器合并为一个工作流：一个主动件可同时驱动多个从动件，从动件又可继续串联下一级；动作模板可自动接在上一段动作后；内齿圈可作为主动件；新增渐开线直齿、内齿、斜齿、锥齿和齿条生成器。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.4.0 主要改进
+## 0.4.1 主要改进
+
+- 内啮合自动识别不再限制内齿圈必须是从动件：内齿圈主动、小齿轮从动同样可以按正确比例联动。
+- 一主多从完成后逐条输出啮合检查结果，便于立即发现中心距、模数、轴向或齿数组合问题。
+- 自动拦截把齿条选为主动件的错误操作；当前版本支持齿轮驱动齿条，不会再把齿条误当旋转件。
+
+### 0.4.0 合并功能
 
 - **自动轴孔**：扫描块内圆边，优先选择靠近零件中心且有成对共轴边的孔，自动设置轴心和轴向；也可单独运行 `PMTAutoPivot`。
 - **可视化传动图**：视口直接连线显示“主动→从动”和实时比例；面板列表可定位两端、编辑齿数/模数/压力角/相位或删除关系。
@@ -144,9 +150,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.0-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.0-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.0-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.1-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.1-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.1-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

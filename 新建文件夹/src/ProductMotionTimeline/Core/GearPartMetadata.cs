@@ -98,7 +98,7 @@ namespace ProductMotionTimeline.Core
         return MechanicalConstraintType.BevelGear;
       if (driver?.Type == GearPartType.Helical || driven?.Type == GearPartType.Helical)
         return MechanicalConstraintType.HelicalGear;
-      if (driven?.Type == GearPartType.Internal)
+      if (driver?.Type == GearPartType.Internal || driven?.Type == GearPartType.Internal)
         return MechanicalConstraintType.InternalGear;
       return MechanicalConstraintType.ExternalGear;
     }
