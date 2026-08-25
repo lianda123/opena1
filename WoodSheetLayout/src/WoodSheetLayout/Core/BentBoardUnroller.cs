@@ -956,18 +956,19 @@ namespace WoodSheetLayout.Core
           var complete = true;
           foreach (var trim in loop.Trims)
           {
-            if (trim.Edge == null)
-            {
-              complete = false;
-              break;
-            }
             Curve mappedSegment;
-            if (!TryMapCurveToOffsetFace(
-              trim.Edge.DuplicateCurve(),
-              sourceFace,
-              offsetFaceBrep,
-              tolerance,
-              out mappedSegment))
+            if (!TryMapTrimToOffsetFace(
+                trim,
+                offsetFaceBrep,
+                tolerance,
+                out mappedSegment) &&
+              (trim.Edge == null ||
+               !TryMapCurveToOffsetFace(
+                 trim.Edge.DuplicateCurve(),
+                 sourceFace,
+                 offsetFaceBrep,
+                 tolerance,
+                 out mappedSegment)))
             {
               complete = false;
               break;
@@ -1031,6 +1032,49 @@ namespace WoodSheetLayout.Core
       };
     }
 
+    private static bool TryMapTrimToOffsetFace(
+      BrepTrim sourceTrim,
+      Brep offsetFaceBrep,
+      double tolerance,
+      out Curve mapped)
+    {
+      mapped = null;
+      if (sourceTrim == null ||
+          offsetFaceBrep == null || offsetFaceBrep.Faces.Count == 0)
+        return false;
+
+      Curve trimCurve2d;
+      try
+      {
+        // BrepTrim是位于所属曲面UV参数域中的二维CurveProxy。直接将这条
+        // 原始修剪曲线Pushup到保持同一参数化的中性层偏移面，可绕过
+        // 复杂闭合孔在3D Curve.Pullback阶段的失败。
+        trimCurve2d = sourceTrim.DuplicateCurve();
+      }
+      catch
+      {
+        trimCurve2d = null;
+      }
+      if (trimCurve2d == null || !trimCurve2d.IsValid)
+        return false;
+
+      foreach (var targetFace in offsetFaceBrep.Faces)
+      {
+        try
+        {
+          mapped = targetFace.Pushup(trimCurve2d, tolerance * 10.0);
+        }
+        catch
+        {
+          mapped = null;
+        }
+        if (mapped != null && mapped.IsValid)
+          return true;
+      }
+      mapped = null;
+      return false;
+    }
+
     private static bool TryMapCurveToOffsetFace(
       Curve sourceCurve,
       BrepFace sourceFace,
@@ -1042,6 +1086,33 @@ namespace WoodSheetLayout.Core
       if (sourceCurve == null || sourceFace == null ||
           offsetFaceBrep == null || offsetFaceBrep.Faces.Count == 0)
         return false;
+
+      // 平面段无需做数值Pullback：把孔边界沿目标中性层平面的法向
+      // 直接平移，能完整保留长圆孔、卡扣槽和大量布尔碎边。
+      Plane sourcePlane;
+      if (sourceFace.TryGetPlane(out sourcePlane, tolerance * 10.0))
+      {
+        foreach (var targetFace in offsetFaceBrep.Faces)
+        {
+          Plane targetPlane;
+          if (!targetFace.TryGetPlane(out targetPlane, tolerance * 10.0))
+            continue;
+          var parallel = Math.Abs(Vector3d.Multiply(
+            sourcePlane.Normal,
+            targetPlane.Normal));
+          if (parallel < 0.999999)
+            continue;
+          var sample = sourceCurve.PointAtNormalizedLength(0.5);
+          var translation = targetPlane.ClosestPoint(sample) - sample;
+          var translated = sourceCurve.DuplicateCurve();
+          if (translated == null ||
+              !translated.Transform(Transform.Translation(translation)))
+            continue;
+          mapped = translated;
+          return mapped.IsValid;
+        }
+      }
+
       Curve pullback;
       try
       {
