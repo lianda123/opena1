@@ -55,7 +55,7 @@ def main():
         "doc.Groups.GroupMembers", "ShouldFollowBoard", "DuplicateGeometry",
         "doc.Objects.Transform", "Stack<AdjustmentTransaction>",
         "TryRollbackAdjustment", "RemapHistoryObjectIds", "OriginalGeometry",
-        "OriginalAttributes", "doc.Objects.Replace", "history.Pop()",
+        "OriginalAttributes", "doc.Objects.Add", "doc.Objects.Delete", "history.Pop()",
         "UndoLast", "撤回上一步",
         "TargetMillimeters", "保持点击面", "折弯板不会强制缩放",
         "ThicknessContactMode.AutoFit", "AssemblyContactResolver.TryFindContact",

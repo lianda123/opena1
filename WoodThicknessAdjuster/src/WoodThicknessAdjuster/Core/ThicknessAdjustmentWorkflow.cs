@@ -8,6 +8,7 @@ using Rhino.DocObjects;
 using Rhino.Geometry;
 using Rhino.Input;
 using Rhino.Input.Custom;
+using Rhino.UI;
 
 namespace WoodThicknessAdjuster.Core
 {
@@ -73,13 +74,19 @@ namespace WoodThicknessAdjuster.Core
           }
           var transaction = history.Peek();
           Guid restoredBoardId;
-          if (!TryRollbackAdjustment(doc, transaction, out restoredBoardId))
+          Dictionary<Guid, Guid> restoredIds;
+          if (!TryRollbackAdjustment(
+            doc,
+            transaction,
+            out restoredBoardId,
+            out restoredIds))
           {
             RhinoApp.WriteLine(
               "WoodThicknessAdjuster：撤回失败，场景中的相关对象可能已被其他操作修改。");
             continue;
           }
           history.Pop();
+          RemapHistoryObjectIds(history, restoredIds);
           adjustedCount = Math.Max(0, adjustedCount - 1);
           lastAdjustedBoardId = history.Count > 0
             ? history.Peek().BoardObjectId
@@ -569,12 +576,34 @@ namespace WoodThicknessAdjuster.Core
       }
     }
 
+    private static void RemapHistoryObjectIds(
+      IEnumerable<AdjustmentTransaction> history,
+      IDictionary<Guid, Guid> restoredIds)
+    {
+      foreach (var previous in history)
+      {
+        Guid restoredBoardId;
+        if (restoredIds.TryGetValue(previous.BoardObjectId, out restoredBoardId))
+          previous.BoardObjectId = restoredBoardId;
+        foreach (var previousObject in previous.Objects)
+        {
+          Guid restoredObjectId;
+          if (restoredIds.TryGetValue(
+            previousObject.CurrentObjectId,
+            out restoredObjectId))
+            previousObject.CurrentObjectId = restoredObjectId;
+        }
+      }
+    }
+
     private static bool TryRollbackAdjustment(
       RhinoDoc doc,
       AdjustmentTransaction transaction,
-      out Guid restoredBoardId)
+      out Guid restoredBoardId,
+      out Dictionary<Guid, Guid> restoredIds)
     {
       restoredBoardId = Guid.Empty;
+      restoredIds = new Dictionary<Guid, Guid>();
       if (transaction == null || transaction.Objects.Count == 0)
         return false;
       if (transaction.Objects.Any(item =>
@@ -584,16 +613,34 @@ namespace WoodThicknessAdjuster.Core
         doc.Objects.FindId(item.CurrentObjectId) == null))
         return false;
 
+      var addedIds = new List<Guid>();
       foreach (var item in transaction.Objects)
       {
         var geometry = item.OriginalGeometry.Duplicate();
         var attributes = item.OriginalAttributes.Duplicate();
-        if (geometry == null ||
-          !doc.Objects.Replace(item.CurrentObjectId, geometry) ||
-          !doc.Objects.ModifyAttributes(item.CurrentObjectId, attributes, true))
+        var restoredId = geometry == null
+          ? Guid.Empty
+          : doc.Objects.Add(geometry, attributes);
+        if (restoredId == Guid.Empty)
+        {
+          foreach (var addedId in addedIds)
+            doc.Objects.Delete(addedId, true);
           return false;
+        }
+        addedIds.Add(restoredId);
+        restoredIds[item.CurrentObjectId] = restoredId;
         if (item.IsBoard)
-          restoredBoardId = item.CurrentObjectId;
+          restoredBoardId = restoredId;
+      }
+
+      foreach (var item in transaction.Objects)
+      {
+        if (!doc.Objects.Delete(item.CurrentObjectId, true))
+        {
+          RhinoApp.WriteLine(
+            "WoodThicknessAdjuster：撤回时无法删除已调整对象，请立即使用Rhino常规撤销恢复。");
+          return false;
+        }
       }
       return restoredBoardId != Guid.Empty;
     }
