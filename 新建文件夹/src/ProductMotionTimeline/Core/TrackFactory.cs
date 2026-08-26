@@ -56,17 +56,17 @@ namespace ProductMotionTimeline.Core
       var geometryAttributes = new List<ObjectAttributes>();
       for (var index = 0; index < geometries.Count; index++)
       {
-        var attributes = new ObjectAttributes
+        var partAttributes = new ObjectAttributes
         {
           Name = index == 0 ? name : "分度圆或分度线（辅助）"
         };
         if (index > 0)
         {
-          attributes.ColorSource = ObjectColorSource.ColorFromObject;
-          attributes.ObjectColor = System.Drawing.Color.FromArgb(0, 190, 255);
-          attributes.SetUserString("ProductMotionTimeline.Auxiliary", "PitchReference");
+          partAttributes.ColorSource = ObjectColorSource.ColorFromObject;
+          partAttributes.ObjectColor = System.Drawing.Color.FromArgb(0, 190, 255);
+          partAttributes.SetUserString("ProductMotionTimeline.Auxiliary", "PitchReference");
         }
-        geometryAttributes.Add(attributes);
+        geometryAttributes.Add(partAttributes);
       }
       var definitionIndex = doc.InstanceDefinitions.Add(
         definitionName,
@@ -79,8 +79,8 @@ namespace ProductMotionTimeline.Core
       var instanceId = doc.Objects.AddInstanceObject(definitionIndex, Transform.Identity);
       if (instanceId == Guid.Empty)
         return null;
-      var attributes = new ObjectAttributes { Name = name };
-      doc.Objects.ModifyAttributes(instanceId, attributes, true);
+      var instanceAttributes = new ObjectAttributes { Name = name };
+      doc.Objects.ModifyAttributes(instanceId, instanceAttributes, true);
       if (gearParameters != null)
         GearPartMetadata.Write(doc, instanceId, gearParameters);
       var instance = doc.Objects.FindId(instanceId) as InstanceObject;
