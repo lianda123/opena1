@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Eto.Drawing;
 using Eto.Forms;
@@ -30,7 +31,11 @@ namespace ProductMotionTimeline.UI
     private readonly Pen _minorGridPen = new Pen(Color.FromArgb(49, 52, 58), 1f);
     private readonly Pen _playheadPen = new Pen(Color.FromArgb(255, 86, 77), 2f);
     private readonly Pen _trackDropPen = new Pen(Color.FromArgb(0, 190, 255), 3f);
+    private readonly Pen _selectedTrackPen = new Pen(Color.FromArgb(70, 190, 255), 4f);
+    private readonly Pen _marqueePen = new Pen(Color.FromArgb(93, 203, 255), 1f);
+    private readonly SolidBrush _marqueeBrush = new SolidBrush(Color.FromArgb(55, 74, 177, 235));
     private readonly SolidBrush _playheadBrush = new SolidBrush(Color.FromArgb(255, 86, 77));
+    private readonly HashSet<KeySelection> _selectedKeys = new HashSet<KeySelection>();
 
     private Guid _dragTrackId = Guid.Empty;
     private int _dragOriginalFrame = -1;
@@ -41,6 +46,28 @@ namespace ProductMotionTimeline.UI
     private float _rowDragStartY;
     private bool _rowDropAfter;
     private bool _rowDragging;
+    private bool _marqueeSelecting;
+    private PointF _marqueeStart;
+    private PointF _marqueeCurrent;
+    private int _marqueeMode;
+
+    public event Action KeySelectionChanged;
+    public event Action KeyActivated;
+
+    public IEnumerable<KeySelection> SelectedKeys
+    {
+      get
+      {
+        var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
+        if (model != null)
+          _selectedKeys.RemoveWhere(item => model.FindTrack(item.TrackId)?.FindKey(item.Frame) == null);
+        return _selectedKeys.Select(item => new KeySelection
+        {
+          TrackId = item.TrackId,
+          Frame = item.Frame
+        }).ToList();
+      }
+    }
 
     public TimelineCanvas()
     {
@@ -49,6 +76,7 @@ namespace ProductMotionTimeline.UI
       MouseDown += OnMouseDown;
       MouseMove += OnMouseMove;
       MouseUp += OnMouseUp;
+      MouseDoubleClick += OnMouseDoubleClick;
     }
 
     public void RefreshHeight()
@@ -76,6 +104,7 @@ namespace ProductMotionTimeline.UI
       DrawTracks(graphics, model, width);
       DrawTrackDropIndicator(graphics, model, width);
       DrawPlayhead(graphics, model, width, height);
+      DrawMarquee(graphics);
     }
 
     private void DrawRuler(Graphics graphics, TimelineDocument model, float width, float height)
@@ -104,9 +133,13 @@ namespace ProductMotionTimeline.UI
         var y = RulerHeight + index * RowHeight;
         var selected = model.SelectedTrack?.Id == track.Id;
         graphics.FillRectangle(selected ? _selectedRow : _row, new RectangleF(0, y, width, RowHeight - 1));
+        if (selected)
+          graphics.DrawLine(_selectedTrackPen, 2f, y + 1f, 2f, y + RowHeight - 2f);
         var depth = model.TrackDepth(track);
         var driven = model.ConstraintForDriven(track.Id) != null;
-        var prefix = (depth > 0 ? "↳ " : string.Empty) + (driven ? "[传] " : string.Empty);
+        var prefix = (selected ? "● " : string.Empty) +
+                     (depth > 0 ? "↳ " : string.Empty) +
+                     (driven ? "[传] " : string.Empty);
         graphics.DrawText(
           _font,
           track.Enabled ? _text : _mutedText,
@@ -131,7 +164,11 @@ namespace ProductMotionTimeline.UI
             ? _dragPreviewFrame
             : key.Frame;
           var x = FrameToX(frame, model, width);
-          var keySelected = selected && frame == model.CurrentFrame;
+          var keySelected = _selectedKeys.Contains(new KeySelection
+          {
+            TrackId = track.Id,
+            Frame = key.Frame
+          });
           DrawDiamond(
             graphics,
             x,
@@ -139,6 +176,15 @@ namespace ProductMotionTimeline.UI
             keySelected ? _selectedKeyBrush : KeyBrush(key.Interpolation));
         }
       }
+    }
+
+    private void DrawMarquee(Graphics graphics)
+    {
+      if (!_marqueeSelecting)
+        return;
+      var rectangle = NormalizedRectangle(_marqueeStart, _marqueeCurrent);
+      graphics.FillRectangle(_marqueeBrush, rectangle);
+      graphics.DrawRectangle(_marqueePen, rectangle);
     }
 
     private Brush KeyBrush(InterpolationMode mode)
@@ -209,6 +255,16 @@ namespace ProductMotionTimeline.UI
 
     private void OnMouseDown(object sender, MouseEventArgs e)
     {
+      if ((e.Buttons & MouseButtons.Alternate) != 0 && e.Location.X >= HeaderWidth)
+      {
+        _marqueeSelecting = true;
+        _marqueeStart = e.Location;
+        _marqueeCurrent = e.Location;
+        _marqueeMode = HasModifier(e, Keys.Alt) ? -1 : HasModifier(e, Keys.Shift) ? 1 : 0;
+        e.Handled = true;
+        Invalidate();
+        return;
+      }
       if ((e.Buttons & MouseButtons.Primary) == 0)
         return;
       var doc = RhinoDoc.ActiveDoc;
@@ -235,10 +291,22 @@ namespace ProductMotionTimeline.UI
         var hit = HitKey(track, model, ClientSize.Width, e.Location.X);
         if (hit != null)
         {
+          var selection = new KeySelection { TrackId = track.Id, Frame = hit.Frame };
+          if (HasModifier(e, Keys.Alt))
+            _selectedKeys.Remove(selection);
+          else if (HasModifier(e, Keys.Shift))
+            _selectedKeys.Add(selection);
+          else
+          {
+            _selectedKeys.Clear();
+            _selectedKeys.Add(selection);
+          }
+          KeySelectionChanged?.Invoke();
           _dragTrackId = track.Id;
           _dragOriginalFrame = hit.Frame;
           _dragPreviewFrame = hit.Frame;
           TimelineEngine.ApplyFrame(doc, hit.Frame, false);
+          Invalidate();
           return;
         }
       }
@@ -252,6 +320,13 @@ namespace ProductMotionTimeline.UI
 
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
+      if (_marqueeSelecting)
+      {
+        _marqueeCurrent = e.Location;
+        e.Handled = true;
+        Invalidate();
+        return;
+      }
       if ((e.Buttons & MouseButtons.Primary) == 0)
         return;
       if (_rowDragTrackId != Guid.Empty)
@@ -280,6 +355,16 @@ namespace ProductMotionTimeline.UI
     private void OnMouseUp(object sender, MouseEventArgs e)
     {
       var doc = RhinoDoc.ActiveDoc;
+      if (_marqueeSelecting)
+      {
+        _marqueeCurrent = e.Location;
+        ApplyMarqueeSelection();
+        _marqueeSelecting = false;
+        e.Handled = true;
+        KeySelectionChanged?.Invoke();
+        Invalidate();
+        return;
+      }
       if (_rowDragTrackId != Guid.Empty)
       {
         if (_rowDragging && _rowDropSiblingId != Guid.Empty)
@@ -293,7 +378,11 @@ namespace ProductMotionTimeline.UI
       {
         var newFrame = _dragPreviewFrame;
         TimelineEngine.MoveKey(doc, _dragTrackId, _dragOriginalFrame, newFrame);
+        var oldSelection = new KeySelection { TrackId = _dragTrackId, Frame = _dragOriginalFrame };
+        if (_selectedKeys.Remove(oldSelection))
+          _selectedKeys.Add(new KeySelection { TrackId = _dragTrackId, Frame = newFrame });
         TimelineEngine.ApplyFrame(doc, newFrame, true);
+        KeySelectionChanged?.Invoke();
       }
       else if (_scrubbing)
       {
@@ -310,6 +399,91 @@ namespace ProductMotionTimeline.UI
       _rowDropAfter = false;
       _rowDragging = false;
       Invalidate();
+    }
+
+    private void OnMouseDoubleClick(object sender, MouseEventArgs e)
+    {
+      if ((e.Buttons & MouseButtons.Primary) == 0 || e.Location.X < HeaderWidth)
+        return;
+      var doc = RhinoDoc.ActiveDoc;
+      var model = TimelineEngine.Model(doc);
+      var tracks = model?.OrderedTracks();
+      var row = RowFromY(e.Location.Y);
+      if (tracks == null || row < 0 || row >= tracks.Count)
+        return;
+      var track = tracks[row];
+      var key = HitKey(track, model, ClientSize.Width, e.Location.X);
+      if (key == null)
+        return;
+      _selectedKeys.Clear();
+      _selectedKeys.Add(new KeySelection { TrackId = track.Id, Frame = key.Frame });
+      TimelineEngine.SelectTrack(doc, track.Id);
+      TimelineEngine.ApplyFrame(doc, key.Frame, false);
+      KeySelectionChanged?.Invoke();
+      KeyActivated?.Invoke();
+      e.Handled = true;
+      Invalidate();
+    }
+
+    public int SelectAllKeys()
+    {
+      _selectedKeys.Clear();
+      var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
+      var track = model?.SelectedTrack;
+      if (track != null)
+      {
+        foreach (var key in track.Keys)
+          _selectedKeys.Add(new KeySelection { TrackId = track.Id, Frame = key.Frame });
+      }
+      KeySelectionChanged?.Invoke();
+      Invalidate();
+      return _selectedKeys.Count;
+    }
+
+    public void ClearKeySelection()
+    {
+      _selectedKeys.Clear();
+      KeySelectionChanged?.Invoke();
+      Invalidate();
+    }
+
+    private void ApplyMarqueeSelection()
+    {
+      var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
+      if (model == null)
+        return;
+      var rectangle = NormalizedRectangle(_marqueeStart, _marqueeCurrent);
+      var hits = new HashSet<KeySelection>();
+      var tracks = model.OrderedTracks();
+      for (var row = 0; row < tracks.Count; row++)
+      {
+        var track = tracks[row];
+        var y = RulerHeight + row * RowHeight + RowHeight / 2f;
+        foreach (var key in track.Keys)
+        {
+          var point = new PointF(FrameToX(key.Frame, model, ClientSize.Width), y);
+          if (rectangle.Contains(point))
+            hits.Add(new KeySelection { TrackId = track.Id, Frame = key.Frame });
+        }
+      }
+      if (_marqueeMode == 0)
+        _selectedKeys.Clear();
+      if (_marqueeMode < 0)
+        _selectedKeys.ExceptWith(hits);
+      else
+        _selectedKeys.UnionWith(hits);
+    }
+
+    private static bool HasModifier(MouseEventArgs e, Keys modifier)
+    {
+      return (e.Modifiers & modifier) == modifier;
+    }
+
+    private static RectangleF NormalizedRectangle(PointF first, PointF second)
+    {
+      var left = Math.Min(first.X, second.X);
+      var top = Math.Min(first.Y, second.Y);
+      return new RectangleF(left, top, Math.Abs(second.X - first.X), Math.Abs(second.Y - first.Y));
     }
 
     private void UpdateTrackDrop(TimelineDocument model, float y)

@@ -10,7 +10,14 @@ namespace ProductMotionTimeline.Core
   internal static class TimelineEngine
   {
     public const string TrackUserStringKey = "ProductMotionTimeline.TrackId";
+    private sealed class KeyClipboardGroup
+    {
+      public Guid SourceTrackId { get; set; }
+      public List<Keyframe> Keys { get; } = new List<Keyframe>();
+    }
+
     private static Keyframe _keyClipboard;
+    private static readonly List<KeyClipboardGroup> _keyClipboardGroups = new List<KeyClipboardGroup>();
 
     public static event Action Changed;
 
@@ -61,10 +68,17 @@ namespace ProductMotionTimeline.Core
 
     public static void SelectTrack(RhinoDoc doc, Guid trackId)
     {
+      if (doc == null)
+        return;
       var model = Model(doc);
-      if (model.Tracks.Any(track => track.Id == trackId))
+      var track = model.FindTrack(trackId);
+      if (track != null)
       {
         model.SelectedTrackId = trackId;
+        doc.Objects.UnselectAll();
+        var instance = ResolveInstance(doc, track);
+        instance?.Select(true);
+        doc.Views.Redraw();
         Notify();
       }
     }
@@ -165,6 +179,10 @@ namespace ProductMotionTimeline.Core
       if (key == null)
         return false;
       _keyClipboard = key.Clone();
+      _keyClipboardGroups.Clear();
+      var group = new KeyClipboardGroup { SourceTrackId = track.Id };
+      group.Keys.Add(key.Clone());
+      _keyClipboardGroups.Add(group);
       return true;
     }
 
@@ -179,6 +197,126 @@ namespace ProductMotionTimeline.Core
       track.UpsertKey(model.CurrentFrame, _keyClipboard.Pose, _keyClipboard.Interpolation);
       SaveAndNotify(doc);
       return true;
+    }
+
+    public static int CopyKeys(RhinoDoc doc, IEnumerable<KeySelection> selections)
+    {
+      var model = Model(doc);
+      var valid = (selections ?? Enumerable.Empty<KeySelection>())
+        .Where(selection => model.FindTrack(selection.TrackId)?.FindKey(selection.Frame) != null)
+        .Distinct()
+        .ToList();
+      if (valid.Count == 0)
+        return 0;
+
+      _keyClipboardGroups.Clear();
+      foreach (var source in valid.GroupBy(selection => selection.TrackId))
+      {
+        var track = model.FindTrack(source.Key);
+        var group = new KeyClipboardGroup { SourceTrackId = source.Key };
+        foreach (var selection in source.OrderBy(item => item.Frame))
+          group.Keys.Add(track.FindKey(selection.Frame).Clone());
+        _keyClipboardGroups.Add(group);
+      }
+      _keyClipboard = _keyClipboardGroups[0].Keys[0].Clone();
+      return valid.Count;
+    }
+
+    public static List<Guid> SelectedRhinoTrackIds(RhinoDoc doc)
+    {
+      var result = new List<Guid>();
+      if (doc == null)
+        return result;
+      var model = Model(doc);
+      foreach (var track in model.OrderedTracks())
+      {
+        var instance = ResolveInstance(doc, track);
+        if (instance != null && instance.IsSelected(false) > 0)
+          result.Add(track.Id);
+      }
+      if (result.Count == 0 && model.SelectedTrack != null)
+        result.Add(model.SelectedTrack.Id);
+      return result;
+    }
+
+    public static KeyPasteResult PasteCopiedKeys(RhinoDoc doc, IEnumerable<Guid> targetTrackIds)
+    {
+      var result = new KeyPasteResult();
+      if (doc == null || _keyClipboardGroups.Count == 0)
+      {
+        result.ErrorMessage = "请先复制关键帧。";
+        return result;
+      }
+
+      var model = Model(doc);
+      var targets = (targetTrackIds ?? Enumerable.Empty<Guid>())
+        .Distinct()
+        .Select(model.FindTrack)
+        .Where(track => track != null)
+        .ToList();
+      if (targets.Count == 0)
+      {
+        result.ErrorMessage = "请先选择目标轨道或目标物体。";
+        return result;
+      }
+      if (_keyClipboardGroups.Count > 1 && _keyClipboardGroups.Count != targets.Count)
+      {
+        result.ErrorMessage = "复制内容来自多条轨道；请选择相同数量的目标物体后再粘贴。";
+        return result;
+      }
+
+      var sourceStart = _keyClipboardGroups.SelectMany(group => group.Keys).Min(key => key.Frame);
+      var maxFrame = model.EndFrame;
+      for (var targetIndex = 0; targetIndex < targets.Count; targetIndex++)
+      {
+        var target = targets[targetIndex];
+        var source = _keyClipboardGroups.Count == 1
+          ? _keyClipboardGroups[0]
+          : _keyClipboardGroups[targetIndex];
+        foreach (var sourceKey in source.Keys)
+        {
+          var targetFrame = model.CurrentFrame + sourceKey.Frame - sourceStart;
+          if (targetFrame < model.StartFrame)
+            continue;
+          maxFrame = Math.Max(maxFrame, targetFrame);
+          var existing = target.FindKey(targetFrame);
+          var freshStartPlaceholder = existing != null &&
+                                      target.Keys.Count == 1 &&
+                                      targetFrame == model.StartFrame &&
+                                      IsIdentityPose(existing.Pose);
+          if (existing != null && !freshStartPlaceholder)
+          {
+            result.SkippedExistingCount++;
+            continue;
+          }
+          target.UpsertKey(targetFrame, sourceKey.Pose, sourceKey.Interpolation);
+          result.PastedCount++;
+        }
+      }
+
+      if (result.PastedCount > 0)
+      {
+        model.EndFrame = maxFrame;
+        SaveAndNotify(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+      }
+      return result;
+    }
+
+    private static bool IsIdentityPose(Pose pose)
+    {
+      if (pose == null)
+        return false;
+      const double tolerance = 1e-9;
+      return pose.Translation.Length <= tolerance &&
+             Math.Abs(pose.Scale.X - 1.0) <= tolerance &&
+             Math.Abs(pose.Scale.Y - 1.0) <= tolerance &&
+             Math.Abs(pose.Scale.Z - 1.0) <= tolerance &&
+             Math.Abs(pose.AxisAngleDegrees) <= tolerance &&
+             Math.Abs(pose.Rotation.X) <= tolerance &&
+             Math.Abs(pose.Rotation.Y) <= tolerance &&
+             Math.Abs(pose.Rotation.Z) <= tolerance &&
+             Math.Abs(Math.Abs(pose.Rotation.W) - 1.0) <= tolerance;
     }
 
     public static bool MoveKey(RhinoDoc doc, Guid trackId, int oldFrame, int newFrame)
@@ -737,6 +875,31 @@ namespace ProductMotionTimeline.Core
         return false;
       track.RotationAxis = axis;
       key.Pose.AxisAngleDegrees = angleDegrees;
+      TimelineRepository.Save(doc);
+      ApplyFrame(doc, model.CurrentFrame, false);
+      return true;
+    }
+
+    public static bool UpdateCurrentKeyPoseChannels(
+      RhinoDoc doc,
+      Vector3d translation,
+      Vector3d scale,
+      RotationAxis axis,
+      double angleDegrees)
+    {
+      var model = Model(doc);
+      var track = model.SelectedTrack;
+      var key = track?.FindKey(model.CurrentFrame);
+      if (track == null || key == null)
+        return false;
+      if (Math.Abs(scale.X) < 1e-6 || Math.Abs(scale.Y) < 1e-6 || Math.Abs(scale.Z) < 1e-6)
+        return false;
+
+      track.RotationAxis = axis;
+      key.Pose.Translation = translation;
+      key.Pose.Scale = scale;
+      if (model.ConstraintForDriven(track.Id) == null)
+        key.Pose.AxisAngleDegrees = angleDegrees;
       TimelineRepository.Save(doc);
       ApplyFrame(doc, model.CurrentFrame, false);
       return true;

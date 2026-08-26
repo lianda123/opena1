@@ -152,6 +152,37 @@ namespace ProductMotionTimeline.Core
     }
   }
 
+  internal sealed class KeySelection : IEquatable<KeySelection>
+  {
+    public Guid TrackId { get; set; }
+    public int Frame { get; set; }
+
+    public bool Equals(KeySelection other)
+    {
+      return other != null && TrackId == other.TrackId && Frame == other.Frame;
+    }
+
+    public override bool Equals(object obj)
+    {
+      return Equals(obj as KeySelection);
+    }
+
+    public override int GetHashCode()
+    {
+      unchecked
+      {
+        return (TrackId.GetHashCode() * 397) ^ Frame;
+      }
+    }
+  }
+
+  internal sealed class KeyPasteResult
+  {
+    public int PastedCount { get; set; }
+    public int SkippedExistingCount { get; set; }
+    public string ErrorMessage { get; set; }
+  }
+
   internal sealed class AnimationTrack
   {
     public Guid Id { get; set; } = Guid.NewGuid();

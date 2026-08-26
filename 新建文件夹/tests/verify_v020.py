@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.5."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.6."""
 
 from pathlib import Path
 import re
@@ -110,7 +110,9 @@ def main():
     for token in [
         "EvaluateEffectivePose", "EvaluateWorldTarget", "AddMechanicalConstraint",
         "SetParent", "EffectiveMechanicalAngle", "UpdateCurrentKeyInterpolation",
-        "TemplateStartFrame", "UpdateTemplatePlacement", "ReorderTrack"
+        "TemplateStartFrame", "UpdateTemplatePlacement", "ReorderTrack",
+        "CopyKeys", "PasteCopiedKeys", "SelectedRhinoTrackIds",
+        "UpdateCurrentKeyPoseChannels"
     ]:
         assert token in engine, token
 
@@ -144,17 +146,27 @@ def main():
     for token in [
         "平滑：缓入缓出", "线性：匀速", "阶梯：保持后跳变",
         "SelectedIndexChanged", "PMTExternalGear", "PMTInternalGear", "PMTBelt",
-        "PMTBindMultiple", "PMTSameShaft", "同轴复合齿轮", "PMTGearFactory", "接在全部动作末尾"
+        "PMTBindMultiple", "PMTSameShaft", "同轴复合齿轮", "PMTGearFactory", "接在全部动作末尾",
+        "全选当前轨道", "复制所选", "粘贴到所选物体", "关键帧属性",
+        "移动 X", "旋转角°", "缩放 X"
     ]:
         assert token in panel, token
     for token in ["_smoothSegmentPen", "_linearSegmentPen", "_constantSegmentPen"]:
         assert token in canvas, token
     for token in [
         "_rowDragTrackId", "DrawTrackDropIndicator", "UpdateTrackDrop",
-        "轨道（上下拖动）", "_trackDropPen"
+        "轨道（上下拖动）", "_trackDropPen", "MouseDoubleClick",
+        "_marqueeSelecting", "ApplyMarqueeSelection", "Keys.Shift", "Keys.Alt",
+        "SelectAllKeys", "KeySelectionChanged", "_selectedTrackPen"
     ]:
         assert token in canvas, token
-    assert "拖动左侧轨道名可上下排序" in panel
+    assert "右键框选，Shift 加选，Alt 减选" in panel
+    assert "doc.Objects.UnselectAll()" in engine
+    assert "instance?.Select(true)" in engine
+    assert "SkippedExistingCount" in engine
+    assert "freshStartPlaceholder" in engine
+    assert "IsIdentityPose" in engine
+    assert "KeySelection" in data
 
     for token in ["TryDetect", "TryGetCircle", "IsCoaxial", "MatchingCircularEdges"]:
         assert token in axis_detector, token
@@ -193,7 +205,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.5</Version>" in project
+    assert "<Version>0.4.6</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -207,7 +219,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.5 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.6 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

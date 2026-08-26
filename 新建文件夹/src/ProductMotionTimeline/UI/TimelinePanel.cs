@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.InteropServices;
 using Eto.Drawing;
 using Eto.Forms;
@@ -24,8 +25,19 @@ namespace ProductMotionTimeline.UI
     private readonly DropDown _rotationAxis = new DropDown();
     private readonly DropDown _templatePlacement = new DropDown();
     private readonly NumericStepper _templateGap = IntegerStepper(0, 100000, 0);
-    private readonly NumericStepper _axisAngle = IntegerStepper(-100000, 100000, 0);
+    private readonly NumericStepper _moveX = DecimalStepper(-1000000, 1000000, 0, 0.1);
+    private readonly NumericStepper _moveY = DecimalStepper(-1000000, 1000000, 0, 0.1);
+    private readonly NumericStepper _moveZ = DecimalStepper(-1000000, 1000000, 0, 0.1);
+    private readonly NumericStepper _scaleX = DecimalStepper(-1000, 1000, 1, 0.01);
+    private readonly NumericStepper _scaleY = DecimalStepper(-1000, 1000, 1, 0.01);
+    private readonly NumericStepper _scaleZ = DecimalStepper(-1000, 1000, 1, 0.01);
+    private readonly NumericStepper _axisAngle = DecimalStepper(-100000, 100000, 0, 0.1);
     private readonly TextBox _trackName = new TextBox { Width = 150 };
+    private readonly Label _keyEditorTitle = new Label
+    {
+      Text = "关键帧属性：双击关键帧后编辑",
+      TextColor = Color.FromArgb(93, 203, 255)
+    };
     private readonly Label _relationship = new Label { TextColor = Color.FromArgb(255, 190, 92) };
     private readonly ListBox _constraints = new ListBox { Height = 72 };
     private readonly List<MechanicalConstraint> _constraintItems = new List<MechanicalConstraint>();
@@ -78,8 +90,10 @@ namespace ProductMotionTimeline.UI
         Button("＋ 组内零件", () => RhinoApp.RunScript("_PMTAddGroupPart", false)),
         Button("◆ 插入/更新帧", InsertKey),
         Button("删除帧", DeleteKey),
-        Button("复制", CopyKey),
-        Button("粘贴", PasteKey));
+        Button("全选当前轨道", SelectAllKeys),
+        Button("清除选择", ClearSelectedKeys),
+        Button("复制所选", CopyKey),
+        Button("粘贴到所选物体", PasteKey));
 
       var settings = Horizontal(
         new Label { Text = "起始" }, _start,
@@ -95,9 +109,24 @@ namespace ProductMotionTimeline.UI
         Button("自动找轴孔", () => RhinoApp.RunScript("_PMTAutoPivot", false)),
         Button("重绑定", () => RhinoApp.RunScript("_PMTRebind", false)),
         new Label { Text = "插值" }, _interpolation,
-        new Label { Text = "连续轴" }, _rotationAxis,
-        new Label { Text = "转角°" }, _axisAngle,
         Button("删除轨道", DeleteTrack));
+
+      var keyEditor = new StackLayout
+      {
+        Orientation = Orientation.Vertical,
+        Spacing = 4
+      };
+      keyEditor.Items.Add(Horizontal(_keyEditorTitle));
+      keyEditor.Items.Add(Horizontal(
+        new Label { Text = "移动 X" }, _moveX,
+        new Label { Text = "Y" }, _moveY,
+        new Label { Text = "Z" }, _moveZ,
+        new Label { Text = "连续轴" }, _rotationAxis,
+        new Label { Text = "旋转角°" }, _axisAngle));
+      keyEditor.Items.Add(Horizontal(
+        new Label { Text = "缩放 X" }, _scaleX,
+        new Label { Text = "Y" }, _scaleY,
+        new Label { Text = "Z" }, _scaleZ));
 
       var hierarchyTools = Horizontal(
         new Label { Text = "父子层级" },
@@ -149,6 +178,7 @@ namespace ProductMotionTimeline.UI
       root.Rows.Add(new TableRow(settings));
       root.Rows.Add(new TableRow(new TableCell(scroll, true)) { ScaleHeight = true });
       root.Rows.Add(new TableRow(trackTools));
+      root.Rows.Add(new TableRow(keyEditor));
       root.Rows.Add(new TableRow(hierarchyTools));
       root.Rows.Add(new TableRow(mechanicalTools));
       root.Rows.Add(new TableRow(constraintSelectionTools));
@@ -177,7 +207,15 @@ namespace ProductMotionTimeline.UI
       _loop.CheckedChanged += (sender, args) => UpdateSettings();
       _interpolation.SelectedIndexChanged += (sender, args) => UpdateInterpolation();
       _rotationAxis.SelectedIndexChanged += (sender, args) => UpdateRotationChannel();
-      _axisAngle.ValueChanged += (sender, args) => UpdateRotationChannel();
+      _axisAngle.ValueChanged += (sender, args) => UpdatePoseChannels();
+      _moveX.ValueChanged += (sender, args) => UpdatePoseChannels();
+      _moveY.ValueChanged += (sender, args) => UpdatePoseChannels();
+      _moveZ.ValueChanged += (sender, args) => UpdatePoseChannels();
+      _scaleX.ValueChanged += (sender, args) => UpdatePoseChannels();
+      _scaleY.ValueChanged += (sender, args) => UpdatePoseChannels();
+      _scaleZ.ValueChanged += (sender, args) => UpdatePoseChannels();
+      _canvas.KeySelectionChanged += RefreshFromModel;
+      _canvas.KeyActivated += KeyActivated;
       _constraints.SelectedIndexChanged += (sender, args) => ConstraintSelectionChanged();
       _templatePlacement.SelectedIndexChanged += (sender, args) => UpdateTemplatePlacement();
       _templateGap.ValueChanged += (sender, args) => UpdateTemplatePlacement();
@@ -208,16 +246,33 @@ namespace ProductMotionTimeline.UI
       if (key != null)
       {
         _interpolation.SelectedIndex = ToDropDownIndex(key.Interpolation);
+        _moveX.Value = key.Pose.Translation.X;
+        _moveY.Value = key.Pose.Translation.Y;
+        _moveZ.Value = key.Pose.Translation.Z;
+        _scaleX.Value = key.Pose.Scale.X;
+        _scaleY.Value = key.Pose.Scale.Y;
+        _scaleZ.Value = key.Pose.Scale.Z;
         _axisAngle.Value = constraint == null
           ? key.Pose.AxisAngleDegrees
           : TimelineEngine.EffectiveMechanicalAngle(doc, track, model.CurrentFrame);
       }
       else
       {
+        _moveX.Value = 0.0;
+        _moveY.Value = 0.0;
+        _moveZ.Value = 0.0;
+        _scaleX.Value = 1.0;
+        _scaleY.Value = 1.0;
+        _scaleZ.Value = 1.0;
         _axisAngle.Value = 0.0;
       }
       _rotationAxis.SelectedIndex = track == null ? 2 : (int)track.RotationAxis;
       _axisAngle.Enabled = constraint == null;
+      SetPoseEditorEnabled(key != null);
+      _axisAngle.Enabled = key != null && constraint == null;
+      _keyEditorTitle.Text = key == null
+        ? "关键帧属性：双击关键帧后编辑"
+        : $"关键帧属性：{track.Name} / 第 {model.CurrentFrame} 帧";
 
       var parent = track == null ? null : model.FindTrack(track.ParentTrackId);
       var driver = constraint == null ? null : model.FindTrack(constraint.DriverTrackId);
@@ -230,9 +285,10 @@ namespace ProductMotionTimeline.UI
       _relationship.Text = parentText + "　　" + constraintText + branchText;
       RefreshConstraintList(model, doc, constraint?.Id ?? Guid.Empty);
 
+      var selectedKeyCount = _canvas.SelectedKeys.Count();
       _status.Text = track == null
         ? "先点“添加部件”；若对象已打组但只想动画其中一部分，请点“组内零件”。"
-        : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　提示：拖动左侧轨道名可上下排序；父级继承运动。";
+        : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　已选关键帧：{selectedKeyCount}　右键框选，Shift 加选，Alt 减选。";
       _canvas.RefreshHeight();
       _suppress = false;
     }
@@ -350,9 +406,23 @@ namespace ProductMotionTimeline.UI
         _status.Text = "当前轨道由机械约束驱动；请修改主动件转角或先解除从动关系。";
         return;
       }
+      UpdatePoseChannels();
+    }
+
+    private void UpdatePoseChannels()
+    {
+      if (_suppress)
+        return;
       var axis = (RotationAxis)Math.Max(0, Math.Min(2, _rotationAxis.SelectedIndex));
-      if (!TimelineEngine.UpdateCurrentKeyRotationChannel(RhinoDoc.ActiveDoc, axis, _axisAngle.Value))
-        _status.Text = "请先在当前帧插入关键帧，再设置连续轴转角。";
+      var translation = new Rhino.Geometry.Vector3d(_moveX.Value, _moveY.Value, _moveZ.Value);
+      var scale = new Rhino.Geometry.Vector3d(_scaleX.Value, _scaleY.Value, _scaleZ.Value);
+      if (!TimelineEngine.UpdateCurrentKeyPoseChannels(
+        RhinoDoc.ActiveDoc,
+        translation,
+        scale,
+        axis,
+        _axisAngle.Value))
+        _status.Text = "请先双击一个关键帧；缩放 X/Y/Z 不能为 0。";
     }
 
     private void UpdateInterpolation()
@@ -382,15 +452,52 @@ namespace ProductMotionTimeline.UI
 
     private void CopyKey()
     {
-      if (!TimelineEngine.CopyKey(RhinoDoc.ActiveDoc))
-        _status.Text = "当前帧没有可复制的关键帧。";
+      var selections = _canvas.SelectedKeys.ToList();
+      var copied = TimelineEngine.CopyKeys(RhinoDoc.ActiveDoc, selections);
+      if (copied == 0 && TimelineEngine.CopyKey(RhinoDoc.ActiveDoc))
+        copied = 1;
+      _status.Text = copied == 0
+        ? "没有可复制的关键帧；请单击、右键框选或全选关键帧。"
+        : $"已复制 {copied} 个关键帧；选择目标轨道或 Rhino 物体后粘贴。";
     }
 
     private void PasteKey()
     {
       StopPlayback();
-      if (!TimelineEngine.PasteKey(RhinoDoc.ActiveDoc))
-        _status.Text = "请先复制一个关键帧。";
+      var doc = RhinoDoc.ActiveDoc;
+      var result = TimelineEngine.PasteCopiedKeys(doc, TimelineEngine.SelectedRhinoTrackIds(doc));
+      if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+        _status.Text = result.ErrorMessage;
+      else
+        _status.Text = $"已粘贴 {result.PastedCount} 个关键帧；目标已有关键帧的 {result.SkippedExistingCount} 个位置未覆盖。";
+    }
+
+    private void SelectAllKeys()
+    {
+      var count = _canvas.SelectAllKeys();
+      _status.Text = $"已选择当前轨道全部 {count} 个关键帧。";
+    }
+
+    private void ClearSelectedKeys()
+    {
+      _canvas.ClearKeySelection();
+      _status.Text = "已清除关键帧选择。";
+    }
+
+    private void KeyActivated()
+    {
+      _status.Text = "已打开该关键帧属性；修改移动、旋转或缩放数值会立即同步到这一帧。";
+    }
+
+    private void SetPoseEditorEnabled(bool enabled)
+    {
+      _moveX.Enabled = enabled;
+      _moveY.Enabled = enabled;
+      _moveZ.Enabled = enabled;
+      _scaleX.Enabled = enabled;
+      _scaleY.Enabled = enabled;
+      _scaleZ.Enabled = enabled;
+      _rotationAxis.Enabled = enabled;
     }
 
     private void RenameTrack()
@@ -523,6 +630,23 @@ namespace ProductMotionTimeline.UI
         DecimalPlaces = 0,
         Increment = 1,
         Width = 62
+      };
+    }
+
+    private static NumericStepper DecimalStepper(
+      double min,
+      double max,
+      double value,
+      double increment)
+    {
+      return new NumericStepper
+      {
+        MinValue = min,
+        MaxValue = max,
+        Value = value,
+        DecimalPlaces = 3,
+        Increment = increment,
+        Width = 72
       };
     }
 
