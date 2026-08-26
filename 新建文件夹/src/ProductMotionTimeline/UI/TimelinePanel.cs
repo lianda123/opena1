@@ -231,7 +231,7 @@ namespace ProductMotionTimeline.UI
 
       _status.Text = track == null
         ? "先点“添加部件”；若对象已打组但只想动画其中一部分，请点“组内零件”。"
-        : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　提示：父级继承运动，子级仍可单独卡帧。";
+        : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　提示：拖动左侧轨道名可上下排序；父级继承运动。";
       _canvas.RefreshHeight();
       _suppress = false;
     }

@@ -69,6 +69,36 @@ namespace ProductMotionTimeline.Core
       }
     }
 
+    public static bool ReorderTrack(
+      RhinoDoc doc,
+      Guid trackId,
+      Guid targetSiblingId,
+      bool insertAfter)
+    {
+      var model = Model(doc);
+      var track = model.FindTrack(trackId);
+      var target = model.FindTrack(targetSiblingId);
+      if (track == null || target == null || track.Id == target.Id ||
+          track.ParentTrackId != target.ParentTrackId)
+        return false;
+
+      if (!model.Tracks.Remove(track))
+        return false;
+      var targetIndex = model.Tracks.IndexOf(target);
+      if (targetIndex < 0)
+      {
+        model.Tracks.Add(track);
+        return false;
+      }
+      model.Tracks.Insert(targetIndex + (insertAfter ? 1 : 0), track);
+      model.SelectedTrackId = track.Id;
+      SaveAndNotify(doc);
+      RhinoApp.WriteLine(
+        "ProductMotion：已调整轨道“{0}”的显示顺序；父子关系和关键帧保持不变。",
+        track.Name);
+      return true;
+    }
+
     public static bool InsertOrUpdateKey(RhinoDoc doc, InterpolationMode interpolation)
     {
       var model = Model(doc);

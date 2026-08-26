@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.3."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.4."""
 
 from pathlib import Path
 import re
@@ -105,7 +105,7 @@ def main():
     for token in [
         "EvaluateEffectivePose", "EvaluateWorldTarget", "AddMechanicalConstraint",
         "SetParent", "EffectiveMechanicalAngle", "UpdateCurrentKeyInterpolation",
-        "TemplateStartFrame", "UpdateTemplatePlacement"
+        "TemplateStartFrame", "UpdateTemplatePlacement", "ReorderTrack"
     ]:
         assert token in engine, token
 
@@ -143,6 +143,12 @@ def main():
         assert token in panel, token
     for token in ["_smoothSegmentPen", "_linearSegmentPen", "_constantSegmentPen"]:
         assert token in canvas, token
+    for token in [
+        "_rowDragTrackId", "DrawTrackDropIndicator", "UpdateTrackDrop",
+        "轨道（上下拖动）", "_trackDropPen"
+    ]:
+        assert token in canvas, token
+    assert "拖动左侧轨道名可上下排序" in panel
 
     for token in ["TryDetect", "TryGetCircle", "IsCoaxial", "MatchingCircularEdges"]:
         assert token in axis_detector, token
@@ -179,7 +185,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.3</Version>" in project
+    assert "<Version>0.4.4</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -193,7 +199,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.3 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.4 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

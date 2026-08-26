@@ -29,12 +29,18 @@ namespace ProductMotionTimeline.UI
     private readonly Pen _gridPen = new Pen(Color.FromArgb(67, 70, 77), 1f);
     private readonly Pen _minorGridPen = new Pen(Color.FromArgb(49, 52, 58), 1f);
     private readonly Pen _playheadPen = new Pen(Color.FromArgb(255, 86, 77), 2f);
+    private readonly Pen _trackDropPen = new Pen(Color.FromArgb(0, 190, 255), 3f);
     private readonly SolidBrush _playheadBrush = new SolidBrush(Color.FromArgb(255, 86, 77));
 
     private Guid _dragTrackId = Guid.Empty;
     private int _dragOriginalFrame = -1;
     private int _dragPreviewFrame = -1;
     private bool _scrubbing;
+    private Guid _rowDragTrackId = Guid.Empty;
+    private Guid _rowDropSiblingId = Guid.Empty;
+    private float _rowDragStartY;
+    private bool _rowDropAfter;
+    private bool _rowDragging;
 
     public TimelineCanvas()
     {
@@ -68,12 +74,13 @@ namespace ProductMotionTimeline.UI
 
       DrawRuler(graphics, model, width, height);
       DrawTracks(graphics, model, width);
+      DrawTrackDropIndicator(graphics, model, width);
       DrawPlayhead(graphics, model, width, height);
     }
 
     private void DrawRuler(Graphics graphics, TimelineDocument model, float width, float height)
     {
-      graphics.DrawText(_font, _text, new PointF(10, 8), "轨道 / 关键帧");
+      graphics.DrawText(_font, _text, new PointF(10, 8), "轨道（上下拖动） / 关键帧");
       var pixelsPerFrame = TimelineWidth(width) / Math.Max(1, model.EndFrame - model.StartFrame);
       var majorStep = ChooseMajorStep(pixelsPerFrame);
       var minorStep = Math.Max(1, majorStep / 5);
@@ -167,6 +174,26 @@ namespace ProductMotionTimeline.UI
       graphics.FillRectangle(_playheadBrush, new RectangleF(x - 4, 0, 8, 6));
     }
 
+    private void DrawTrackDropIndicator(Graphics graphics, TimelineDocument model, float width)
+    {
+      if (!_rowDragging || _rowDropSiblingId == Guid.Empty)
+        return;
+      var tracks = model.OrderedTracks();
+      var targetIndex = tracks.FindIndex(track => track.Id == _rowDropSiblingId);
+      if (targetIndex < 0)
+        return;
+      var lineIndex = targetIndex;
+      if (_rowDropAfter)
+      {
+        var targetDepth = model.TrackDepth(tracks[targetIndex]);
+        lineIndex++;
+        while (lineIndex < tracks.Count && model.TrackDepth(tracks[lineIndex]) > targetDepth)
+          lineIndex++;
+      }
+      var y = RulerHeight + lineIndex * RowHeight;
+      graphics.DrawLine(_trackDropPen, 0f, y, width, y);
+    }
+
     private static void DrawDiamond(Graphics graphics, float x, float y, Brush brush)
     {
       using (var path = new GraphicsPath())
@@ -196,7 +223,14 @@ namespace ProductMotionTimeline.UI
         var track = tracks[row];
         TimelineEngine.SelectTrack(doc, track.Id);
         if (e.Location.X < HeaderWidth)
+        {
+          _rowDragTrackId = track.Id;
+          _rowDropSiblingId = track.Id;
+          _rowDragStartY = e.Location.Y;
+          _rowDropAfter = false;
+          _rowDragging = false;
           return;
+        }
 
         var hit = HitKey(track, model, ClientSize.Width, e.Location.X);
         if (hit != null)
@@ -220,7 +254,18 @@ namespace ProductMotionTimeline.UI
     {
       if ((e.Buttons & MouseButtons.Primary) == 0)
         return;
-      if (_dragTrackId != Guid.Empty)
+      if (_rowDragTrackId != Guid.Empty)
+      {
+        var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
+        if (model == null)
+          return;
+        if (!_rowDragging && Math.Abs(e.Location.Y - _rowDragStartY) < 4f)
+          return;
+        _rowDragging = true;
+        UpdateTrackDrop(model, e.Location.Y);
+        Invalidate();
+      }
+      else if (_dragTrackId != Guid.Empty)
       {
         var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
         _dragPreviewFrame = XToFrame(e.Location.X, model, ClientSize.Width);
@@ -235,7 +280,16 @@ namespace ProductMotionTimeline.UI
     private void OnMouseUp(object sender, MouseEventArgs e)
     {
       var doc = RhinoDoc.ActiveDoc;
-      if (_dragTrackId != Guid.Empty)
+      if (_rowDragTrackId != Guid.Empty)
+      {
+        if (_rowDragging && _rowDropSiblingId != Guid.Empty)
+          TimelineEngine.ReorderTrack(
+            doc,
+            _rowDragTrackId,
+            _rowDropSiblingId,
+            _rowDropAfter);
+      }
+      else if (_dragTrackId != Guid.Empty)
       {
         var newFrame = _dragPreviewFrame;
         TimelineEngine.MoveKey(doc, _dragTrackId, _dragOriginalFrame, newFrame);
@@ -250,7 +304,41 @@ namespace ProductMotionTimeline.UI
       _dragOriginalFrame = -1;
       _dragPreviewFrame = -1;
       _scrubbing = false;
+      _rowDragTrackId = Guid.Empty;
+      _rowDropSiblingId = Guid.Empty;
+      _rowDragStartY = 0f;
+      _rowDropAfter = false;
+      _rowDragging = false;
       Invalidate();
+    }
+
+    private void UpdateTrackDrop(TimelineDocument model, float y)
+    {
+      var source = model.FindTrack(_rowDragTrackId);
+      var tracks = model.OrderedTracks();
+      if (source == null || tracks.Count == 0)
+        return;
+      var row = Math.Max(0, Math.Min(tracks.Count - 1, RowFromY(y)));
+      var target = tracks[row];
+      while (target != null && target.ParentTrackId != source.ParentTrackId)
+        target = model.FindTrack(target.ParentTrackId);
+
+      if (target == null)
+      {
+        var siblings = tracks.Where(track => track.ParentTrackId == source.ParentTrackId).ToList();
+        if (siblings.Count == 0)
+          return;
+        var firstRow = tracks.FindIndex(track => track.Id == siblings[0].Id);
+        target = row <= firstRow ? siblings[0] : siblings[siblings.Count - 1];
+        _rowDropAfter = row > firstRow;
+      }
+      else
+      {
+        var targetRow = tracks.FindIndex(track => track.Id == target.Id);
+        _rowDropAfter = row > targetRow ||
+                        (row == targetRow && y >= RulerHeight + (targetRow + 0.5f) * RowHeight);
+      }
+      _rowDropSiblingId = target.Id;
     }
 
     private void ScrubTo(float x, bool persist)

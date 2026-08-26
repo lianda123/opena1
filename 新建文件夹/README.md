@@ -1,10 +1,18 @@
-# ProductMotion Timeline 0.4.3（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.4（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.3 在 RhinoGears 曲线生成流程基础上恢复分度圆/分度线输出，并把齿轮类型、传动类型和方向选项本地化为中文；同时保留一主多从、串联动作和五类齿轮生成器。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.4 新增轨道纵向拖动排序，并保持父子层级树完整；同时保留分度圆/分度线、中文传动选项、一主多从、串联动作和五类齿轮生成器。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.4.3 主要改进
+## 0.4.4 主要改进
+
+- 在时间轴左侧轨道名称区域按住并上下拖动，即可调整轨道显示顺序；青色横线表示插入位置。
+- 拖动父级轨道时，其全部子级和后代会作为完整子树一起移动。
+- 子级只能在同一父级下与兄弟轨道交换顺序，拖动排序不会更改父子关系。
+- 根级轨道可以自由前后排序；同级顺序会随3dm文档保存。
+- 关键帧区域的水平拖动方式保持不变。
+
+### 0.4.3 分度圆与中文选项
 
 - 齿轮生成时新增“是否输出分度圆/分度线”，默认“是”。
 - 直齿、内齿、斜齿和锥齿生成青色分度圆，半径严格为 `模数 × 齿数 ÷ 2`；两齿轮分度圆相切即可确定标准中心距。
@@ -165,9 +173,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.3-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.3-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.3-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.4-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.4-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.4-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 
