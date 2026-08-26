@@ -193,6 +193,363 @@ namespace WoodThicknessAdjuster.Core
       return Result.Success;
     }
 
+    internal static Result RunFitToFace(
+      RhinoDoc doc,
+      double targetThicknessMillimeters,
+      FitCoordinateMode coordinateMode,
+      FitAxisMode axisMode)
+    {
+      if (doc == null || targetThicknessMillimeters <= 0.1 || targetThicknessMillimeters > 50.0)
+      {
+        RhinoApp.WriteLine("WoodThicknessAdjuster：目标板厚必须大于0.1mm且不超过50mm。");
+        return Result.Failure;
+      }
+
+      var modelUnitsPerMillimeter = RhinoMath.UnitScale(
+        UnitSystem.Millimeters,
+        doc.ModelUnitSystem);
+      if (!RhinoMath.IsValidDouble(modelUnitsPerMillimeter) || modelUnitsPerMillimeter <= 0.0)
+      {
+        RhinoApp.WriteLine("WoodThicknessAdjuster：无法换算当前文档单位，请先设置正确的Rhino模型单位。");
+        return Result.Failure;
+      }
+
+      var targetModelUnits = targetThicknessMillimeters * modelUnitsPerMillimeter;
+      var tolerance = Math.Max(doc.ModelAbsoluteTolerance, modelUnitsPerMillimeter * 0.001);
+      var adjustedCount = 0;
+      var undo = doc.BeginUndoRecord("Wood Thickness Adjuster Fit To Face");
+      try
+      {
+        while (true)
+        {
+          var boardGetter = new GetObject();
+          boardGetter.SetCommandPrompt(string.Format(
+            CultureInfo.InvariantCulture,
+            "点击待调整木板上需要贴合的主表面（目标{0:0.###}mm），回车结束",
+            targetThicknessMillimeters));
+          boardGetter.GeometryFilter = ObjectType.AnyObject;
+          boardGetter.GroupSelect = false;
+          boardGetter.SubObjectSelect = false;
+          boardGetter.AcceptNothing(true);
+          boardGetter.EnablePreSelect(adjustedCount == 0, true);
+          var boardResult = boardGetter.Get();
+          if (boardResult == GetResult.Nothing)
+            break;
+          if (boardResult == GetResult.Cancel)
+            return adjustedCount > 0 ? Result.Success : Result.Cancel;
+          if (boardResult != GetResult.Object || boardGetter.ObjectCount == 0)
+          {
+            var commandResult = boardGetter.CommandResult();
+            if (commandResult != Result.Success)
+              return adjustedCount > 0 ? Result.Success : commandResult;
+            continue;
+          }
+
+          var boardReference = boardGetter.Object(0);
+          var clickedObject = boardReference == null ? null : boardReference.Object();
+          if (clickedObject == null)
+            continue;
+          var selectionPoint = SafeSelectionPoint(boardReference);
+
+          PartTarget part;
+          if (!TryResolvePart(
+            doc,
+            clickedObject,
+            tolerance,
+            selectionPoint,
+            out part))
+          {
+            RhinoApp.WriteLine(
+              "WoodThicknessAdjuster：第一个对象不是具有两张平行主表面的平直闭合木板。");
+            clickedObject.Select(false);
+            continue;
+          }
+
+          Plane anchorPlane;
+          Point3d anchorCentroid;
+          if (!TryGetPreferredMainFace(
+            part.Analysis,
+            selectionPoint,
+            out anchorPlane,
+            out anchorCentroid))
+          {
+            RhinoApp.WriteLine("WoodThicknessAdjuster：无法确定木板上需要贴合的主表面。");
+            clickedObject.Select(false);
+            continue;
+          }
+
+          Plane targetPlane = Plane.Unset;
+          RhinoObject targetObject = null;
+          var cancelPair = false;
+          while (true)
+          {
+            var targetGetter = new GetObject();
+            targetGetter.SetCommandPrompt("点击需要贴合的目标平面");
+            targetGetter.GeometryFilter =
+              ObjectType.Surface | ObjectType.Brep | ObjectType.Extrusion;
+            targetGetter.GroupSelect = false;
+            targetGetter.SubObjectSelect = true;
+            targetGetter.EnablePreSelect(false, true);
+            var targetResult = targetGetter.Get();
+            if (targetResult == GetResult.Cancel)
+            {
+              cancelPair = true;
+              break;
+            }
+            if (targetResult != GetResult.Object || targetGetter.ObjectCount == 0)
+            {
+              var commandResult = targetGetter.CommandResult();
+              if (commandResult != Result.Success)
+              {
+                cancelPair = true;
+                break;
+              }
+              continue;
+            }
+
+            var targetReference = targetGetter.Object(0);
+            targetObject = targetReference == null ? null : targetReference.Object();
+            if (targetObject == null)
+              continue;
+            if (targetObject.Id == part.BoardObject.Id)
+            {
+              RhinoApp.WriteLine("WoodThicknessAdjuster：目标贴合面不能来自待调整木板本身，请重新选择。");
+              targetObject.Select(false);
+              continue;
+            }
+            if (!TryGetClickedPlanarFace(
+              targetReference,
+              tolerance,
+              out targetPlane))
+            {
+              RhinoApp.WriteLine("WoodThicknessAdjuster：目标必须是平面，请重新选择。");
+              targetObject.Select(false);
+              continue;
+            }
+
+            var alignment = Math.Abs(Vector3d.Multiply(
+              anchorPlane.Normal,
+              targetPlane.Normal));
+            if (alignment < Math.Cos(2.0 * Math.PI / 180.0))
+            {
+              RhinoApp.WriteLine(
+                "WoodThicknessAdjuster：两个贴合面不平行；本命令只移动不旋转，请重新选择平行面。");
+              targetObject.Select(false);
+              continue;
+            }
+            break;
+          }
+
+          if (cancelPair)
+            return adjustedCount > 0 ? Result.Success : Result.Cancel;
+
+          Transform transform;
+          double movementModelUnits;
+          if (!TryCreateManualFitTransform(
+            part.Analysis,
+            anchorPlane,
+            anchorCentroid,
+            targetPlane,
+            targetModelUnits,
+            coordinateMode,
+            axisMode,
+            out transform,
+            out movementModelUnits))
+          {
+            RhinoApp.WriteLine(
+              "WoodThicknessAdjuster：所选移动轴与目标平面平行，无法沿该轴贴合；请选择自动轴或可到达目标面的轴。");
+            clickedObject.Select(false);
+            if (targetObject != null)
+              targetObject.Select(false);
+            continue;
+          }
+
+          var currentMillimeters = part.Analysis.ThicknessModelUnits /
+            modelUnitsPerMillimeter;
+          var thicknessNeedsAdjustment =
+            Math.Abs(currentMillimeters - targetThicknessMillimeters) > 0.005;
+          if (!thicknessNeedsAdjustment && movementModelUnits <= tolerance)
+          {
+            RhinoApp.WriteLine(
+              "WoodThicknessAdjuster：板厚与指定贴合面都已经正确，无需调整。");
+            clickedObject.Select(false);
+            if (targetObject != null)
+              targetObject.Select(false);
+            continue;
+          }
+
+          int transformedCount;
+          int skippedFollowers;
+          Guid newBoardId;
+          if (!TryApplyTransform(
+            doc,
+            part,
+            transform,
+            targetThicknessMillimeters,
+            out transformedCount,
+            out skippedFollowers,
+            out newBoardId))
+          {
+            RhinoApp.WriteLine("WoodThicknessAdjuster：指定贴合变换失败，原零件保持不变。");
+            clickedObject.Select(false);
+            if (targetObject != null)
+              targetObject.Select(false);
+            continue;
+          }
+
+          adjustedCount++;
+          RhinoApp.WriteLine(string.Format(
+            CultureInfo.InvariantCulture,
+            "WoodThicknessAdjuster：{0:0.###}mm → {1:0.###}mm；已按{2}{3}移动{4:0.###}mm并贴合；同步{5}个对象{6}。",
+            currentMillimeters,
+            targetThicknessMillimeters,
+            coordinateMode == FitCoordinateMode.Object ? "物体坐标" : "世界坐标",
+            DescribeAxis(axisMode),
+            movementModelUnits / modelUnitsPerMillimeter,
+            transformedCount,
+            skippedFollowers > 0 ? "，另有不支持的组内对象已跳过" : string.Empty));
+          clickedObject.Select(false);
+          if (targetObject != null)
+            targetObject.Select(false);
+          doc.Views.Redraw();
+        }
+      }
+      finally
+      {
+        doc.EndUndoRecord(undo);
+      }
+
+      if (adjustedCount == 0)
+      {
+        RhinoApp.WriteLine("WoodThicknessAdjuster：没有修改任何零件。");
+        return Result.Nothing;
+      }
+      RhinoApp.WriteLine(
+        "WoodThicknessAdjuster：指定贴合完成，共调整{0}个木板零件。",
+        adjustedCount);
+      return Result.Success;
+    }
+
+    private static Point3d SafeSelectionPoint(ObjRef reference)
+    {
+      if (reference == null)
+        return Point3d.Unset;
+      try
+      {
+        return reference.SelectionPoint();
+      }
+      catch
+      {
+        return Point3d.Unset;
+      }
+    }
+
+    private static bool TryGetPreferredMainFace(
+      ThicknessAnalysis analysis,
+      Point3d selectionPoint,
+      out Plane plane,
+      out Point3d centroid)
+    {
+      plane = Plane.Unset;
+      centroid = Point3d.Unset;
+      if (analysis == null)
+        return false;
+
+      var useFirst = analysis.PreferredAnchorFaceIndex == analysis.FirstFaceIndex;
+      if (analysis.PreferredAnchorFaceIndex != analysis.FirstFaceIndex &&
+        analysis.PreferredAnchorFaceIndex != analysis.SecondFaceIndex)
+      {
+        useFirst = true;
+        if (selectionPoint.IsValid)
+        {
+          var firstDistance = Math.Abs(
+            analysis.FirstPlane.DistanceTo(selectionPoint));
+          var secondDistance = Math.Abs(
+            analysis.SecondPlane.DistanceTo(selectionPoint));
+          useFirst = firstDistance <= secondDistance;
+        }
+      }
+
+      plane = useFirst ? analysis.FirstPlane : analysis.SecondPlane;
+      centroid = useFirst ? analysis.FirstCentroid : analysis.SecondCentroid;
+      return plane.IsValid && centroid.IsValid;
+    }
+
+    private static bool TryGetClickedPlanarFace(
+      ObjRef reference,
+      double tolerance,
+      out Plane plane)
+    {
+      plane = Plane.Unset;
+      if (reference == null)
+        return false;
+
+      var directFace = reference.Face();
+      if (directFace != null &&
+        directFace.TryGetPlane(out plane, tolerance * 10.0))
+        return true;
+
+      var rhinoObject = reference.Object();
+      if (rhinoObject == null || rhinoObject.Geometry == null)
+        return false;
+      Brep brep = rhinoObject.Geometry as Brep;
+      var extrusion = rhinoObject.Geometry as Extrusion;
+      if (brep == null && extrusion != null)
+        brep = extrusion.ToBrep();
+      if (brep == null || !brep.IsValid)
+        return false;
+
+      var selectionPoint = SafeSelectionPoint(reference);
+      var candidates = new List<PlanarTargetFace>();
+      for (var index = 0; index < brep.Faces.Count; index++)
+      {
+        Plane candidatePlane;
+        if (!brep.Faces[index].TryGetPlane(
+          out candidatePlane,
+          tolerance * 10.0))
+          continue;
+        var properties = AreaMassProperties.Compute(brep.Faces[index]);
+        var area = properties == null ? 0.0 : properties.Area;
+        var distance = selectionPoint.IsValid
+          ? DistanceToTrimmedFace(
+            brep.Faces[index],
+            candidatePlane,
+            selectionPoint)
+          : 0.0;
+        candidates.Add(new PlanarTargetFace
+        {
+          Plane = candidatePlane,
+          Distance = distance,
+          Area = area
+        });
+      }
+
+      var best = candidates
+        .OrderBy(item => item.Distance)
+        .ThenByDescending(item => item.Area)
+        .FirstOrDefault();
+      if (best == null)
+        return false;
+      plane = best.Plane;
+      return plane.IsValid;
+    }
+
+    private static double DistanceToTrimmedFace(
+      BrepFace face,
+      Plane plane,
+      Point3d point)
+    {
+      if (face == null || !point.IsValid)
+        return double.MaxValue;
+      var projected = plane.ClosestPoint(point);
+      double u;
+      double v;
+      if (!face.ClosestPoint(projected, out u, out v) ||
+        face.IsPointOnFace(u, v) == PointFaceRelation.Exterior)
+        return double.MaxValue;
+      return point.DistanceTo(projected);
+    }
+
     private static bool TryResolvePart(
       RhinoDoc doc,
       RhinoObject clickedObject,
@@ -382,6 +739,109 @@ namespace WoodThicknessAdjuster.Core
       return point.DistanceTo(closest);
     }
 
+    private static bool TryCreateManualFitTransform(
+      ThicknessAnalysis analysis,
+      Plane anchorPlane,
+      Point3d anchorCentroid,
+      Plane targetPlane,
+      double targetThickness,
+      FitCoordinateMode coordinateMode,
+      FitAxisMode axisMode,
+      out Transform transform,
+      out double movementDistance)
+    {
+      transform = Transform.Unset;
+      movementDistance = 0.0;
+      if (analysis == null || analysis.ThicknessModelUnits <= 0.0 ||
+        targetThickness <= 0.0 || !anchorPlane.IsValid ||
+        !anchorCentroid.IsValid || !targetPlane.IsValid)
+        return false;
+
+      Vector3d direction;
+      if (!TryResolveMoveDirection(
+        anchorPlane,
+        targetPlane,
+        coordinateMode,
+        axisMode,
+        out direction))
+        return false;
+
+      var denominator = Vector3d.Multiply(targetPlane.Normal, direction);
+      if (Math.Abs(denominator) <= 1e-9)
+        return false;
+      var amount = -targetPlane.DistanceTo(anchorCentroid) / denominator;
+      if (!RhinoMath.IsValidDouble(amount))
+        return false;
+
+      var factor = targetThickness / analysis.ThicknessModelUnits;
+      var scalingPlane = new Plane(
+        anchorPlane.Origin,
+        anchorPlane.XAxis,
+        anchorPlane.YAxis);
+      var scaleTransform = Transform.Scale(
+        scalingPlane,
+        1.0,
+        1.0,
+        factor);
+      var correction = direction * amount;
+      transform = Transform.Translation(correction) * scaleTransform;
+      movementDistance = correction.Length;
+      return transform.IsValid;
+    }
+
+    private static bool TryResolveMoveDirection(
+      Plane anchorPlane,
+      Plane targetPlane,
+      FitCoordinateMode coordinateMode,
+      FitAxisMode axisMode,
+      out Vector3d direction)
+    {
+      direction = Vector3d.Unset;
+      var axes = coordinateMode == FitCoordinateMode.Object
+        ? new[]
+        {
+          anchorPlane.XAxis,
+          anchorPlane.YAxis,
+          anchorPlane.Normal
+        }
+        : new[]
+        {
+          Vector3d.XAxis,
+          Vector3d.YAxis,
+          Vector3d.ZAxis
+        };
+
+      if (axisMode == FitAxisMode.Auto)
+      {
+        direction = axes
+          .OrderByDescending(axis => Math.Abs(Vector3d.Multiply(
+            axis,
+            targetPlane.Normal)))
+          .First();
+      }
+      else
+      {
+        var axisIndex = axisMode == FitAxisMode.X
+          ? 0
+          : axisMode == FitAxisMode.Y ? 1 : 2;
+        direction = axes[axisIndex];
+      }
+
+      return direction.IsValid && direction.Unitize() &&
+        Math.Abs(Vector3d.Multiply(direction, targetPlane.Normal)) > 1e-9;
+    }
+
+    private static string DescribeAxis(FitAxisMode axisMode)
+    {
+      if (axisMode == FitAxisMode.X)
+        return "X轴";
+      if (axisMode == FitAxisMode.Y)
+        return "Y轴";
+      if (axisMode == FitAxisMode.Z)
+        return "Z轴";
+      return "自动轴";
+    }
+
     private static bool TryCreateThicknessTransform(
       ThicknessAnalysis analysis,
       Point3d selectionPoint,
@@ -535,6 +995,13 @@ namespace WoodThicknessAdjuster.Core
     {
       public Guid ObjectId { get; set; }
       public bool IsBoard { get; set; }
+    }
+
+    private sealed class PlanarTargetFace
+    {
+      public Plane Plane { get; set; }
+      public double Distance { get; set; }
+      public double Area { get; set; }
     }
   }
 }

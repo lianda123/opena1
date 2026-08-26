@@ -14,6 +14,20 @@ namespace WoodThicknessAdjuster.Core
     Off
   }
 
+  internal enum FitCoordinateMode
+  {
+    Object,
+    World
+  }
+
+  internal enum FitAxisMode
+  {
+    Auto,
+    X,
+    Y,
+    Z
+  }
+
   internal sealed class ThicknessAnalysis
   {
     public int FirstFaceIndex { get; set; }

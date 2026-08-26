@@ -16,7 +16,7 @@
     <Title>Wood Thickness Adjuster</Title>
     <Company>Lianda Design Tools</Company>
     <Product>Wood Thickness Adjuster for Rhino</Product>
-    <Description>Click planar wooden parts to set common plywood thicknesses while preserving the clicked face.</Description>
+    <Description>Adjust planar wood thickness while preserving or explicitly fitting assembly contact faces and attached curves.</Description>
     <Version>1.1.0</Version>
     <AssemblyVersion>1.1.0.0</AssemblyVersion>
     <FileVersion>1.1.0.0</FileVersion>
