@@ -1,8 +1,8 @@
 name: WoodThicknessAdjuster
-version: 1.0.1
+version: 1.1.0
 authors:
   - Lianda Design Tools
-description: Click planar wooden parts to set common plywood thicknesses while preserving the clicked face.
+description: Adjust planar wood thickness while preserving clicked or assembly contact faces and attached curves.
 url: https://github.com/lianda123/opena1
 keywords:
   - wood
