@@ -36,16 +36,44 @@ namespace ProductMotionTimeline.Core
       string name,
       GearParameters gearParameters)
     {
-      if (doc == null || geometry == null)
+      return CreateGeneratedPart(
+        doc,
+        geometry == null ? null : new[] { geometry },
+        name,
+        gearParameters);
+    }
+
+    public static InstanceObject CreateGeneratedPart(
+      RhinoDoc doc,
+      IEnumerable<GeometryBase> sourceGeometry,
+      string name,
+      GearParameters gearParameters)
+    {
+      var geometries = sourceGeometry?.Where(geometry => geometry != null).ToList();
+      if (doc == null || geometries == null || geometries.Count == 0)
         return null;
       var definitionName = NextDefinitionName(doc);
-      var geometryAttributes = new ObjectAttributes { Name = name };
+      var geometryAttributes = new List<ObjectAttributes>();
+      for (var index = 0; index < geometries.Count; index++)
+      {
+        var attributes = new ObjectAttributes
+        {
+          Name = index == 0 ? name : "分度圆或分度线（辅助）"
+        };
+        if (index > 0)
+        {
+          attributes.ColorSource = ObjectColorSource.ColorFromObject;
+          attributes.ObjectColor = System.Drawing.Color.FromArgb(0, 190, 255);
+          attributes.SetUserString("ProductMotionTimeline.Auxiliary", "PitchReference");
+        }
+        geometryAttributes.Add(attributes);
+      }
       var definitionIndex = doc.InstanceDefinitions.Add(
         definitionName,
         "ProductMotion 自动生成的机构部件",
         Point3d.Origin,
-        new[] { geometry },
-        new[] { geometryAttributes });
+        geometries,
+        geometryAttributes);
       if (definitionIndex < 0)
         return null;
       var instanceId = doc.Objects.AddInstanceObject(definitionIndex, Transform.Identity);

@@ -1,10 +1,18 @@
-# ProductMotion Timeline 0.4.2（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.3（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.2 修复齿形轮廓中的连续重复点，并按 RhinoGears 的“先生成有效闭合曲线、再生成曲面/实体”流程重写失败回退；同时保留一主多从、串联动作和五类齿轮生成器。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.3 在 RhinoGears 曲线生成流程基础上恢复分度圆/分度线输出，并把齿轮类型、传动类型和方向选项本地化为中文；同时保留一主多从、串联动作和五类齿轮生成器。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.4.2 主要改进
+## 0.4.3 主要改进
+
+- 齿轮生成时新增“是否输出分度圆/分度线”，默认“是”。
+- 直齿、内齿、斜齿和锥齿生成青色分度圆，半径严格为 `模数 × 齿数 ÷ 2`；两齿轮分度圆相切即可确定标准中心距。
+- 齿条生成青色分度线，便于与齿轮分度圆定位。
+- 分度圆/线放在同一个动画块内部，会随齿轮一起移动和旋转。
+- Auto、ExternalGear、InternalGear、Belt、HelicalGear、BevelGear、RackPinion、Normal、Reverse 和综合齿轮类型均显示对应中文名称。
+
+### 0.4.2 齿轮生成修正
 
 - 修复每个齿顶和相邻齿之间的连续重复节点；这些节点会使 Rhino 拒绝挤出或放样，表现为命令结束但没有生成对象。
 - 所有齿形在挤出前都会清理无效点并确认轮廓有效、闭合。
@@ -157,9 +165,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.2-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.2-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.2-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.3-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.3-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.3-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

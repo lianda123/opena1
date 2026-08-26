@@ -219,9 +219,9 @@ namespace ProductMotionTimeline.Commands
 
       var typeGetter = new GetOption();
       typeGetter.SetCommandPrompt("选择机械传动类型");
-      var externalIndex = typeGetter.AddOption("ExternalGear");
-      var internalIndex = typeGetter.AddOption("InternalGear");
-      var beltIndex = typeGetter.AddOption("Belt");
+      var externalIndex = typeGetter.AddOption(new LocalizeStringPair("ExternalGear", "外啮合齿轮"));
+      var internalIndex = typeGetter.AddOption(new LocalizeStringPair("InternalGear", "内啮合齿轮"));
+      var beltIndex = typeGetter.AddOption(new LocalizeStringPair("Belt", "皮带传动"));
       typeGetter.Get();
       if (typeGetter.CommandResult() != Result.Success)
         return typeGetter.CommandResult();
@@ -465,13 +465,13 @@ namespace ProductMotionTimeline.Commands
 
       var typeGetter = new GetOption();
       typeGetter.SetCommandPrompt("选择分支传动类型（Auto 会读取插件生成的齿轮参数）");
-      var auto = typeGetter.AddOption("Auto");
-      var external = typeGetter.AddOption("ExternalGear");
-      var internalGear = typeGetter.AddOption("InternalGear");
-      var belt = typeGetter.AddOption("Belt");
-      var helical = typeGetter.AddOption("HelicalGear");
-      var bevel = typeGetter.AddOption("BevelGear");
-      var rack = typeGetter.AddOption("RackPinion");
+      var auto = typeGetter.AddOption(new LocalizeStringPair("Auto", "自动识别"));
+      var external = typeGetter.AddOption(new LocalizeStringPair("ExternalGear", "外啮合齿轮"));
+      var internalGear = typeGetter.AddOption(new LocalizeStringPair("InternalGear", "内啮合齿轮"));
+      var belt = typeGetter.AddOption(new LocalizeStringPair("Belt", "皮带传动"));
+      var helical = typeGetter.AddOption(new LocalizeStringPair("HelicalGear", "斜齿轮传动"));
+      var bevel = typeGetter.AddOption(new LocalizeStringPair("BevelGear", "锥齿轮传动"));
+      var rack = typeGetter.AddOption(new LocalizeStringPair("RackPinion", "齿轮齿条传动"));
       typeGetter.Get();
       if (typeGetter.CommandResult() != Result.Success)
         return typeGetter.CommandResult();
@@ -670,12 +670,12 @@ namespace ProductMotionTimeline.Commands
       var typeGetter = new GetOption();
       typeGetter.SetCommandPrompt("修改传动类型（按回车保留当前类型）");
       typeGetter.AcceptNothing(true);
-      var external = typeGetter.AddOption("ExternalGear");
-      var internalGear = typeGetter.AddOption("InternalGear");
-      var belt = typeGetter.AddOption("Belt");
-      var helical = typeGetter.AddOption("HelicalGear");
-      var bevel = typeGetter.AddOption("BevelGear");
-      var rack = typeGetter.AddOption("RackPinion");
+      var external = typeGetter.AddOption(new LocalizeStringPair("ExternalGear", "外啮合齿轮"));
+      var internalGear = typeGetter.AddOption(new LocalizeStringPair("InternalGear", "内啮合齿轮"));
+      var belt = typeGetter.AddOption(new LocalizeStringPair("Belt", "皮带传动"));
+      var helical = typeGetter.AddOption(new LocalizeStringPair("HelicalGear", "斜齿轮传动"));
+      var bevel = typeGetter.AddOption(new LocalizeStringPair("BevelGear", "锥齿轮传动"));
+      var rack = typeGetter.AddOption(new LocalizeStringPair("RackPinion", "齿轮齿条传动"));
       var typeResult = typeGetter.Get();
       if (typeResult == GetResult.Cancel)
         return Result.Cancel;
@@ -936,8 +936,8 @@ namespace ProductMotionTimeline.Commands
       var getter = new GetOption();
       getter.SetCommandPrompt("传动方向（按回车保留）");
       getter.AcceptNothing(true);
-      var normal = getter.AddOption("Normal");
-      var reverse = getter.AddOption("Reverse");
+      var normal = getter.AddOption(new LocalizeStringPair("Normal", "正常方向"));
+      var reverse = getter.AddOption(new LocalizeStringPair("Reverse", "反向"));
       var result = getter.Get();
       if (result == GetResult.Cancel)
         return double.NaN;

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.2."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.3."""
 
 from pathlib import Path
 import re
@@ -155,11 +155,21 @@ def main():
     for token in [
         "CreateExternalOutline", "CreateInternalBoundary", "CreateHelicalSolid",
         "CreateBevelSolid", "CreateRackOutline", "Brep.CreateBooleanDifference",
-        "CreateGearGeometry", "CleanClosedPolyline", "回退输出闭合齿形曲线"
+        "CreateGearGeometry", "CleanClosedPolyline", "回退输出闭合齿形曲线",
+        "CreatePitchReference", "LineCurve"
     ]:
         assert token in gear_geometry, token
-    for token in ["GearPartType", "InferConstraintType", "HelixAngleDegrees", "RackLength"]:
+    for token in ["GearPartType", "InferConstraintType", "HelixAngleDegrees", "RackLength", "OutputPitchReference"]:
         assert token in gear_metadata, token
+    for token in [
+        'LocalizeStringPair("Auto", "自动识别")',
+        'LocalizeStringPair("ExternalGear", "外啮合齿轮")',
+        'LocalizeStringPair("RackPinion", "齿轮齿条传动")',
+        'LocalizeStringPair("Reverse", "反向")'
+    ]:
+        assert token in commands, token
+    assert "已附带青色分度圆/分度线" in commands
+    assert "分度圆或分度线（辅助）" in (SRC / "Core" / "TrackFactory.cs").read_text(encoding="utf-8")
     assert "driver?.Type == GearPartType.Internal || driven?.Type == GearPartType.Internal" in gear_metadata
     assert "当前版本只支持齿轮驱动齿条" in commands
     assert "内齿圈齿数必须大于配对的外齿轮" in engine
@@ -169,7 +179,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.2</Version>" in project
+    assert "<Version>0.4.3</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -183,7 +193,7 @@ def main():
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.2 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.3 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

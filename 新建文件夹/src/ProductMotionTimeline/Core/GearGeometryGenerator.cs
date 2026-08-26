@@ -30,6 +30,27 @@ namespace ProductMotionTimeline.Core
       return profile;
     }
 
+    public static Curve CreatePitchReference(GearParameters parameters, Plane plane)
+    {
+      if (parameters == null || !plane.IsValid)
+        return null;
+      Curve local;
+      if (parameters.Type == GearPartType.Rack)
+      {
+        var halfLength = Math.Max(parameters.Module * Math.PI, parameters.RackLength) * 0.5;
+        local = new LineCurve(
+          new Point3d(-halfLength, 0.0, 0.0),
+          new Point3d(halfLength, 0.0, 0.0));
+      }
+      else
+      {
+        var radius = Math.Max(1e-6, parameters.Module * parameters.Teeth * 0.5);
+        local = new Circle(Plane.WorldXY, radius).ToNurbsCurve();
+      }
+      local.Transform(Transform.PlaneToPlane(Plane.WorldXY, plane));
+      return local;
+    }
+
     public static Brep CreateGearSolid(
       RhinoDoc doc,
       GearParameters parameters,

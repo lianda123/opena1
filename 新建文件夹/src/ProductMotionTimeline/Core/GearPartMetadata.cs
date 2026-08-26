@@ -25,6 +25,7 @@ namespace ProductMotionTimeline.Core
     public double HelixAngleDegrees { get; set; } = 15.0;
     public double ConeAngleDegrees { get; set; } = 90.0;
     public double RackLength { get; set; }
+    public bool OutputPitchReference { get; set; } = true;
 
     public string DisplayName
     {
@@ -61,6 +62,7 @@ namespace ProductMotionTimeline.Core
       attributes.SetUserString(Prefix + "HelixAngle", Format(parameters.HelixAngleDegrees));
       attributes.SetUserString(Prefix + "ConeAngle", Format(parameters.ConeAngleDegrees));
       attributes.SetUserString(Prefix + "RackLength", Format(parameters.RackLength));
+      attributes.SetUserString(Prefix + "PitchReference", parameters.OutputPitchReference ? "1" : "0");
       doc.Objects.ModifyAttributes(objectId, attributes, true);
     }
 
@@ -83,7 +85,8 @@ namespace ProductMotionTimeline.Core
         BoreDiameter = ReadDouble(instance, "BoreDiameter", 2.0),
         HelixAngleDegrees = ReadDouble(instance, "HelixAngle", 15.0),
         ConeAngleDegrees = ReadDouble(instance, "ConeAngle", 90.0),
-        RackLength = ReadDouble(instance, "RackLength", 0.0)
+        RackLength = ReadDouble(instance, "RackLength", 0.0),
+        OutputPitchReference = ReadBool(instance, "PitchReference", true)
       };
       return parameters.Type == GearPartType.Rack || parameters.Teeth >= 4;
     }
@@ -130,6 +133,14 @@ namespace ProductMotionTimeline.Core
         out value)
         ? value
         : fallback;
+    }
+
+    private static bool ReadBool(InstanceObject instance, string key, bool fallback)
+    {
+      var text = instance.Attributes.GetUserString(Prefix + key);
+      if (string.IsNullOrWhiteSpace(text))
+        return fallback;
+      return text == "1" || text.Equals("true", StringComparison.OrdinalIgnoreCase);
     }
   }
 }
