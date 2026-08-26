@@ -91,6 +91,7 @@ namespace WoodThicknessAdjuster.Commands
         new[]
         {
           L("ObjectAxis", "物体厚度轴"),
+          L("WorldAuto", "世界自动轴"),
           L("WorldX", "世界X轴"),
           L("WorldY", "世界Y轴"),
           L("WorldZ", "世界Z轴")
@@ -146,12 +147,134 @@ namespace WoodThicknessAdjuster.Commands
     private static ThicknessMoveMode MoveModeFromIndex(int index)
     {
       if (index == 1)
-        return ThicknessMoveMode.WorldX;
+        return ThicknessMoveMode.WorldAuto;
       if (index == 2)
-        return ThicknessMoveMode.WorldY;
+        return ThicknessMoveMode.WorldX;
       if (index == 3)
+        return ThicknessMoveMode.WorldY;
+      if (index == 4)
         return ThicknessMoveMode.WorldZ;
       return ThicknessMoveMode.ObjectAxis;
+    }
+
+    private static LocalizeStringPair L(string english, string chinese)
+    {
+      return new LocalizeStringPair(english, chinese);
+    }
+  }
+
+  [Guid("D727B7F7-66B8-429F-8305-B461D862ADE8")]
+  public sealed class AdjustThicknessFitCommand : Command
+  {
+    private static readonly double[] Presets = { 1.5, 2.0, 2.5, 3.0, 4.0, 5.0 };
+    private static int _lastThicknessIndex = 2;
+    private static int _lastCoordinateIndex;
+    private static int _lastAxisIndex;
+    private static double _lastCustomThickness = 2.5;
+
+    public override string EnglishName => "WSAdjustThicknessFit";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      double thickness;
+      ThicknessMoveMode moveMode;
+      var result = Configure(out thickness, out moveMode);
+      if (result != Result.Success)
+        return result;
+      return ThicknessAdjustmentWorkflow.Run(
+        doc,
+        thickness,
+        ThicknessAnchorMode.ClickedFace,
+        ThicknessContactMode.ExplicitFace,
+        moveMode);
+    }
+
+    private static Result Configure(
+      out double thicknessMillimeters,
+      out ThicknessMoveMode moveMode)
+    {
+      thicknessMillimeters = Presets[Math.Min(_lastThicknessIndex, Presets.Length - 1)];
+      moveMode = ResolveMoveMode(_lastCoordinateIndex, _lastAxisIndex);
+      var customThickness = new OptionDouble(_lastCustomThickness);
+      var getter = new GetOption();
+      getter.SetCommandPrompt("设置目标板厚与指定贴合的移动坐标，回车后按两次点击操作");
+      getter.AcceptNothing(true);
+      var thicknessOption = getter.AddOptionList(
+        L("Thickness", "目标板厚"),
+        new[]
+        {
+          L("T1_5mm", "1点5毫米"),
+          L("T2mm", "2毫米"),
+          L("T2_5mm", "2点5毫米"),
+          L("T3mm", "3毫米"),
+          L("T4mm", "4毫米"),
+          L("T5mm", "5毫米"),
+          L("Custom", "自定义")
+        },
+        _lastThicknessIndex);
+      var coordinateOption = getter.AddOptionList(
+        L("Coordinates", "移动坐标"),
+        new[]
+        {
+          L("Object", "物体坐标"),
+          L("World", "世界坐标")
+        },
+        _lastCoordinateIndex);
+      var axisOption = getter.AddOptionList(
+        L("Axis", "移动轴"),
+        new[]
+        {
+          L("Auto", "自动轴"),
+          L("X", "X轴"),
+          L("Y", "Y轴"),
+          L("Z", "Z轴")
+        },
+        _lastAxisIndex);
+      getter.AddOptionDouble(L("CustomThickness", "自定义板厚"), ref customThickness);
+
+      while (true)
+      {
+        var getResult = getter.Get();
+        if (getResult == GetResult.Cancel)
+          return Result.Cancel;
+        if (getResult == GetResult.Nothing)
+          break;
+        if (getResult != GetResult.Option)
+          continue;
+        if (getter.OptionIndex() == thicknessOption)
+          _lastThicknessIndex = getter.Option().CurrentListOptionIndex;
+        else if (getter.OptionIndex() == coordinateOption)
+          _lastCoordinateIndex = getter.Option().CurrentListOptionIndex;
+        else if (getter.OptionIndex() == axisOption)
+          _lastAxisIndex = getter.Option().CurrentListOptionIndex;
+      }
+
+      _lastCustomThickness = customThickness.CurrentValue;
+      thicknessMillimeters = _lastThicknessIndex < Presets.Length
+        ? Presets[_lastThicknessIndex]
+        : _lastCustomThickness;
+      moveMode = ResolveMoveMode(_lastCoordinateIndex, _lastAxisIndex);
+      if (thicknessMillimeters <= 0.1 || thicknessMillimeters > 50.0)
+      {
+        RhinoApp.WriteLine("WoodThicknessAdjuster：自定义板厚必须大于0.1mm且不超过50mm。");
+        return Result.Failure;
+      }
+      return Result.Success;
+    }
+
+    private static ThicknessMoveMode ResolveMoveMode(
+      int coordinateIndex,
+      int axisIndex)
+    {
+      if (coordinateIndex == 0)
+        return ThicknessMoveMode.ObjectAxis;
+      if (axisIndex == 1)
+        return ThicknessMoveMode.WorldX;
+      if (axisIndex == 2)
+        return ThicknessMoveMode.WorldY;
+      if (axisIndex == 3)
+        return ThicknessMoveMode.WorldZ;
+      return ThicknessMoveMode.WorldAuto;
     }
 
     private static LocalizeStringPair L(string english, string chinese)

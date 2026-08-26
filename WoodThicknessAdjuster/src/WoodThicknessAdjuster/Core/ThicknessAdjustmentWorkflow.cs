@@ -348,16 +348,9 @@ namespace WoodThicknessAdjuster.Core
 
       var reference = getter.Object(0);
       var neighborObject = reference == null ? null : reference.Object();
-      var face = reference == null ? null : reference.Face();
-      if (face == null && neighborObject != null)
-      {
-        var brep = neighborObject.Geometry as Brep;
-        if (brep != null && brep.Faces.Count == 1)
-          face = brep.Faces[0];
-      }
       Plane neighborPlane;
-      if (neighborObject == null || face == null ||
-        !face.TryGetPlane(out neighborPlane, tolerance * 10.0))
+      if (neighborObject == null ||
+        !TryGetClickedPlanarFace(reference, tolerance, out neighborPlane))
       {
         RhinoApp.WriteLine("WoodThicknessAdjuster：目标面必须是平面，曲面不能作为贴合基准。");
         if (neighborObject != null)
@@ -381,6 +374,87 @@ namespace WoodThicknessAdjuster.Core
       }
       neighborObject.Select(false);
       return Result.Success;
+    }
+
+    private static bool TryGetClickedPlanarFace(
+      ObjRef reference,
+      double tolerance,
+      out Plane plane)
+    {
+      plane = Plane.Unset;
+      if (reference == null)
+        return false;
+      var directFace = reference.Face();
+      if (directFace != null &&
+        directFace.TryGetPlane(out plane, tolerance * 10.0))
+        return true;
+
+      var rhinoObject = reference.Object();
+      if (rhinoObject == null || rhinoObject.Geometry == null)
+        return false;
+      var brep = rhinoObject.Geometry as Brep;
+      var extrusion = rhinoObject.Geometry as Extrusion;
+      if (brep == null && extrusion != null)
+        brep = extrusion.ToBrep();
+      if (brep == null || !brep.IsValid)
+        return false;
+
+      Point3d selectionPoint;
+      try
+      {
+        selectionPoint = reference.SelectionPoint();
+      }
+      catch
+      {
+        selectionPoint = Point3d.Unset;
+      }
+      var candidates = new List<PlanarTargetFace>();
+      for (var index = 0; index < brep.Faces.Count; index++)
+      {
+        Plane candidatePlane;
+        if (!brep.Faces[index].TryGetPlane(
+          out candidatePlane,
+          tolerance * 10.0))
+          continue;
+        var properties = AreaMassProperties.Compute(brep.Faces[index]);
+        var area = properties == null ? 0.0 : properties.Area;
+        var distance = selectionPoint.IsValid
+          ? DistanceToTrimmedFace(
+            brep.Faces[index],
+            candidatePlane,
+            selectionPoint)
+          : 0.0;
+        candidates.Add(new PlanarTargetFace
+        {
+          Plane = candidatePlane,
+          Distance = distance,
+          Area = area
+        });
+      }
+      var best = candidates
+        .OrderBy(item => item.Distance)
+        .ThenByDescending(item => item.Area)
+        .FirstOrDefault();
+      if (best == null)
+        return false;
+      plane = best.Plane;
+      return plane.IsValid;
+    }
+
+    private static double DistanceToTrimmedFace(
+      BrepFace face,
+      Plane plane,
+      Point3d point)
+    {
+      if (face == null || !point.IsValid)
+        return double.MaxValue;
+      var projected = plane.ClosestPoint(point);
+      double u;
+      double v;
+      if (!face.ClosestPoint(projected, out u, out v) ||
+        face.IsPointOnFace(u, v) == PointFaceRelation.Exterior)
+        return double.MaxValue;
+      return point.DistanceTo(projected);
     }
 
     private static void ReportContactVerification(
@@ -695,7 +769,20 @@ namespace WoodThicknessAdjuster.Core
       if (contact == null)
         return false;
       Vector3d direction;
-      if (moveMode == ThicknessMoveMode.WorldX)
+      if (moveMode == ThicknessMoveMode.WorldAuto)
+      {
+        direction = new[]
+        {
+          Vector3d.XAxis,
+          Vector3d.YAxis,
+          Vector3d.ZAxis
+        }
+          .OrderByDescending(axis => Math.Abs(Vector3d.Multiply(
+            axis,
+            contact.NeighborPlane.Normal)))
+          .First();
+      }
+      else if (moveMode == ThicknessMoveMode.WorldX)
         direction = Vector3d.XAxis;
       else if (moveMode == ThicknessMoveMode.WorldY)
         direction = Vector3d.YAxis;
@@ -891,6 +978,13 @@ namespace WoodThicknessAdjuster.Core
       public RhinoObject BoardObject { get; set; }
       public ThicknessAnalysis Analysis { get; set; }
       public List<RhinoObject> Objects { get; set; }
+    }
+
+    private sealed class PlanarTargetFace
+    {
+      public Plane Plane { get; set; }
+      public double Distance { get; set; }
+      public double Area { get; set; }
     }
 
     private sealed class TransformTarget

@@ -68,12 +68,13 @@ def main():
         "reference.Face()",
         "ThicknessContactMode.ExplicitFace", "TryGetContactCorrection",
         "ThicknessMoveMode.WorldX", "ThicknessMoveMode.WorldY", "ThicknessMoveMode.WorldZ",
+        "ThicknessMoveMode.WorldAuto",
         "ReportContactVerification", "投影重合率"
     ]:
         assert token in workflow, token
 
     for command in [
-        "WSAdjustThickness", "WSThickness15", "WSThickness20",
+        "WSAdjustThickness", "WSAdjustThicknessFit", "WSThickness15", "WSThickness20",
         "WSThickness25", "WSThickness30", "WSThickness40", "WSThickness50"
     ]:
         assert command in commands, command
@@ -81,13 +82,14 @@ def main():
         assert token in commands, token
     for token in [
         "装配贴合", "自动贴合", "指定目标面", "ThicknessContactMode.AutoFit",
-        "贴合移动坐标", "物体厚度轴", "世界X轴", "世界Y轴", "世界Z轴"
+        "贴合移动坐标", "物体厚度轴", "世界自动轴", "世界X轴", "世界Y轴", "世界Z轴",
+        "移动坐标", "物体坐标", "世界坐标", "自动轴"
     ]:
         assert token in commands, token
 
     for token in [
         "ThicknessContactMode", "ExplicitFace", "ThicknessMoveMode", "ObjectAxis",
-        "WorldX", "WorldY", "WorldZ", "ContactVerification"
+        "WorldAuto", "WorldX", "WorldY", "WorldZ", "ContactVerification"
     ]:
         assert token in models, token
     for token in [
@@ -120,7 +122,7 @@ def main():
         "保持点击面", "中心对称", "自动贴合", "原贴合面", "5mm",
         "第一块→第二块→第三块", "表面曲线", "Group", "命令内撤回",
         "撤回上一步（UndoLast）", "指定目标面", "物体厚度轴", "投影重合率",
-        "绿色点", "红色“警告”"
+        "绿色点", "红色“警告”", "WSAdjustThicknessFit", "WTFIT"
     ]:
         assert token in readme, token
 

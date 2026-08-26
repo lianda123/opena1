@@ -145,7 +145,10 @@ namespace WoodThicknessAdjuster.Core
         neighborPlane.DistanceTo(analysis.FirstCentroid));
       var secondSeparation = Math.Abs(
         neighborPlane.DistanceTo(analysis.SecondCentroid));
-      var useFirst = firstSeparation <= secondSeparation;
+      var useFirst = analysis.PreferredAnchorFaceIndex == analysis.FirstFaceIndex;
+      if (analysis.PreferredAnchorFaceIndex != analysis.FirstFaceIndex &&
+        analysis.PreferredAnchorFaceIndex != analysis.SecondFaceIndex)
+        useFirst = firstSeparation <= secondSeparation;
       var targetPlane = useFirst ? analysis.FirstPlane : analysis.SecondPlane;
       var targetCentroid = useFirst
         ? analysis.FirstCentroid

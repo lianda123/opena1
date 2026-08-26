@@ -18,6 +18,7 @@ namespace WoodThicknessAdjuster.Core
   internal enum ThicknessMoveMode
   {
     ObjectAxis,
+    WorldAuto,
     WorldX,
     WorldY,
     WorldZ
