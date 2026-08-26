@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Eto.Drawing;
 using Eto.Forms;
@@ -30,7 +31,11 @@ namespace ProductMotionTimeline.UI
     private readonly Pen _minorGridPen = new Pen(Color.FromArgb(49, 52, 58), 1f);
     private readonly Pen _playheadPen = new Pen(Color.FromArgb(255, 86, 77), 2f);
     private readonly Pen _trackDropPen = new Pen(Color.FromArgb(0, 190, 255), 3f);
+    private readonly Pen _marqueePen = new Pen(Color.FromArgb(82, 190, 255), 1.5f);
     private readonly SolidBrush _playheadBrush = new SolidBrush(Color.FromArgb(255, 86, 77));
+
+    private readonly HashSet<KeyframeReference> _selectedKeys = new HashSet<KeyframeReference>();
+    private KeyframeReference? _primaryKey;
 
     private Guid _dragTrackId = Guid.Empty;
     private int _dragOriginalFrame = -1;
@@ -41,14 +46,71 @@ namespace ProductMotionTimeline.UI
     private float _rowDragStartY;
     private bool _rowDropAfter;
     private bool _rowDragging;
+    private bool _marqueeSelecting;
+    private PointF _marqueeStart;
+    private PointF _marqueeCurrent;
+    private HashSet<KeyframeReference> _selectionBeforeMarquee = new HashSet<KeyframeReference>();
+    private MarqueeMode _marqueeMode;
+
+    public event Action KeySelectionChanged;
+    public event Action KeyActivated;
 
     public TimelineCanvas()
     {
       Size = new Size(520, 190);
       Paint += OnPaint;
       MouseDown += OnMouseDown;
+      MouseDoubleClick += OnMouseDoubleClick;
       MouseMove += OnMouseMove;
       MouseUp += OnMouseUp;
+    }
+
+    public IList<KeyframeReference> SelectedKeys
+    {
+      get
+      {
+        return _selectedKeys
+          .OrderBy(reference => reference.TrackId)
+          .ThenBy(reference => reference.Frame)
+          .ToList();
+      }
+    }
+
+    public KeyframeReference? PrimaryKey => _primaryKey;
+
+    public void SelectAllCurrentTrack(TimelineDocument model)
+    {
+      var track = model?.SelectedTrack;
+      if (track == null)
+        return;
+      _selectedKeys.Clear();
+      foreach (var key in track.Keys)
+        _selectedKeys.Add(new KeyframeReference(track.Id, key.Frame));
+      _primaryKey = track.Keys.Count > 0
+        ? new KeyframeReference?(new KeyframeReference(track.Id, track.Keys[0].Frame))
+        : null;
+      SelectionChanged();
+    }
+
+    public void ClearKeySelection()
+    {
+      if (_selectedKeys.Count == 0)
+        return;
+      _selectedKeys.Clear();
+      _primaryKey = null;
+      SelectionChanged();
+    }
+
+    public void PruneSelection(TimelineDocument model)
+    {
+      if (model == null)
+        return;
+      _selectedKeys.RemoveWhere(reference =>
+        model.FindTrack(reference.TrackId)?.FindKey(reference.Frame) == null);
+      if (_primaryKey.HasValue && !_selectedKeys.Contains(_primaryKey.Value))
+        _primaryKey = _selectedKeys.Count > 0
+          ? new KeyframeReference?(_selectedKeys.First())
+          : null;
     }
 
     public void RefreshHeight()
@@ -76,6 +138,7 @@ namespace ProductMotionTimeline.UI
       DrawTracks(graphics, model, width);
       DrawTrackDropIndicator(graphics, model, width);
       DrawPlayhead(graphics, model, width, height);
+      DrawMarquee(graphics);
     }
 
     private void DrawRuler(Graphics graphics, TimelineDocument model, float width, float height)
@@ -131,7 +194,8 @@ namespace ProductMotionTimeline.UI
             ? _dragPreviewFrame
             : key.Frame;
           var x = FrameToX(frame, model, width);
-          var keySelected = selected && frame == model.CurrentFrame;
+          var keySelected = _selectedKeys.Contains(new KeyframeReference(track.Id, key.Frame)) ||
+                            (_selectedKeys.Count == 0 && selected && frame == model.CurrentFrame);
           DrawDiamond(
             graphics,
             x,
@@ -194,6 +258,13 @@ namespace ProductMotionTimeline.UI
       graphics.DrawLine(_trackDropPen, 0f, y, width, y);
     }
 
+    private void DrawMarquee(Graphics graphics)
+    {
+      if (!_marqueeSelecting)
+        return;
+      graphics.DrawRectangle(_marqueePen, NormalizedRectangle(_marqueeStart, _marqueeCurrent));
+    }
+
     private static void DrawDiamond(Graphics graphics, float x, float y, Brush brush)
     {
       using (var path = new GraphicsPath())
@@ -209,6 +280,11 @@ namespace ProductMotionTimeline.UI
 
     private void OnMouseDown(object sender, MouseEventArgs e)
     {
+      if ((e.Buttons & MouseButtons.Alternate) != 0)
+      {
+        BeginMarquee(e);
+        return;
+      }
       if ((e.Buttons & MouseButtons.Primary) == 0)
         return;
       var doc = RhinoDoc.ActiveDoc;
@@ -221,9 +297,10 @@ namespace ProductMotionTimeline.UI
       if (row >= 0 && row < tracks.Count)
       {
         var track = tracks[row];
-        TimelineEngine.SelectTrack(doc, track.Id);
         if (e.Location.X < HeaderWidth)
         {
+          ClearKeySelection();
+          TimelineEngine.SelectTrack(doc, track.Id);
           _rowDragTrackId = track.Id;
           _rowDropSiblingId = track.Id;
           _rowDragStartY = e.Location.Y;
@@ -235,23 +312,65 @@ namespace ProductMotionTimeline.UI
         var hit = HitKey(track, model, ClientSize.Width, e.Location.X);
         if (hit != null)
         {
-          _dragTrackId = track.Id;
-          _dragOriginalFrame = hit.Frame;
-          _dragPreviewFrame = hit.Frame;
+          var reference = new KeyframeReference(track.Id, hit.Frame);
+          UpdateClickSelection(reference, e.Modifiers);
+          TimelineEngine.SelectTrack(doc, track.Id);
           TimelineEngine.ApplyFrame(doc, hit.Frame, false);
+          if (!HasModifier(e.Modifiers, Keys.Shift) &&
+              !HasModifier(e.Modifiers, Keys.Alt) &&
+              _selectedKeys.Count == 1)
+          {
+            _dragTrackId = track.Id;
+            _dragOriginalFrame = hit.Frame;
+            _dragPreviewFrame = hit.Frame;
+          }
           return;
         }
+
+        TimelineEngine.SelectTrack(doc, track.Id);
       }
 
       if (e.Location.X >= HeaderWidth)
       {
+        ClearKeySelection();
         _scrubbing = true;
         ScrubTo(e.Location.X, false);
       }
     }
 
+    private void OnMouseDoubleClick(object sender, MouseEventArgs e)
+    {
+      if ((e.Buttons & MouseButtons.Primary) == 0)
+        return;
+      var doc = RhinoDoc.ActiveDoc;
+      var model = TimelineEngine.Model(doc);
+      if (model == null)
+        return;
+      var row = RowFromY(e.Location.Y);
+      var tracks = model.OrderedTracks();
+      if (row < 0 || row >= tracks.Count || e.Location.X < HeaderWidth)
+        return;
+      var track = tracks[row];
+      var hit = HitKey(track, model, ClientSize.Width, e.Location.X);
+      if (hit == null)
+        return;
+
+      SetSingleSelection(new KeyframeReference(track.Id, hit.Frame));
+      TimelineEngine.SelectTrack(doc, track.Id);
+      TimelineEngine.ApplyFrame(doc, hit.Frame, true);
+      e.Handled = true;
+      KeyActivated?.Invoke();
+    }
+
     private void OnMouseMove(object sender, MouseEventArgs e)
     {
+      if (_marqueeSelecting && (e.Buttons & MouseButtons.Alternate) != 0)
+      {
+        _marqueeCurrent = e.Location;
+        UpdateMarqueeSelection();
+        Invalidate();
+        return;
+      }
       if ((e.Buttons & MouseButtons.Primary) == 0)
         return;
       if (_rowDragTrackId != Guid.Empty)
@@ -280,7 +399,20 @@ namespace ProductMotionTimeline.UI
     private void OnMouseUp(object sender, MouseEventArgs e)
     {
       var doc = RhinoDoc.ActiveDoc;
-      if (_rowDragTrackId != Guid.Empty)
+      if (_marqueeSelecting)
+      {
+        _marqueeCurrent = e.Location;
+        UpdateMarqueeSelection();
+        _marqueeSelecting = false;
+        var primary = _primaryKey;
+        if (primary.HasValue)
+        {
+          TimelineEngine.SelectTrack(doc, primary.Value.TrackId);
+          TimelineEngine.ApplyFrame(doc, primary.Value.Frame, false);
+        }
+        SelectionChanged();
+      }
+      else if (_rowDragTrackId != Guid.Empty)
       {
         if (_rowDragging && _rowDropSiblingId != Guid.Empty)
           TimelineEngine.ReorderTrack(
@@ -293,6 +425,9 @@ namespace ProductMotionTimeline.UI
       {
         var newFrame = _dragPreviewFrame;
         TimelineEngine.MoveKey(doc, _dragTrackId, _dragOriginalFrame, newFrame);
+        ReplaceSelectedReference(
+          new KeyframeReference(_dragTrackId, _dragOriginalFrame),
+          new KeyframeReference(_dragTrackId, newFrame));
         TimelineEngine.ApplyFrame(doc, newFrame, true);
       }
       else if (_scrubbing)
@@ -310,6 +445,103 @@ namespace ProductMotionTimeline.UI
       _rowDropAfter = false;
       _rowDragging = false;
       Invalidate();
+    }
+
+    private void BeginMarquee(MouseEventArgs e)
+    {
+      if (e.Location.X < HeaderWidth || e.Location.Y < RulerHeight)
+        return;
+      _marqueeSelecting = true;
+      _marqueeStart = e.Location;
+      _marqueeCurrent = e.Location;
+      _selectionBeforeMarquee = new HashSet<KeyframeReference>(_selectedKeys);
+      _marqueeMode = HasModifier(e.Modifiers, Keys.Alt)
+        ? MarqueeMode.Subtract
+        : HasModifier(e.Modifiers, Keys.Shift)
+          ? MarqueeMode.Add
+          : MarqueeMode.Replace;
+      UpdateMarqueeSelection();
+      Invalidate();
+    }
+
+    private void UpdateMarqueeSelection()
+    {
+      var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
+      if (model == null)
+        return;
+      var rectangle = NormalizedRectangle(_marqueeStart, _marqueeCurrent);
+      var hits = new HashSet<KeyframeReference>();
+      var tracks = model.OrderedTracks();
+      for (var row = 0; row < tracks.Count; row++)
+      {
+        var track = tracks[row];
+        var y = RulerHeight + row * RowHeight + RowHeight / 2f;
+        foreach (var key in track.Keys)
+        {
+          var x = FrameToX(key.Frame, model, ClientSize.Width);
+          if (Contains(rectangle, x, y))
+            hits.Add(new KeyframeReference(track.Id, key.Frame));
+        }
+      }
+
+      _selectedKeys.Clear();
+      if (_marqueeMode != MarqueeMode.Replace)
+        _selectedKeys.UnionWith(_selectionBeforeMarquee);
+      if (_marqueeMode == MarqueeMode.Subtract)
+        _selectedKeys.ExceptWith(hits);
+      else
+        _selectedKeys.UnionWith(hits);
+      _primaryKey = hits.Count > 0 && _marqueeMode != MarqueeMode.Subtract
+        ? new KeyframeReference?(hits.Last())
+        : _selectedKeys.Count > 0
+          ? new KeyframeReference?(_selectedKeys.Last())
+          : null;
+    }
+
+    private void UpdateClickSelection(KeyframeReference reference, Keys modifiers)
+    {
+      if (HasModifier(modifiers, Keys.Alt))
+      {
+        _selectedKeys.Remove(reference);
+        if (_primaryKey.HasValue && _primaryKey.Value.Equals(reference))
+          _primaryKey = _selectedKeys.Count > 0
+            ? new KeyframeReference?(_selectedKeys.Last())
+            : null;
+      }
+      else if (HasModifier(modifiers, Keys.Shift))
+      {
+        _selectedKeys.Add(reference);
+        _primaryKey = reference;
+      }
+      else
+      {
+        _selectedKeys.Clear();
+        _selectedKeys.Add(reference);
+        _primaryKey = reference;
+      }
+      SelectionChanged();
+    }
+
+    private void SetSingleSelection(KeyframeReference reference)
+    {
+      _selectedKeys.Clear();
+      _selectedKeys.Add(reference);
+      _primaryKey = reference;
+      SelectionChanged();
+    }
+
+    private void ReplaceSelectedReference(KeyframeReference oldReference, KeyframeReference newReference)
+    {
+      _selectedKeys.Remove(oldReference);
+      _selectedKeys.Add(newReference);
+      _primaryKey = newReference;
+      SelectionChanged();
+    }
+
+    private void SelectionChanged()
+    {
+      Invalidate();
+      KeySelectionChanged?.Invoke();
     }
 
     private void UpdateTrackDrop(TimelineDocument model, float y)
@@ -362,6 +594,24 @@ namespace ProductMotionTimeline.UI
       return (int)((y - RulerHeight) / RowHeight);
     }
 
+    private static bool HasModifier(Keys modifiers, Keys modifier)
+    {
+      return (modifiers & modifier) != 0;
+    }
+
+    private static RectangleF NormalizedRectangle(PointF a, PointF b)
+    {
+      var left = Math.Min(a.X, b.X);
+      var top = Math.Min(a.Y, b.Y);
+      return new RectangleF(left, top, Math.Abs(a.X - b.X), Math.Abs(a.Y - b.Y));
+    }
+
+    private static bool Contains(RectangleF rectangle, float x, float y)
+    {
+      return x >= rectangle.X && x <= rectangle.X + rectangle.Width &&
+             y >= rectangle.Y && y <= rectangle.Y + rectangle.Height;
+    }
+
     private static float TimelineWidth(float width)
     {
       return Math.Max(1f, width - HeaderWidth - 8f);
@@ -392,6 +642,13 @@ namespace ProductMotionTimeline.UI
         return "动画部件";
       var limit = Math.Max(7, 18 - depth * 2 - (driven ? 3 : 0));
       return value.Length <= limit ? value : value.Substring(0, limit - 1) + "…";
+    }
+
+    private enum MarqueeMode
+    {
+      Replace,
+      Add,
+      Subtract
     }
   }
 }

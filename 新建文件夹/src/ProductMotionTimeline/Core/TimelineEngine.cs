@@ -11,6 +11,8 @@ namespace ProductMotionTimeline.Core
   {
     public const string TrackUserStringKey = "ProductMotionTimeline.TrackId";
     private static Keyframe _keyClipboard;
+    private static readonly List<Keyframe> _keySelectionClipboard = new List<Keyframe>();
+    private static Guid _keySelectionSourceTrackId = Guid.Empty;
 
     public static event Action Changed;
 
@@ -61,12 +63,19 @@ namespace ProductMotionTimeline.Core
 
     public static void SelectTrack(RhinoDoc doc, Guid trackId)
     {
+      if (doc == null)
+        return;
       var model = Model(doc);
-      if (model.Tracks.Any(track => track.Id == trackId))
-      {
-        model.SelectedTrackId = trackId;
-        Notify();
-      }
+      var track = model.FindTrack(trackId);
+      if (track == null)
+        return;
+
+      model.SelectedTrackId = trackId;
+      var instance = ResolveInstance(doc, track);
+      doc.Objects.UnselectAll();
+      instance?.Select(true);
+      doc.Views.Redraw();
+      Notify();
     }
 
     public static bool ReorderTrack(
@@ -178,6 +187,101 @@ namespace ProductMotionTimeline.Core
         return false;
       track.UpsertKey(model.CurrentFrame, _keyClipboard.Pose, _keyClipboard.Interpolation);
       SaveAndNotify(doc);
+      return true;
+    }
+
+    public static int CopyKeys(RhinoDoc doc, IEnumerable<KeyframeReference> references)
+    {
+      if (doc == null || references == null)
+        return 0;
+      var model = Model(doc);
+      var valid = references
+        .Distinct()
+        .Where(reference => model.FindTrack(reference.TrackId)?.FindKey(reference.Frame) != null)
+        .ToList();
+      _keySelectionClipboard.Clear();
+      _keySelectionSourceTrackId = Guid.Empty;
+      var sourceTracks = valid.Select(reference => reference.TrackId).Distinct().ToList();
+      if (sourceTracks.Count > 1)
+        return -1;
+      if (sourceTracks.Count == 0)
+        return 0;
+
+      var source = model.FindTrack(sourceTracks[0]);
+      foreach (var reference in valid.OrderBy(reference => reference.Frame))
+      {
+        var key = source.FindKey(reference.Frame);
+        if (key != null)
+          _keySelectionClipboard.Add(key.Clone());
+      }
+      _keySelectionSourceTrackId = source.Id;
+      return _keySelectionClipboard.Count;
+    }
+
+    public static KeyframePasteResult PasteCopiedKeys(
+      RhinoDoc doc,
+      IEnumerable<Guid> targetTrackIds,
+      bool onlyEmptyFrames)
+    {
+      var result = new KeyframePasteResult();
+      if (doc == null || targetTrackIds == null)
+        return result;
+      var model = Model(doc);
+      var targets = targetTrackIds
+        .Distinct()
+        .Select(model.FindTrack)
+        .Where(track => track != null)
+        .ToList();
+      result.TargetTracks = targets.Count;
+      if (_keySelectionClipboard.Count == 0)
+        return result;
+
+      foreach (var target in targets)
+      {
+        foreach (var copied in _keySelectionClipboard)
+        {
+          var existing = target.FindKey(copied.Frame);
+          if (onlyEmptyFrames && existing != null)
+          {
+            result.Skipped++;
+            continue;
+          }
+          target.UpsertKey(copied.Frame, copied.Pose, copied.Interpolation);
+          result.Added++;
+        }
+      }
+
+      if (result.Added > 0)
+      {
+        TimelineRepository.Save(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+      }
+      return result;
+    }
+
+    public static Guid CopiedKeySourceTrackId => _keySelectionSourceTrackId;
+
+    public static bool UpdateKeyPose(
+      RhinoDoc doc,
+      Guid trackId,
+      int frame,
+      Pose pose)
+    {
+      if (doc == null || pose == null ||
+          Math.Abs(pose.Scale.X) < 1e-6 ||
+          Math.Abs(pose.Scale.Y) < 1e-6 ||
+          Math.Abs(pose.Scale.Z) < 1e-6)
+        return false;
+      var model = Model(doc);
+      var track = model.FindTrack(trackId);
+      var key = track?.FindKey(frame);
+      if (track == null || key == null)
+        return false;
+
+      key.Pose = pose.Clone();
+      model.SelectedTrackId = track.Id;
+      TimelineRepository.Save(doc);
+      ApplyFrame(doc, frame, false);
       return true;
     }
 

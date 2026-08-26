@@ -152,6 +152,43 @@ namespace ProductMotionTimeline.Core
     }
   }
 
+  internal struct KeyframeReference : IEquatable<KeyframeReference>
+  {
+    public KeyframeReference(Guid trackId, int frame)
+    {
+      TrackId = trackId;
+      Frame = frame;
+    }
+
+    public Guid TrackId { get; }
+    public int Frame { get; }
+
+    public bool Equals(KeyframeReference other)
+    {
+      return TrackId == other.TrackId && Frame == other.Frame;
+    }
+
+    public override bool Equals(object obj)
+    {
+      return obj is KeyframeReference && Equals((KeyframeReference)obj);
+    }
+
+    public override int GetHashCode()
+    {
+      unchecked
+      {
+        return (TrackId.GetHashCode() * 397) ^ Frame;
+      }
+    }
+  }
+
+  internal sealed class KeyframePasteResult
+  {
+    public int Added { get; set; }
+    public int Skipped { get; set; }
+    public int TargetTracks { get; set; }
+  }
+
   internal sealed class AnimationTrack
   {
     public Guid Id { get; set; } = Guid.NewGuid();

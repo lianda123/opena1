@@ -1,10 +1,18 @@
-# ProductMotion Timeline 0.4.5（Rhino 7 / 8）
+# ProductMotion Timeline 0.5.0（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.5 新增同轴复合齿轮：上下齿轮保持 1:1 同角速度，同时各自保留齿数，可由上层小齿轮继续驱动后级；并保留轨道拖动、分度圆/分度线、中文传动选项、一主多从、串联动作和五类齿轮生成器。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.5.0 重点改进时间轴编辑：轨道与 Rhino 对象同步选中，关键帧可右键框选、Shift 加选、Alt 减选，双击后可直接修改该帧的位移、旋转和缩放，并可把全部或部分关键帧复制到其他对象。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.4.5 主要改进
+## 0.5.0 主要改进
+
+- 点击轨道行或轨道名时，Rhino 视口中对应的动画部件会立即高亮选中。
+- 双击关键帧后，面板显示该轨道、帧号、位移 XYZ、旋转 XYZ 角度和缩放 XYZ；修改数值会同步回该帧并立即更新模型。
+- 在关键帧区域按住鼠标右键可框选；`Shift` 保留原选择并加选，`Alt` 从原选择中减选。
+- “全选本轨”可选中当前轨道的全部关键帧；也可框选或逐个加减来复制部分关键帧。
+- “复制所选”按原帧号保留姿态和插值；“粘贴到对象”支持 Rhino 中选中一个或多个目标部件，并自动跳过目标已有关键帧的位置，不覆盖原动作。
+
+### 0.4.5 同轴复合齿轮
 
 - 新增“同轴复合齿轮”按钮和 `PMTSameShaft` 命令，一次可把多个同轴零件刚性锁定到当前主动轨道。
 - 同轴上下齿轮的角速度固定为 1:1，不会错误套用上下齿轮的齿数比；建立时自动保持当前装配相位。
@@ -190,9 +198,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.5-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.5-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.5-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.5.0-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.5.0-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.5.0-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

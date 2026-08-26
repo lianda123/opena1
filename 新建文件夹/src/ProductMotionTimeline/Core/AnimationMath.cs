@@ -138,6 +138,41 @@ namespace ProductMotionTimeline.Core
 
   internal static class AnimationMath
   {
+    public static QuaternionValue FromEulerDegrees(Vector3d eulerDegrees)
+    {
+      var halfX = eulerDegrees.X * Math.PI / 360.0;
+      var halfY = eulerDegrees.Y * Math.PI / 360.0;
+      var halfZ = eulerDegrees.Z * Math.PI / 360.0;
+      var sx = Math.Sin(halfX);
+      var cx = Math.Cos(halfX);
+      var sy = Math.Sin(halfY);
+      var cy = Math.Cos(halfY);
+      var sz = Math.Sin(halfZ);
+      var cz = Math.Cos(halfZ);
+      return new QuaternionValue(
+        sx * cy * cz - cx * sy * sz,
+        cx * sy * cz + sx * cy * sz,
+        cx * cy * sz - sx * sy * cz,
+        cx * cy * cz + sx * sy * sz).Normalized();
+    }
+
+    public static Vector3d ToEulerDegrees(QuaternionValue rotation)
+    {
+      var q = rotation.Normalized();
+      var roll = Math.Atan2(
+        2.0 * (q.W * q.X + q.Y * q.Z),
+        1.0 - 2.0 * (q.X * q.X + q.Y * q.Y));
+      var sinPitch = 2.0 * (q.W * q.Y - q.Z * q.X);
+      var pitch = Math.Abs(sinPitch) >= 1.0
+        ? (sinPitch >= 0.0 ? Math.PI / 2.0 : -Math.PI / 2.0)
+        : Math.Asin(sinPitch);
+      var yaw = Math.Atan2(
+        2.0 * (q.W * q.Z + q.X * q.Y),
+        1.0 - 2.0 * (q.Y * q.Y + q.Z * q.Z));
+      const double degrees = 180.0 / Math.PI;
+      return new Vector3d(roll * degrees, pitch * degrees, yaw * degrees);
+    }
+
     public static Transform Compose(Pose pose, RotationAxis rotationAxis)
     {
       var axisRotation = QuaternionValue.FromAxisAngle(rotationAxis, pose.AxisAngleDegrees);

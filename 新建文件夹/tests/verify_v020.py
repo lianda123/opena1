@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.5."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.5.0."""
 
 from pathlib import Path
 import re
@@ -72,6 +72,14 @@ def main():
     assert crank_slider_x(0.0, 10.0, 30.0) == 40.0
     assert abs(rack_travel(360.0, 2.0, 20) - 40.0 * 3.141592653589793) < 1e-9
 
+    # Multi-key paste keeps absolute frame numbers and never overwrites occupied frames.
+    copied_frames = {0: "start", 10: "middle", 30: "end"}
+    target_frames = {10: "keep-target"}
+    for frame, value in copied_frames.items():
+        if frame not in target_frames:
+            target_frames[frame] = value
+    assert target_frames == {0: "start", 10: "keep-target", 30: "end"}
+
     # Parent moved +5; child own target remains +13, so inherited result is +18.
     parent_world = translation(15.0, 0.0, 0.0)
     parent_bind = translation(10.0, 0.0, 0.0)
@@ -110,11 +118,15 @@ def main():
     for token in [
         "EvaluateEffectivePose", "EvaluateWorldTarget", "AddMechanicalConstraint",
         "SetParent", "EffectiveMechanicalAngle", "UpdateCurrentKeyInterpolation",
-        "TemplateStartFrame", "UpdateTemplatePlacement", "ReorderTrack"
+        "TemplateStartFrame", "UpdateTemplatePlacement", "ReorderTrack",
+        "UpdateKeyPose", "CopyKeys", "PasteCopiedKeys", "UnselectAll"
     ]:
         assert token in engine, token
 
-    for token in ["ExtractAxisRotationDegrees", "MechanicalAngleDegrees", "SmoothStep"]:
+    for token in [
+        "ExtractAxisRotationDegrees", "MechanicalAngleDegrees", "SmoothStep",
+        "FromEulerDegrees", "ToEulerDegrees"
+    ]:
         assert token in animation_math, token
 
     command_names = re.findall(r'EnglishName\s*=>\s*"([^"]+)"', commands)
@@ -144,7 +156,8 @@ def main():
     for token in [
         "平滑：缓入缓出", "线性：匀速", "阶梯：保持后跳变",
         "SelectedIndexChanged", "PMTExternalGear", "PMTInternalGear", "PMTBelt",
-        "PMTBindMultiple", "PMTSameShaft", "同轴复合齿轮", "PMTGearFactory", "接在全部动作末尾"
+        "PMTBindMultiple", "PMTSameShaft", "同轴复合齿轮", "PMTGearFactory", "接在全部动作末尾",
+        "全选本轨", "复制所选", "粘贴到对象", "应用到该帧", "位移 X", "旋转° X", "缩放 X"
     ]:
         assert token in panel, token
     for token in ["_smoothSegmentPen", "_linearSegmentPen", "_constantSegmentPen"]:
@@ -155,6 +168,11 @@ def main():
     ]:
         assert token in canvas, token
     assert "拖动左侧轨道名可上下排序" in panel
+    for token in [
+        "MouseDoubleClick", "MouseButtons.Alternate", "Keys.Shift", "Keys.Alt",
+        "DrawMarquee", "UpdateMarqueeSelection", "KeySelectionChanged", "KeyActivated"
+    ]:
+        assert token in canvas, token
 
     for token in ["TryDetect", "TryGetCircle", "IsCoaxial", "MatchingCircularEdges"]:
         assert token in axis_detector, token
@@ -193,7 +211,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.5</Version>" in project
+    assert "<Version>0.5.0</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -203,11 +221,12 @@ def main():
         "组内零件", "父子层级", "外啮合齿轮", "几何/运动学校验",
         "Gumball", "缓入缓出", "保持后跳变",
         "一主多从机构网络", "动作自动衔接", "齿轮生成器合并",
-        "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮"
+        "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮",
+        "右键框选", "Shift", "Alt", "复制所选", "粘贴到对象"
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.5 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.5.0 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

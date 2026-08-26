@@ -1,6 +1,6 @@
 ---
 name: productmotion-timeline
-version: 0.4.5
+version: 0.5.0
 authors:
 - ProductMotion
 description: Blender-style product motion timeline and transform keyframes for Rhino 7 and 8.
