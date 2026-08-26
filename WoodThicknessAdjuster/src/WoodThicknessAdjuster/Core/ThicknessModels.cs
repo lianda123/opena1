@@ -11,7 +11,16 @@ namespace WoodThicknessAdjuster.Core
   internal enum ThicknessContactMode
   {
     AutoFit,
+    ExplicitFace,
     Off
+  }
+
+  internal enum ThicknessMoveMode
+  {
+    ObjectAxis,
+    WorldX,
+    WorldY,
+    WorldZ
   }
 
   internal sealed class ThicknessAnalysis
@@ -42,5 +51,13 @@ namespace WoodThicknessAdjuster.Core
 
     public bool NeedsSnap =>
       SeparationModelUnits > ContactToleranceModelUnits;
+  }
+
+  internal sealed class ContactVerification
+  {
+    public double GapModelUnits { get; set; }
+    public double OverlapRatio { get; set; }
+    public bool GapWithinTolerance { get; set; }
+    public bool HasProjectedOverlap { get; set; }
   }
 }

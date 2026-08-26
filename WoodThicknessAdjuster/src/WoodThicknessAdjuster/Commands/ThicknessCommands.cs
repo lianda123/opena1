@@ -16,6 +16,7 @@ namespace WoodThicknessAdjuster.Commands
     private static int _lastThicknessIndex = 2;
     private static int _lastAnchorIndex;
     private static int _lastContactIndex;
+    private static int _lastMoveIndex;
     private static double _lastCustomThickness = 2.5;
 
     public override string EnglishName => "WSAdjustThickness";
@@ -25,26 +26,32 @@ namespace WoodThicknessAdjuster.Commands
       double thickness;
       ThicknessAnchorMode anchorMode;
       ThicknessContactMode contactMode;
-      var result = Configure(out thickness, out anchorMode, out contactMode);
+      ThicknessMoveMode moveMode;
+      var result = Configure(
+        out thickness,
+        out anchorMode,
+        out contactMode,
+        out moveMode);
       if (result != Result.Success)
         return result;
       return ThicknessAdjustmentWorkflow.Run(
         doc,
         thickness,
         anchorMode,
-        contactMode);
+        contactMode,
+        moveMode);
     }
 
     private static Result Configure(
       out double thicknessMillimeters,
       out ThicknessAnchorMode anchorMode,
-      out ThicknessContactMode contactMode)
+      out ThicknessContactMode contactMode,
+      out ThicknessMoveMode moveMode)
     {
       thicknessMillimeters = Presets[Math.Min(_lastThicknessIndex, Presets.Length - 1)];
       anchorMode = (ThicknessAnchorMode)Math.Min(_lastAnchorIndex, 1);
-      contactMode = _lastContactIndex == 1
-        ? ThicknessContactMode.Off
-        : ThicknessContactMode.AutoFit;
+      contactMode = ContactModeFromIndex(_lastContactIndex);
+      moveMode = MoveModeFromIndex(_lastMoveIndex);
       var customThickness = new OptionDouble(_lastCustomThickness);
       var getter = new GetOption();
       getter.SetCommandPrompt("设置目标板厚、保持方式与装配贴合，回车后连续点击木板");
@@ -75,9 +82,20 @@ namespace WoodThicknessAdjuster.Commands
         new[]
         {
           L("AutoFit", "自动贴合"),
+          L("ExplicitFace", "指定目标面"),
           L("Off", "关闭")
         },
         _lastContactIndex);
+      var moveOption = getter.AddOptionList(
+        L("MoveCoordinate", "贴合移动坐标"),
+        new[]
+        {
+          L("ObjectAxis", "物体厚度轴"),
+          L("WorldX", "世界X轴"),
+          L("WorldY", "世界Y轴"),
+          L("WorldZ", "世界Z轴")
+        },
+        _lastMoveIndex);
       getter.AddOptionDouble(L("CustomThickness", "自定义板厚"), ref customThickness);
 
       while (true)
@@ -95,6 +113,8 @@ namespace WoodThicknessAdjuster.Commands
           _lastAnchorIndex = getter.Option().CurrentListOptionIndex;
         else if (getter.OptionIndex() == contactOption)
           _lastContactIndex = getter.Option().CurrentListOptionIndex;
+        else if (getter.OptionIndex() == moveOption)
+          _lastMoveIndex = getter.Option().CurrentListOptionIndex;
       }
 
       _lastCustomThickness = customThickness.CurrentValue;
@@ -104,15 +124,34 @@ namespace WoodThicknessAdjuster.Commands
       anchorMode = _lastAnchorIndex == 1
         ? ThicknessAnchorMode.Center
         : ThicknessAnchorMode.ClickedFace;
-      contactMode = _lastContactIndex == 1
-        ? ThicknessContactMode.Off
-        : ThicknessContactMode.AutoFit;
+      contactMode = ContactModeFromIndex(_lastContactIndex);
+      moveMode = MoveModeFromIndex(_lastMoveIndex);
       if (thicknessMillimeters <= 0.1 || thicknessMillimeters > 50.0)
       {
         RhinoApp.WriteLine("WoodThicknessAdjuster：自定义板厚必须大于0.1mm且不超过50mm。");
         return Result.Failure;
       }
       return Result.Success;
+    }
+
+    private static ThicknessContactMode ContactModeFromIndex(int index)
+    {
+      if (index == 1)
+        return ThicknessContactMode.ExplicitFace;
+      return index == 2
+        ? ThicknessContactMode.Off
+        : ThicknessContactMode.AutoFit;
+    }
+
+    private static ThicknessMoveMode MoveModeFromIndex(int index)
+    {
+      if (index == 1)
+        return ThicknessMoveMode.WorldX;
+      if (index == 2)
+        return ThicknessMoveMode.WorldY;
+      if (index == 3)
+        return ThicknessMoveMode.WorldZ;
+      return ThicknessMoveMode.ObjectAxis;
     }
 
     private static LocalizeStringPair L(string english, string chinese)
@@ -129,7 +168,8 @@ namespace WoodThicknessAdjuster.Commands
         doc,
         thickness,
         ThicknessAnchorMode.ClickedFace,
-        ThicknessContactMode.AutoFit);
+        ThicknessContactMode.AutoFit,
+        ThicknessMoveMode.ObjectAxis);
     }
   }
 

@@ -117,6 +117,120 @@ namespace WoodThicknessAdjuster.Core
       return true;
     }
 
+    internal static bool TryCreateExplicitContact(
+      RhinoObject boardObject,
+      ThicknessAnalysis analysis,
+      RhinoObject neighborObject,
+      Plane neighborPlane,
+      double tolerance,
+      double modelUnitsPerMillimeter,
+      out ThicknessContact contact)
+    {
+      contact = null;
+      if (boardObject == null || analysis == null || neighborObject == null ||
+        neighborObject.Id == boardObject.Id || !neighborPlane.IsValid)
+        return false;
+
+      var firstAlignment = Math.Abs(Vector3d.Multiply(
+        analysis.FirstPlane.Normal,
+        neighborPlane.Normal));
+      var secondAlignment = Math.Abs(Vector3d.Multiply(
+        analysis.SecondPlane.Normal,
+        neighborPlane.Normal));
+      var minimumAlignment = Math.Cos(2.0 * Math.PI / 180.0);
+      if (Math.Max(firstAlignment, secondAlignment) < minimumAlignment)
+        return false;
+
+      var firstSeparation = Math.Abs(
+        neighborPlane.DistanceTo(analysis.FirstCentroid));
+      var secondSeparation = Math.Abs(
+        neighborPlane.DistanceTo(analysis.SecondCentroid));
+      var useFirst = firstSeparation <= secondSeparation;
+      var targetPlane = useFirst ? analysis.FirstPlane : analysis.SecondPlane;
+      var targetCentroid = useFirst
+        ? analysis.FirstCentroid
+        : analysis.SecondCentroid;
+      var targetFaceIndex = useFirst
+        ? analysis.FirstFaceIndex
+        : analysis.SecondFaceIndex;
+      var separation = useFirst ? firstSeparation : secondSeparation;
+      var contactTolerance = Math.Max(
+        tolerance * 20.0,
+        modelUnitsPerMillimeter * 0.02);
+      double overlapRatio;
+      if (!TryProjectedOverlapRatio(
+        boardObject.Geometry,
+        neighborObject.Geometry,
+        neighborPlane,
+        tolerance,
+        out overlapRatio))
+        overlapRatio = 0.0;
+
+      contact = new ThicknessContact
+      {
+        NeighborObjectId = neighborObject.Id,
+        TargetFaceIndex = targetFaceIndex,
+        TargetPlane = targetPlane,
+        NeighborPlane = neighborPlane,
+        TargetCentroid = targetCentroid,
+        SeparationModelUnits = separation,
+        ContactToleranceModelUnits = contactTolerance,
+        OverlapRatio = overlapRatio,
+        IsPreferredNeighbor = true,
+        WasExactContact = separation <= contactTolerance
+      };
+      return true;
+    }
+
+    internal static bool TryVerifyContact(
+      RhinoDoc doc,
+      Guid boardObjectId,
+      ThicknessContact contact,
+      double tolerance,
+      double modelUnitsPerMillimeter,
+      out ContactVerification verification)
+    {
+      verification = null;
+      if (doc == null || contact == null)
+        return false;
+      var boardObject = doc.Objects.FindId(boardObjectId);
+      var neighborObject = doc.Objects.FindId(contact.NeighborObjectId);
+      if (boardObject == null || neighborObject == null)
+        return false;
+
+      ThicknessAnalysis boardAnalysis;
+      if (!ThicknessAnalyzer.TryAnalyze(
+        boardObject.Geometry,
+        tolerance,
+        Point3d.Unset,
+        out boardAnalysis))
+        return false;
+
+      var firstGap = Math.Abs(
+        contact.NeighborPlane.DistanceTo(boardAnalysis.FirstCentroid));
+      var secondGap = Math.Abs(
+        contact.NeighborPlane.DistanceTo(boardAnalysis.SecondCentroid));
+      var gap = Math.Min(firstGap, secondGap);
+      double overlapRatio;
+      var hasOverlap = TryProjectedOverlapRatio(
+        boardObject.Geometry,
+        neighborObject.Geometry,
+        contact.NeighborPlane,
+        tolerance,
+        out overlapRatio);
+      var contactTolerance = Math.Max(
+        tolerance * 20.0,
+        modelUnitsPerMillimeter * 0.02);
+      verification = new ContactVerification
+      {
+        GapModelUnits = gap,
+        OverlapRatio = hasOverlap ? overlapRatio : 0.0,
+        GapWithinTolerance = gap <= contactTolerance,
+        HasProjectedOverlap = hasOverlap && overlapRatio >= 0.02
+      };
+      return true;
+    }
+
     private static IEnumerable<MainFace> GetMainFaces(ThicknessAnalysis analysis)
     {
       yield return new MainFace
@@ -133,7 +247,7 @@ namespace WoodThicknessAdjuster.Core
       };
     }
 
-    private static bool TryProjectedOverlapRatio(
+    internal static bool TryProjectedOverlapRatio(
       GeometryBase first,
       GeometryBase second,
       Plane plane,
