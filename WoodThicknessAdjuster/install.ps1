@@ -8,7 +8,7 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $pluginId = "7E0039F7-EBDE-4708-8481-3970035E1FA7"
-$version = "1.0.1"
+$version = "1.1.1"
 $installRoot = Join-Path $env:LOCALAPPDATA "WoodThicknessAdjuster\$version"
 $targets = if ($RhinoVersion -eq "Both") { @("7", "8") } else { @($RhinoVersion) }
 
