@@ -15,6 +15,7 @@ namespace WoodThicknessAdjuster.Commands
     private static readonly double[] Presets = { 1.5, 2.0, 2.5, 3.0, 4.0, 5.0 };
     private static int _lastThicknessIndex = 2;
     private static int _lastAnchorIndex;
+    private static int _lastContactIndex;
     private static double _lastCustomThickness = 2.5;
 
     public override string EnglishName => "WSAdjustThickness";
@@ -23,21 +24,30 @@ namespace WoodThicknessAdjuster.Commands
     {
       double thickness;
       ThicknessAnchorMode anchorMode;
-      var result = Configure(out thickness, out anchorMode);
+      ThicknessContactMode contactMode;
+      var result = Configure(out thickness, out anchorMode, out contactMode);
       if (result != Result.Success)
         return result;
-      return ThicknessAdjustmentWorkflow.Run(doc, thickness, anchorMode);
+      return ThicknessAdjustmentWorkflow.Run(
+        doc,
+        thickness,
+        anchorMode,
+        contactMode);
     }
 
     private static Result Configure(
       out double thicknessMillimeters,
-      out ThicknessAnchorMode anchorMode)
+      out ThicknessAnchorMode anchorMode,
+      out ThicknessContactMode contactMode)
     {
       thicknessMillimeters = Presets[Math.Min(_lastThicknessIndex, Presets.Length - 1)];
       anchorMode = (ThicknessAnchorMode)Math.Min(_lastAnchorIndex, 1);
+      contactMode = _lastContactIndex == 1
+        ? ThicknessContactMode.Off
+        : ThicknessContactMode.AutoFit;
       var customThickness = new OptionDouble(_lastCustomThickness);
       var getter = new GetOption();
-      getter.SetCommandPrompt("设置目标板厚与保持方式，回车后连续点击木板");
+      getter.SetCommandPrompt("设置目标板厚、保持方式与装配贴合，回车后连续点击木板");
       getter.AcceptNothing(true);
       var thicknessOption = getter.AddOptionList(
         L("Thickness", "目标板厚"),
@@ -60,6 +70,14 @@ namespace WoodThicknessAdjuster.Commands
           L("Center", "中心对称")
         },
         _lastAnchorIndex);
+      var contactOption = getter.AddOptionList(
+        L("Contact", "装配贴合"),
+        new[]
+        {
+          L("AutoFit", "自动贴合"),
+          L("Off", "关闭")
+        },
+        _lastContactIndex);
       getter.AddOptionDouble(L("CustomThickness", "自定义板厚"), ref customThickness);
 
       while (true)
@@ -75,6 +93,8 @@ namespace WoodThicknessAdjuster.Commands
           _lastThicknessIndex = getter.Option().CurrentListOptionIndex;
         else if (getter.OptionIndex() == anchorOption)
           _lastAnchorIndex = getter.Option().CurrentListOptionIndex;
+        else if (getter.OptionIndex() == contactOption)
+          _lastContactIndex = getter.Option().CurrentListOptionIndex;
       }
 
       _lastCustomThickness = customThickness.CurrentValue;
@@ -84,6 +104,9 @@ namespace WoodThicknessAdjuster.Commands
       anchorMode = _lastAnchorIndex == 1
         ? ThicknessAnchorMode.Center
         : ThicknessAnchorMode.ClickedFace;
+      contactMode = _lastContactIndex == 1
+        ? ThicknessContactMode.Off
+        : ThicknessContactMode.AutoFit;
       if (thicknessMillimeters <= 0.1 || thicknessMillimeters > 50.0)
       {
         RhinoApp.WriteLine("WoodThicknessAdjuster：自定义板厚必须大于0.1mm且不超过50mm。");
@@ -105,7 +128,8 @@ namespace WoodThicknessAdjuster.Commands
       return ThicknessAdjustmentWorkflow.Run(
         doc,
         thickness,
-        ThicknessAnchorMode.ClickedFace);
+        ThicknessAnchorMode.ClickedFace,
+        ThicknessContactMode.AutoFit);
     }
   }
 
