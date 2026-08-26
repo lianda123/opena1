@@ -222,6 +222,7 @@ namespace ProductMotionTimeline.Commands
       var externalIndex = typeGetter.AddOption(new LocalizeStringPair("ExternalGear", "外啮合齿轮"));
       var internalIndex = typeGetter.AddOption(new LocalizeStringPair("InternalGear", "内啮合齿轮"));
       var beltIndex = typeGetter.AddOption(new LocalizeStringPair("Belt", "皮带传动"));
+      var sameShaftIndex = typeGetter.AddOption(new LocalizeStringPair("SameShaft", "同轴刚性或复合齿轮"));
       typeGetter.Get();
       if (typeGetter.CommandResult() != Result.Success)
         return typeGetter.CommandResult();
@@ -230,13 +231,19 @@ namespace ProductMotionTimeline.Commands
         selectedType = MechanicalConstraintType.InternalGear;
       else if (typeGetter.OptionIndex() == beltIndex)
         selectedType = MechanicalConstraintType.Belt;
+      else if (typeGetter.OptionIndex() == sameShaftIndex)
+        selectedType = MechanicalConstraintType.SameShaft;
       else if (typeGetter.OptionIndex() != externalIndex)
         return Result.Cancel;
 
-      var driverCount = GetPositiveInteger("输入主动齿轮齿数/主动轮节数", 20);
+      var driverCount = selectedType == MechanicalConstraintType.SameShaft
+        ? 1
+        : GetPositiveInteger("输入主动齿轮齿数/主动轮节数", 20);
       if (driverCount < 1)
         return Result.Cancel;
-      var drivenCount = GetPositiveInteger("输入从动齿轮齿数/从动轮节数", 20);
+      var drivenCount = selectedType == MechanicalConstraintType.SameShaft
+        ? 1
+        : GetPositiveInteger("输入从动齿轮齿数/从动轮节数", 20);
       if (drivenCount < 1)
         return Result.Cancel;
 
@@ -248,11 +255,16 @@ namespace ProductMotionTimeline.Commands
         doc,
         driven,
         TimelineEngine.Model(doc).CurrentFrame);
+      var direction = selectedType == MechanicalConstraintType.SameShaft &&
+                      TimelineEngine.PivotAxis(driver) * TimelineEngine.PivotAxis(driven) < 0.0
+        ? -1.0
+        : 1.0;
       var defaultConstraint = new MechanicalConstraint
       {
         Type = selectedType,
         DriverTeeth = driverCount,
-        DrivenTeeth = drivenCount
+        DrivenTeeth = drivenCount,
+        DirectionMultiplier = direction
       };
       var defaultPhase = drivenAngle - driverAngle * defaultConstraint.SignedRatio;
       var phaseGetter = new GetNumber();
@@ -262,7 +274,8 @@ namespace ProductMotionTimeline.Commands
       if (phaseGetter.CommandResult() != Result.Success)
         return phaseGetter.CommandResult();
 
-      var module = selectedType == MechanicalConstraintType.Belt
+      var module = selectedType == MechanicalConstraintType.Belt ||
+                   selectedType == MechanicalConstraintType.SameShaft
         ? 0.0
         : CommandInput.GetPositiveNumber("输入齿轮模数（0=仅动画比例）", 0.0, true);
       if (module < 0.0)
@@ -277,7 +290,10 @@ namespace ProductMotionTimeline.Commands
         drivenCount,
         phaseGetter.Number(),
         module,
-        20.0)
+        20.0,
+        0.0,
+        RotationAxis.X,
+        direction)
         ? Result.Success
         : Result.Failure;
     }
@@ -449,6 +465,115 @@ namespace ProductMotionTimeline.Commands
     }
   }
 
+  public sealed class SameShaftCommand : Command
+  {
+    public override string EnglishName => "PMTSameShaft";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      var model = TimelineEngine.Model(doc);
+      var driver = model.SelectedTrack;
+      if (driver == null)
+      {
+        RhinoApp.WriteLine("ProductMotion：请先在时间轴选中复合齿轮的主动轨道。");
+        return Result.Nothing;
+      }
+
+      var driverInstance = TimelineEngine.ResolveInstance(doc, driver);
+      GearParameters driverGear;
+      var hasDriverGear = GearPartMetadata.TryRead(driverInstance, out driverGear);
+      if (hasDriverGear && driverGear.Type == GearPartType.Rack)
+      {
+        RhinoApp.WriteLine("ProductMotion：齿条不能建立同轴刚性关系。");
+        return Result.Nothing;
+      }
+      string ignored;
+      if (!hasDriverGear)
+        TimelineEngine.TryAutoSetPivot(doc, driver, out ignored);
+
+      var getter = new GetObject();
+      getter.SetCommandPrompt("选择一个或多个与主动件刚性同轴的齿轮/零件，选完按回车");
+      getter.GeometryFilter = ObjectType.InstanceReference;
+      getter.GroupSelect = false;
+      getter.SubObjectSelect = false;
+      getter.EnablePreSelect(false, true);
+      getter.GetMultiple(1, 0);
+      if (getter.CommandResult() != Result.Success)
+        return getter.CommandResult();
+
+      var successCount = 0;
+      for (var index = 0; index < getter.ObjectCount; index++)
+      {
+        var drivenInstance = getter.Object(index).Object() as InstanceObject;
+        if (drivenInstance == null)
+          continue;
+        var driven = TimelineEngine.AddTrack(doc, drivenInstance);
+        if (driven == null || driven.Id == driver.Id)
+          continue;
+
+        GearParameters drivenGear;
+        var hasDrivenGear = GearPartMetadata.TryRead(drivenInstance, out drivenGear);
+        if (hasDrivenGear && drivenGear.Type == GearPartType.Rack)
+        {
+          RhinoApp.WriteLine("ProductMotion：跳过“{0}”：齿条不能建立同轴刚性关系。", driven.Name);
+          continue;
+        }
+        if (!hasDrivenGear)
+          TimelineEngine.TryAutoSetPivot(doc, driven, out ignored);
+
+        var direction = TimelineEngine.PivotAxis(driver) * TimelineEngine.PivotAxis(driven) < 0.0
+          ? -1.0
+          : 1.0;
+        var frame = model.CurrentFrame;
+        var driverAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driver, frame);
+        var drivenAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driven, frame);
+        var preview = new MechanicalConstraint
+        {
+          DriverTrackId = driver.Id,
+          DrivenTrackId = driven.Id,
+          Type = MechanicalConstraintType.SameShaft,
+          DriverTeeth = 1,
+          DrivenTeeth = 1,
+          DirectionMultiplier = direction
+        };
+        preview.PhaseOffsetDegrees = drivenAngle - driverAngle * preview.SignedRatio;
+        var validation = TimelineEngine.ValidateMechanicalConstraint(doc, preview);
+        if (validation.Severity == ValidationSeverity.Error)
+        {
+          RhinoApp.WriteLine("ProductMotion：跳过“{0}”：{1}。", driven.Name, validation.Message);
+          continue;
+        }
+
+        if (TimelineEngine.AddMechanicalConstraint(
+          doc,
+          driver.Id,
+          driven.Id,
+          MechanicalConstraintType.SameShaft,
+          1,
+          1,
+          preview.PhaseOffsetDegrees,
+          0.0,
+          20.0,
+          0.0,
+          RotationAxis.X,
+          direction))
+        {
+          successCount++;
+          RhinoApp.WriteLine(
+            "ProductMotion：“{0}”已同轴锁定 1:1；该零件保留自己的齿数，可继续驱动下一级。",
+            driven.Name);
+        }
+      }
+
+      TimelineEngine.SelectTrack(doc, driver.Id);
+      Panels.OpenPanel(TimelinePanel.PanelId);
+      RhinoApp.WriteLine(
+        "ProductMotion：已建立 {0} 条同轴刚性关系；上下齿轮角速度相同，后级传动仍读取各自齿数。",
+        successCount);
+      return successCount > 0 ? Result.Success : Result.Nothing;
+    }
+  }
+
   public sealed class BindMultipleDrivenCommand : Command
   {
     public override string EnglishName => "PMTBindMultiple";
@@ -472,6 +597,7 @@ namespace ProductMotionTimeline.Commands
       var helical = typeGetter.AddOption(new LocalizeStringPair("HelicalGear", "斜齿轮传动"));
       var bevel = typeGetter.AddOption(new LocalizeStringPair("BevelGear", "锥齿轮传动"));
       var rack = typeGetter.AddOption(new LocalizeStringPair("RackPinion", "齿轮齿条传动"));
+      var sameShaft = typeGetter.AddOption(new LocalizeStringPair("SameShaft", "同轴刚性或复合齿轮"));
       typeGetter.Get();
       if (typeGetter.CommandResult() != Result.Success)
         return typeGetter.CommandResult();
@@ -482,6 +608,7 @@ namespace ProductMotionTimeline.Commands
       else if (typeGetter.OptionIndex() == helical) fixedType = MechanicalConstraintType.HelicalGear;
       else if (typeGetter.OptionIndex() == bevel) fixedType = MechanicalConstraintType.BevelGear;
       else if (typeGetter.OptionIndex() == rack) fixedType = MechanicalConstraintType.RackPinion;
+      else if (typeGetter.OptionIndex() == sameShaft) fixedType = MechanicalConstraintType.SameShaft;
       else if (typeGetter.OptionIndex() != auto) return Result.Cancel;
 
       var getter = new GetObject();
@@ -537,9 +664,11 @@ namespace ProductMotionTimeline.Commands
           RhinoApp.WriteLine("ProductMotion：跳过“{0}”：齿轮-齿条传动必须把齿条作为从动件。", driven.Name);
           continue;
         }
-        var driverTeeth = hasDriverGear && driverGear.Type != GearPartType.Rack
-          ? driverGear.Teeth
-          : manualDriverTeeth;
+        var driverTeeth = type == MechanicalConstraintType.SameShaft
+          ? 1
+          : hasDriverGear && driverGear.Type != GearPartType.Rack
+            ? driverGear.Teeth
+            : manualDriverTeeth;
         if (driverTeeth < 1)
         {
           manualDriverTeeth = CommandInput.GetPositiveInteger("输入主动件齿数/比例", 20);
@@ -547,7 +676,8 @@ namespace ProductMotionTimeline.Commands
         }
         if (driverTeeth < 1)
           return Result.Cancel;
-        var drivenTeeth = type == MechanicalConstraintType.RackPinion
+        var drivenTeeth = type == MechanicalConstraintType.RackPinion ||
+                          type == MechanicalConstraintType.SameShaft
           ? 1
           : hasDrivenGear && drivenGear.Type != GearPartType.Rack
             ? drivenGear.Teeth
@@ -555,7 +685,8 @@ namespace ProductMotionTimeline.Commands
         if (drivenTeeth < 1)
           return Result.Cancel;
 
-        var module = type == MechanicalConstraintType.Belt
+        var module = type == MechanicalConstraintType.Belt ||
+                     type == MechanicalConstraintType.SameShaft
           ? 0.0
           : hasDriverGear
             ? driverGear.Module
@@ -569,6 +700,10 @@ namespace ProductMotionTimeline.Commands
         var driverAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driver, frame);
         var phaseAngle = 0.0;
         var phaseDistance = 0.0;
+        var direction = type == MechanicalConstraintType.SameShaft &&
+                        TimelineEngine.PivotAxis(driver) * TimelineEngine.PivotAxis(driven) < 0.0
+          ? -1.0
+          : 1.0;
         if (type == MechanicalConstraintType.RackPinion)
         {
           var pose = TimelineEngine.EffectivePose(doc, driven, frame);
@@ -582,9 +717,34 @@ namespace ProductMotionTimeline.Commands
           {
             Type = type,
             DriverTeeth = driverTeeth,
-            DrivenTeeth = drivenTeeth
+            DrivenTeeth = drivenTeeth,
+            DirectionMultiplier = direction
           };
           phaseAngle = drivenAngle - driverAngle * preview.SignedRatio;
+        }
+
+        if (type == MechanicalConstraintType.SameShaft)
+        {
+          var preview = new MechanicalConstraint
+          {
+            DriverTrackId = driver.Id,
+            DrivenTrackId = driven.Id,
+            Type = type,
+            DriverTeeth = 1,
+            DrivenTeeth = 1,
+            DirectionMultiplier = direction,
+            PhaseOffsetDegrees = phaseAngle
+          };
+          var previewValidation = TimelineEngine.ValidateMechanicalConstraint(doc, preview);
+          if (previewValidation.Severity == ValidationSeverity.Error)
+          {
+            warningCount++;
+            RhinoApp.WriteLine(
+              "ProductMotion：跳过“{0}”：{1}。",
+              driven.Name,
+              previewValidation.Message);
+            continue;
+          }
         }
 
         if (TimelineEngine.AddMechanicalConstraint(
@@ -599,7 +759,7 @@ namespace ProductMotionTimeline.Commands
           pressure,
           phaseDistance,
           RotationAxis.X,
-          1.0))
+          direction))
         {
           successCount++;
           var added = model.ConstraintForDriven(driven.Id);
@@ -676,6 +836,7 @@ namespace ProductMotionTimeline.Commands
       var helical = typeGetter.AddOption(new LocalizeStringPair("HelicalGear", "斜齿轮传动"));
       var bevel = typeGetter.AddOption(new LocalizeStringPair("BevelGear", "锥齿轮传动"));
       var rack = typeGetter.AddOption(new LocalizeStringPair("RackPinion", "齿轮齿条传动"));
+      var sameShaft = typeGetter.AddOption(new LocalizeStringPair("SameShaft", "同轴刚性或复合齿轮"));
       var typeResult = typeGetter.Get();
       if (typeResult == GetResult.Cancel)
         return Result.Cancel;
@@ -686,20 +847,26 @@ namespace ProductMotionTimeline.Commands
         else if (typeGetter.OptionIndex() == helical) type = MechanicalConstraintType.HelicalGear;
         else if (typeGetter.OptionIndex() == bevel) type = MechanicalConstraintType.BevelGear;
         else if (typeGetter.OptionIndex() == rack) type = MechanicalConstraintType.RackPinion;
+        else if (typeGetter.OptionIndex() == sameShaft) type = MechanicalConstraintType.SameShaft;
         else if (typeGetter.OptionIndex() == external) type = MechanicalConstraintType.ExternalGear;
       }
 
-      var driverCount = CommandInput.GetPositiveInteger("主动齿数/皮带轮比例", constraint.DriverTeeth);
+      var driverCount = type == MechanicalConstraintType.SameShaft
+        ? 1
+        : CommandInput.GetPositiveInteger("主动齿数/皮带轮比例", constraint.DriverTeeth);
       if (driverCount < 1) return Result.Cancel;
-      var drivenCount = type == MechanicalConstraintType.RackPinion
+      var drivenCount = type == MechanicalConstraintType.RackPinion ||
+                        type == MechanicalConstraintType.SameShaft
         ? 1
         : CommandInput.GetPositiveInteger("从动齿数/皮带轮比例", constraint.DrivenTeeth);
       if (drivenCount < 1) return Result.Cancel;
-      var module = type == MechanicalConstraintType.Belt
+      var module = type == MechanicalConstraintType.Belt ||
+                   type == MechanicalConstraintType.SameShaft
         ? 0.0
         : CommandInput.GetPositiveNumber("模数（0=跳过中心距检查）", constraint.Module, true);
       if (module < 0.0) return Result.Cancel;
-      var pressureAngle = type == MechanicalConstraintType.Belt
+      var pressureAngle = type == MechanicalConstraintType.Belt ||
+                          type == MechanicalConstraintType.SameShaft
         ? constraint.PressureAngleDegrees
         : CommandInput.GetPositiveNumber("压力角°", constraint.PressureAngleDegrees, false);
       if (pressureAngle < 0.0) return Result.Cancel;
@@ -712,7 +879,14 @@ namespace ProductMotionTimeline.Commands
       var linearAxis = type == MechanicalConstraintType.RackPinion
         ? CommandInput.GetAxis("齿条移动轴", constraint.DrivenLinearAxis)
         : constraint.DrivenLinearAxis;
-      var direction = CommandInput.GetDirectionMultiplier(constraint.DirectionMultiplier);
+      var driverTrack = model.FindTrack(constraint.DriverTrackId);
+      var drivenTrack = model.FindTrack(constraint.DrivenTrackId);
+      var direction = type == MechanicalConstraintType.SameShaft &&
+                      driverTrack != null && drivenTrack != null
+        ? (TimelineEngine.PivotAxis(driverTrack) * TimelineEngine.PivotAxis(drivenTrack) < 0.0
+          ? -1.0
+          : 1.0)
+        : CommandInput.GetDirectionMultiplier(constraint.DirectionMultiplier);
       if (double.IsNaN(direction)) return Result.Cancel;
 
       if (!TimelineEngine.UpdateMechanicalConstraint(

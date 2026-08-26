@@ -109,6 +109,7 @@ namespace ProductMotionTimeline.UI
         Button("外啮合齿轮", () => RhinoApp.RunScript("_PMTExternalGear", false)),
         Button("内啮合齿轮", () => RhinoApp.RunScript("_PMTInternalGear", false)),
         Button("皮带传动", () => RhinoApp.RunScript("_PMTBelt", false)),
+        Button("同轴复合齿轮", () => RhinoApp.RunScript("_PMTSameShaft", false)),
         Button("一主多从/串联", () => RhinoApp.RunScript("_PMTBindMultiple", false)),
         Button("编辑选中", () => RhinoApp.RunScript("_PMTEditMechanical", false)),
         Button("检查全部", () => RhinoApp.RunScript("_PMTValidateMechanical", false)),
@@ -311,6 +312,7 @@ namespace ProductMotionTimeline.UI
         case MechanicalConstraintType.HelicalGear: return "斜齿";
         case MechanicalConstraintType.BevelGear: return "锥齿";
         case MechanicalConstraintType.RackPinion: return "齿轮-齿条";
+        case MechanicalConstraintType.SameShaft: return "同轴刚性";
         default: return "外啮合";
       }
     }

@@ -26,7 +26,8 @@ namespace ProductMotionTimeline.Core
     Belt = 2,
     HelicalGear = 3,
     BevelGear = 4,
-    RackPinion = 5
+    RackPinion = 5,
+    SameShaft = 6
   }
 
   internal enum TemplatePlacementMode
@@ -71,6 +72,8 @@ namespace ProductMotionTimeline.Core
     {
       get
       {
+        if (Type == MechanicalConstraintType.SameShaft)
+          return DirectionMultiplier < 0.0 ? -1.0 : 1.0;
         var ratio = Math.Max(1, DriverTeeth) / (double)Math.Max(1, DrivenTeeth);
         var direction = Type == MechanicalConstraintType.ExternalGear ||
                Type == MechanicalConstraintType.HelicalGear ||

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.4."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.5."""
 
 from pathlib import Path
 import re
@@ -10,6 +10,8 @@ SRC = ROOT / "src" / "ProductMotionTimeline"
 
 
 def gear_angle(kind: str, driver_angle: float, driver_teeth: int, driven_teeth: int, phase: float = 0.0) -> float:
+    if kind == "SameShaft":
+        return phase + driver_angle
     sign = -1.0 if kind == "ExternalGear" else 1.0
     return phase + driver_angle * sign * driver_teeth / driven_teeth
 
@@ -60,6 +62,9 @@ def main():
     assert gear_angle("ExternalGear", 360.0, 20, 40) == -180.0
     assert gear_angle("InternalGear", 360.0, 20, 40) == 180.0
     assert gear_angle("Belt", -720.0, 30, 15, 10.0) == -1430.0
+    assert gear_angle("SameShaft", 360.0, 30, 10) == 360.0
+    compound_upper_angle = gear_angle("SameShaft", 90.0, 30, 10)
+    assert gear_angle("ExternalGear", compound_upper_angle, 10, 20) == -45.0
     assert smooth_step(0.25) == 0.15625
     assert smooth_step(0.25) != 0.25
     assert gear_center_distance("ExternalGear", 2.0, 10, 30) == 40.0
@@ -95,7 +100,7 @@ def main():
         "ExternalGear",
         "InternalGear",
         "Belt",
-        "HelicalGear", "BevelGear", "RackPinion", "TemplatePlacementMode",
+        "HelicalGear", "BevelGear", "RackPinion", "SameShaft", "TemplatePlacementMode",
         "WouldCreateParentCycle",
         "WouldCreateConstraintCycle",
     ]
@@ -124,6 +129,7 @@ def main():
         "PMTInternalGear",
         "PMTBelt", "PMTAutoPivot", "PMTEditMechanical", "PMTValidateMechanical",
         "PMTReciprocate", "PMTRebound", "PMTCrankSlider", "PMTFourBar", "PMTBindMultiple",
+        "PMTSameShaft",
         "PMTGearFactory", "PMTCreateSpurGear", "PMTCreateInternalGear",
         "PMTCreateHelicalGear", "PMTCreateBevelGear", "PMTCreateRack",
     ]:
@@ -138,7 +144,7 @@ def main():
     for token in [
         "平滑：缓入缓出", "线性：匀速", "阶梯：保持后跳变",
         "SelectedIndexChanged", "PMTExternalGear", "PMTInternalGear", "PMTBelt",
-        "PMTBindMultiple", "PMTGearFactory", "接在全部动作末尾"
+        "PMTBindMultiple", "PMTSameShaft", "同轴复合齿轮", "PMTGearFactory", "接在全部动作末尾"
     ]:
         assert token in panel, token
     for token in ["_smoothSegmentPen", "_linearSegmentPen", "_constantSegmentPen"]:
@@ -171,6 +177,7 @@ def main():
         'LocalizeStringPair("Auto", "自动识别")',
         'LocalizeStringPair("ExternalGear", "外啮合齿轮")',
         'LocalizeStringPair("RackPinion", "齿轮齿条传动")',
+        'LocalizeStringPair("SameShaft", "同轴刚性或复合齿轮")',
         'LocalizeStringPair("Reverse", "反向")'
     ]:
         assert token in commands, token
@@ -179,13 +186,14 @@ def main():
     assert "driver?.Type == GearPartType.Internal || driven?.Type == GearPartType.Internal" in gear_metadata
     assert "当前版本只支持齿轮驱动齿条" in commands
     assert "内齿圈齿数必须大于配对的外齿轮" in engine
+    assert "同轴刚性有效：角速度 1:1，相位固定" in engine
     assert "ConstraintsForDriver" in data
     assert "EvaluateRackDistance" in data
 
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.4</Version>" in project
+    assert "<Version>0.4.5</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -195,11 +203,11 @@ def main():
         "组内零件", "父子层级", "外啮合齿轮", "几何/运动学校验",
         "Gumball", "缓入缓出", "保持后跳变",
         "一主多从机构网络", "动作自动衔接", "齿轮生成器合并",
-        "渐开线直齿", "斜齿", "锥齿", "齿条"
+        "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮"
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.4 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.5 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

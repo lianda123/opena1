@@ -464,6 +464,32 @@ namespace ProductMotionTimeline.Core
       var drivenOrigin = PivotOrigin(driven);
       var driverAxis = PivotAxis(driver);
       var drivenAxis = PivotAxis(driven);
+      if (constraint.Type == MechanicalConstraintType.SameShaft)
+      {
+        if (Math.Abs(driverAxis * drivenAxis) < Math.Cos(Math.PI / 90.0))
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = "同轴刚性失败：两转轴不平行（偏差超过 2°）";
+          return result;
+        }
+
+        var sameShaftDelta = drivenOrigin - driverOrigin;
+        result.ActualCenterDistance =
+          (sameShaftDelta - driverAxis * (sameShaftDelta * driverAxis)).Length;
+        var sameShaftTolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, 1e-6);
+        if (result.ActualCenterDistance > sameShaftTolerance)
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = string.Format(
+            "同轴刚性失败：两轴线偏心 {0:0.###}，允许 {1:0.###}",
+            result.ActualCenterDistance,
+            sameShaftTolerance);
+          return result;
+        }
+
+        result.Message = "同轴刚性有效：角速度 1:1，相位固定";
+        return result;
+      }
       if (constraint.Type == MechanicalConstraintType.RackPinion)
       {
         if (constraint.Module <= 0.0)
