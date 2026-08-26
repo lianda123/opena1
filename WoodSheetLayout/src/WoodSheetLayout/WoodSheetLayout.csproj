@@ -16,10 +16,10 @@
     <Title>Wood Sheet Layout</Title>
     <Company>Lianda Design Tools</Company>
     <Product>Wood Sheet Layout for Rhino</Product>
-    <Description>Classic FlatBounds MaxRects layout with custom sheets and separate bend unrolling.</Description>
-    <Version>2.2.7</Version>
-    <AssemblyVersion>2.2.7.0</AssemblyVersion>
-    <FileVersion>2.2.7.0</FileVersion>
+    <Description>FlatBounds MaxRects layout with nested output groups and reusable bend unrolling.</Description>
+    <Version>2.2.8</Version>
+    <AssemblyVersion>2.2.8.0</AssemblyVersion>
+    <FileVersion>2.2.8.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">

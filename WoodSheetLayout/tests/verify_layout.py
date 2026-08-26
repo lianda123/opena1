@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks the 1.1 planar workflow and 2.2.7 neutral-patch bend workflow."""
+"""Checks the 1.1 planar workflow and 2.2.8 nested-group bend workflow."""
 
 from pathlib import Path
 import math
@@ -40,6 +40,16 @@ def main():
     neutral_length = (20.0 + 2.0 * 0.5) * math.pi / 2
     assert math.isclose(neutral_length, 21.0 * math.pi / 2)
 
+    # One-level confirmation removes only the outer source/copy pairing. The
+    # flattened solid and its surface curves remain together in WSL_PART.
+    source_groups = {"ORIGINAL_PART", "WSL_PAIR"}
+    flat_solid_groups = {"WSL_PART", "WSL_PAIR"}
+    surface_curve_groups = {"WSL_PART", "WSL_PAIR"}
+    for memberships in (source_groups, flat_solid_groups, surface_curve_groups):
+        memberships.discard("WSL_PAIR")
+    assert source_groups == {"ORIGINAL_PART"}
+    assert flat_solid_groups == surface_curve_groups == {"WSL_PART"}
+
     models = (SRC / "Core" / "LayoutModels.cs").read_text(encoding="utf-8")
     analyzer = (SRC / "Core" / "BoardAnalyzer.cs").read_text(encoding="utf-8")
     bent = (SRC / "Core" / "BentBoardUnroller.cs").read_text(encoding="utf-8")
@@ -74,7 +84,9 @@ def main():
     for token in [
         "ExpandSelectedGroups", "doc.Groups.GroupMembers(groupIndex)",
         "IsOutputPairGroup", 'StartsWith("WSL_PAIR_"',
-        "IsGeneratedOutputObject", 'StartsWith("WoodSheetLayout_"'
+        "IsGeneratedOutputObject", 'StartsWith("WoodSheetLayout_"',
+        "IsBendInputObject", "IsFlatCopyObject", '"OutputGuide"',
+        "oldFlatMember"
     ]:
         assert token in analyzer, token
 
@@ -151,21 +163,26 @@ def main():
     for token in ["ShowProgressMeter", "EscapeKeyPressed", "RhinoApp.Wait"]:
         assert token in progress, token
     for token in [
-        "WoodSheetLayout_2.2.7", "矩形MaxRects", "边框出血",
-        "WSL_PAIR_", "WoodSheetLayoutRole", "FlatCopy", "Source",
+        "WoodSheetLayout_2.2.8", "矩形MaxRects", "边框出血",
+        "WSL_PART_", "WSL_PAIR_", "WoodSheetLayoutPartId",
+        "WoodSheetLayoutRole", "FlatCopy", "Source",
         "OutputGuide", "doc.Objects.ModifyAttributes",
         "AddClassicPlanarPart", "doc.Objects.Transform(source.Id, finalTransform, false)",
         "placement.Part.FlattenKind == FlattenKind.Planar",
         "-placement.Part.FlatBounds.Min.Z",
-        "TryCreatePlacedGeometry", "AddGeometryWithFallback",
+        "TryCreatePlacedGeometry", "AddGeometryWithFallback", "CreateOutputGroups",
+        "AddOutputGroupMembership", "groups.PartIndex", "groups.PairIndex",
         "数量校验未通过", "数量校验通过"
     ]:
         assert token in engine, token
+    create_groups = engine[engine.index("private static OutputGroups CreateOutputGroups"):]
+    assert create_groups.index('"WSL_PART_') < create_groups.index('"WSL_PAIR_')
     # Normal command uses the exact 1.1 selection list; recursive completion is bend-only.
     normal_selection = engine[engine.index("var objects = settings.PartMode"):engine.index("if (objects.Count == 0)")]
     assert "LayoutPartMode.BentOnly" in normal_selection
     assert "ExpandSelectedGroups" in normal_selection
     assert "IsGeneratedOutputObject" in normal_selection
+    assert "getter.GroupSelect = settings.PartMode != LayoutPartMode.BentOnly" in commands
     assert "AddIssueMarkers(doc" not in engine
     for token in ["CreateExpandedSheet", "AutoExpanded = true", "sheet.Width + settings.SheetGap"]:
         assert token in packer, token
@@ -174,7 +191,7 @@ def main():
     assert "net48;net8.0" in project
     assert "<Prefer32Bit>false</Prefer32Bit>" in project
     assert '<PackageReference Include="RhinoCommon" Version="7.0.20314.3001"' in project
-    assert "<Version>2.2.7</Version>" in project
+    assert "<Version>2.2.8</Version>" in project
 
     for path in SRC.rglob("*.cs"):
         stripped = strip_csharp(path.read_text(encoding="utf-8"))
@@ -184,11 +201,12 @@ def main():
     for phrase in [
         "FlatBounds", "MaxRects", "共12次快速方案", "自定义边界框",
         "边框出血=4mm", "中文选项", "WSLayFlatBend",
-        "不再提供真实轮廓精排、孔洞嵌套或自由角度搜索"
+        "不再提供真实轮廓精排、孔洞嵌套或自由角度搜索",
+        "WSL_PART", "解除一层只移除配对关系", "铺平副本继续运行"
     ]:
         assert phrase in readme, phrase
 
-    print("WoodSheetLayout 2.2.7 planar/bend workflow checks passed.")
+    print("WoodSheetLayout 2.2.8 nested-group planar/bend workflow checks passed.")
 
 
 if __name__ == "__main__":

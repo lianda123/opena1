@@ -110,7 +110,10 @@ namespace WoodSheetLayout.Commands
       getter.SetCommandPrompt(settings.PartMode == LayoutPartMode.BentOnly
         ? "选择折弯木板及其同组刀线、雕刻线或文字"
         : "选择普通木板及其同组刀线、雕刻线或文字（每块木板使用独立组）");
-      getter.GroupSelect = true;
+      // 普通排版继续采用1.1的Rhino原生组选择。折弯命令改由
+      // ExpandSelectedGroups补齐组件，并主动跳过WSL_PAIR外层配对组；这样
+      // 用户可明确点击原件或铺平副本，不会把两边一起送入展开器。
+      getter.GroupSelect = settings.PartMode != LayoutPartMode.BentOnly;
       getter.SubObjectSelect = false;
       getter.GeometryFilter = Rhino.DocObjects.ObjectType.AnyObject;
       getter.EnablePreSelect(true, true);

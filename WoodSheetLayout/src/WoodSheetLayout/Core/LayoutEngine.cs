@@ -48,7 +48,7 @@ namespace WoodSheetLayout.Core
       if (settings.PartMode == LayoutPartMode.BentOnly && objects.Count != selectedObjects.Count)
       {
         RhinoApp.WriteLine(
-          "WSLayFlatBend：选中 {0} 个对象，补齐原始组后按 {1} 个对象分析；旧铺平副本和旧输出层已排除。",
+          "WSLayFlatBend：选中 {0} 个对象，补齐零件内部组后按 {1} 个对象分析；铺平副本可以继续展开，输出边框已排除。",
           selectedObjects.Count,
           objects.Count);
       }
@@ -154,8 +154,8 @@ namespace WoodSheetLayout.Core
       var outputObjectCount = 0;
       var outputFailureCount = 0;
       var undo = doc.BeginUndoRecord(settings.PartMode == LayoutPartMode.BentOnly
-        ? "WoodSheetLayout 2.2.7 折弯件中性层展开排版"
-        : "WoodSheetLayout 2.2.7（1.1原生通道）铺平排版");
+        ? "WoodSheetLayout 2.2.8 折弯件中性层展开排版"
+        : "WoodSheetLayout 2.2.8（双层分组）铺平排版");
       try
       {
         var layers = new OutputLayerManager(doc);
@@ -246,13 +246,7 @@ namespace WoodSheetLayout.Core
       var sheetTranslation = Transform.Translation(sheet.Origin.X, sheet.Origin.Y, 0.0);
       var finalTransform = sheetTranslation * localTranslation * rotation;
 
-      var groupName = string.Format(
-        "WSL_PAIR_{0:0.00}mm_S{1:00}_{2}_{3}",
-        sheet.ThicknessMillimeters,
-        sheet.IndexWithinThickness,
-        placement.Part.Name,
-        Guid.NewGuid().ToString("N").Substring(0, 6));
-      var groupIndex = doc.Groups.Add(groupName);
+      var groups = CreateOutputGroups(doc, sheet, placement.Part);
       var createdIds = new List<Guid>();
 
       foreach (var item in placement.Part.FlatGeometry)
@@ -274,9 +268,9 @@ namespace WoodSheetLayout.Core
           ? new ObjectAttributes()
           : item.SourceAttributes.Duplicate();
         attributes.RemoveFromAllGroups();
-        if (groupIndex >= 0)
-          attributes.AddToGroup(groupIndex);
+        AddOutputGroupMembership(attributes, groups);
         attributes.SetUserString("WoodSheetLayoutRole", "FlatCopy");
+        attributes.SetUserString("WoodSheetLayoutPartId", groups.Token);
         attributes.LayerIndex = layers.GetSourceLayer(sheetLayer, item.SourceAttributes);
         attributes.Name = string.IsNullOrWhiteSpace(item.Name) ? placement.Part.Name : item.Name;
         var newId = AddGeometryWithFallback(doc, geometry, attributes);
@@ -292,17 +286,17 @@ namespace WoodSheetLayout.Core
         }
       }
 
-      // 原件和铺平副本进入同一个额外配对Group，同时保留原件已有的Group。
-      // 移动任意一边都会带动另一边，可直接检查哪些原件已经生成铺平副本。
-      if (groupIndex >= 0 && createdIds.Count > 0)
+      // WSL_PART只包含铺平实体、表面曲线和压痕；WSL_PAIR是最后创建的
+      // 外层核对组。用户对配对组执行一次Ungroup后，铺平零件内部组仍保留。
+      if (groups.PairIndex >= 0 && createdIds.Count > 0)
       {
         foreach (var source in placement.Part.Objects.Where(item => item != null))
         {
           var sourceAttributes = source.Attributes.Duplicate();
           var existingGroups = sourceAttributes.GetGroupList() ?? new int[0];
-          if (existingGroups.Contains(groupIndex))
+          if (existingGroups.Contains(groups.PairIndex))
             continue;
-          sourceAttributes.AddToGroup(groupIndex);
+          sourceAttributes.AddToGroup(groups.PairIndex);
           sourceAttributes.SetUserString("WoodSheetLayoutRole", "Source");
           if (!doc.Objects.ModifyAttributes(source.Id, sourceAttributes, true))
           {
@@ -349,13 +343,7 @@ namespace WoodSheetLayout.Core
       var sheetTranslation = Transform.Translation(sheet.Origin.X, sheet.Origin.Y, 0.0);
       var finalTransform = sheetTranslation * localTranslation * rotation * placement.Part.FlattenTransform;
 
-      var groupName = string.Format(
-        "WSL_PAIR_{0:0.00}mm_S{1:00}_{2}_{3}",
-        sheet.ThicknessMillimeters,
-        sheet.IndexWithinThickness,
-        placement.Part.Name,
-        Guid.NewGuid().ToString("N").Substring(0, 6));
-      var groupIndex = doc.Groups.Add(groupName);
+      var groups = CreateOutputGroups(doc, sheet, placement.Part);
       var createdIds = new List<Guid>();
 
       foreach (var sourceReference in placement.Part.Objects.Where(item => item != null))
@@ -388,9 +376,9 @@ namespace WoodSheetLayout.Core
 
         var attributes = duplicate.Attributes.Duplicate();
         attributes.RemoveFromAllGroups();
-        if (groupIndex >= 0)
-          attributes.AddToGroup(groupIndex);
+        AddOutputGroupMembership(attributes, groups);
         attributes.SetUserString("WoodSheetLayoutRole", "FlatCopy");
+        attributes.SetUserString("WoodSheetLayoutPartId", groups.Token);
         attributes.LayerIndex = layers.GetSourceLayer(sheetLayer, source.Attributes);
         attributes.Name = string.IsNullOrWhiteSpace(source.Attributes.Name)
           ? placement.Part.Name
@@ -408,8 +396,9 @@ namespace WoodSheetLayout.Core
         createdCount++;
       }
 
-      // 保留用户要求的“原件 + 铺平件”配对组；不删除原件已有的任何组。
-      if (groupIndex >= 0 && createdIds.Count > 0)
+      // 保留“原件 + 铺平件”外层配对组；不删除原件已有的任何组。
+      // 铺平副本另外属于WSL_PART内部组，因此解除最外层配对后不会散开。
+      if (groups.PairIndex >= 0 && createdIds.Count > 0)
       {
         foreach (var sourceReference in placement.Part.Objects.Where(item => item != null))
         {
@@ -418,8 +407,8 @@ namespace WoodSheetLayout.Core
             continue;
           var sourceAttributes = source.Attributes.Duplicate();
           var existingGroups = sourceAttributes.GetGroupList() ?? new int[0];
-          if (!existingGroups.Contains(groupIndex))
-            sourceAttributes.AddToGroup(groupIndex);
+          if (!existingGroups.Contains(groups.PairIndex))
+            sourceAttributes.AddToGroup(groups.PairIndex);
           sourceAttributes.SetUserString("WoodSheetLayoutRole", "Source");
           if (!doc.Objects.ModifyAttributes(source.Id, sourceAttributes, true))
           {
@@ -445,6 +434,55 @@ namespace WoodSheetLayout.Core
           failedCount);
       }
       return createdCount > 0 && failedCount == 0;
+    }
+
+    private static OutputGroups CreateOutputGroups(
+      RhinoDoc doc,
+      PackedSheet sheet,
+      BoardPart part)
+    {
+      var token = Guid.NewGuid().ToString("N").Substring(0, 8);
+      // 内部组必须先创建，配对组后创建；Rhino的Ungroup按最外层解除时，
+      // 会先移除后创建的WSL_PAIR，保留铺平件自己的WSL_PART成员关系。
+      var partGroupName = string.Format(
+        "WSL_PART_{0:0.00}mm_S{1:00}_{2}_{3}",
+        sheet.ThicknessMillimeters,
+        sheet.IndexWithinThickness,
+        part.Name,
+        token);
+      var partIndex = doc.Groups.Add(partGroupName);
+      var pairGroupName = string.Format(
+        "WSL_PAIR_{0:0.00}mm_S{1:00}_{2}_{3}",
+        sheet.ThicknessMillimeters,
+        sheet.IndexWithinThickness,
+        part.Name,
+        token);
+      var pairIndex = doc.Groups.Add(pairGroupName);
+      return new OutputGroups
+      {
+        Token = token,
+        PartIndex = partIndex,
+        PairIndex = pairIndex
+      };
+    }
+
+    private static void AddOutputGroupMembership(
+      ObjectAttributes attributes,
+      OutputGroups groups)
+    {
+      if (attributes == null || groups == null)
+        return;
+      if (groups.PartIndex >= 0)
+        attributes.AddToGroup(groups.PartIndex);
+      if (groups.PairIndex >= 0)
+        attributes.AddToGroup(groups.PairIndex);
+    }
+
+    private sealed class OutputGroups
+    {
+      public string Token { get; set; }
+      public int PartIndex { get; set; } = -1;
+      public int PairIndex { get; set; } = -1;
     }
 
     private static bool TryCreatePlacedGeometry(
@@ -604,7 +642,7 @@ namespace WoodSheetLayout.Core
     {
       var packedPartCount = result.Sheets.Sum(sheet => sheet.Placements.Count);
       RhinoApp.WriteLine(string.Format(
-        "WoodSheetLayout 2.2.7：选中组 {0} 件，识别 {1} 件，排入 {2} 件，实际生成 {3} 件/{4} 个对象，{5} 张 {6}；零件间距 {7:0.##} mm，边框出血 {8:0.##} mm。",
+        "WoodSheetLayout 2.2.8：选中组 {0} 件，识别 {1} 件，排入 {2} 件，实际生成 {3} 件/{4} 个对象，{5} 张 {6}；零件间距 {7:0.##} mm，边框出血 {8:0.##} mm。",
         componentCount,
         analyzedPartCount,
         packedPartCount,
@@ -661,7 +699,7 @@ namespace WoodSheetLayout.Core
       if (result.Issues.Count > 0 || outputFailureCount > 0 || outputPartCount != packedPartCount)
       {
         RhinoApp.WriteLine(
-          "WoodSheetLayout：仍有 {0} 个分析问题、{1} 个输出对象失败；不创建文字标记。移动WSL_PAIR配对组可核对已铺平零件。",
+          "WoodSheetLayout：仍有 {0} 个分析问题、{1} 个输出对象失败；不创建文字标记。移动WSL_PAIR配对组可核对已铺平零件，解除外层后WSL_PART内部组仍保留。",
           result.Issues.Count,
           outputFailureCount);
         foreach (var issue in result.Issues)
@@ -706,7 +744,7 @@ namespace WoodSheetLayout.Core
       {
         _doc = doc;
         _rootLayer = CreateLayer(
-          "WoodSheetLayout_2.2.7_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
+          "WoodSheetLayout_2.2.8_" + DateTime.Now.ToString("yyyyMMdd_HHmmss"),
           Color.White,
           Color.White,
           Guid.Empty,
