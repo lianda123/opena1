@@ -18,8 +18,11 @@ namespace ProductMotionTimeline.Core
 
     private static Keyframe _keyClipboard;
     private static readonly List<KeyClipboardGroup> _keyClipboardGroups = new List<KeyClipboardGroup>();
+    private static bool _synchronizingRhinoSelection;
 
     public static event Action Changed;
+
+    public static bool SynchronizingRhinoSelection => _synchronizingRhinoSelection;
 
     public static TimelineDocument Model(RhinoDoc doc)
     {
@@ -75,12 +78,34 @@ namespace ProductMotionTimeline.Core
       if (track != null)
       {
         model.SelectedTrackId = trackId;
-        doc.Objects.UnselectAll();
-        var instance = ResolveInstance(doc, track);
-        instance?.Select(true);
+        _synchronizingRhinoSelection = true;
+        try
+        {
+          doc.Objects.UnselectAll();
+          var instance = ResolveInstance(doc, track);
+          instance?.Select(true);
+        }
+        finally
+        {
+          _synchronizingRhinoSelection = false;
+        }
         doc.Views.Redraw();
         Notify();
       }
+    }
+
+    public static bool SelectTrackFromRhinoObject(RhinoDoc doc, RhinoObject rhinoObject)
+    {
+      if (doc == null || rhinoObject == null || _synchronizingRhinoSelection)
+        return false;
+      var instance = rhinoObject as InstanceObject;
+      var track = FindTrackForInstance(doc, instance);
+      if (track == null)
+        return false;
+      var model = Model(doc);
+      model.SelectedTrackId = track.Id;
+      Notify();
+      return true;
     }
 
     public static bool ReorderTrack(
@@ -280,17 +305,15 @@ namespace ProductMotionTimeline.Core
             continue;
           maxFrame = Math.Max(maxFrame, targetFrame);
           var existing = target.FindKey(targetFrame);
-          var freshStartPlaceholder = existing != null &&
-                                      target.Keys.Count == 1 &&
-                                      targetFrame == model.StartFrame &&
-                                      IsIdentityPose(existing.Pose);
-          if (existing != null && !freshStartPlaceholder)
-          {
-            result.SkippedExistingCount++;
-            continue;
-          }
+          if (existing != null)
+            result.OverwrittenCount++;
           target.UpsertKey(targetFrame, sourceKey.Pose, sourceKey.Interpolation);
           result.PastedCount++;
+          result.PastedSelections.Add(new KeySelection
+          {
+            TrackId = target.Id,
+            Frame = targetFrame
+          });
         }
       }
 
@@ -303,33 +326,81 @@ namespace ProductMotionTimeline.Core
       return result;
     }
 
-    private static bool IsIdentityPose(Pose pose)
-    {
-      if (pose == null)
-        return false;
-      const double tolerance = 1e-9;
-      return pose.Translation.Length <= tolerance &&
-             Math.Abs(pose.Scale.X - 1.0) <= tolerance &&
-             Math.Abs(pose.Scale.Y - 1.0) <= tolerance &&
-             Math.Abs(pose.Scale.Z - 1.0) <= tolerance &&
-             Math.Abs(pose.AxisAngleDegrees) <= tolerance &&
-             Math.Abs(pose.Rotation.X) <= tolerance &&
-             Math.Abs(pose.Rotation.Y) <= tolerance &&
-             Math.Abs(pose.Rotation.Z) <= tolerance &&
-             Math.Abs(Math.Abs(pose.Rotation.W) - 1.0) <= tolerance;
-    }
-
     public static bool MoveKey(RhinoDoc doc, Guid trackId, int oldFrame, int newFrame)
     {
+      var result = MoveKeys(
+        doc,
+        new[] { new KeySelection { TrackId = trackId, Frame = oldFrame } },
+        newFrame - oldFrame);
+      return string.IsNullOrWhiteSpace(result.ErrorMessage);
+    }
+
+    public static KeyMoveResult MoveKeys(
+      RhinoDoc doc,
+      IEnumerable<KeySelection> selections,
+      int requestedDelta)
+    {
+      var result = new KeyMoveResult();
+      if (doc == null)
+      {
+        result.ErrorMessage = "没有活动Rhino文档。";
+        return result;
+      }
+
       var model = Model(doc);
-      var track = model.Tracks.FirstOrDefault(item => item.Id == trackId);
-      if (track == null || track.FindKey(oldFrame) == null)
-        return false;
-      newFrame = Math.Max(model.StartFrame, Math.Min(model.EndFrame, newFrame));
-      track.MoveKey(oldFrame, newFrame);
+      var valid = (selections ?? Enumerable.Empty<KeySelection>())
+        .Where(selection => model.FindTrack(selection.TrackId)?.FindKey(selection.Frame) != null)
+        .Distinct()
+        .ToList();
+      if (valid.Count == 0)
+      {
+        result.ErrorMessage = "没有可移动的关键帧。";
+        return result;
+      }
+
+      var minimumFrame = valid.Min(selection => selection.Frame);
+      var maximumFrame = valid.Max(selection => selection.Frame);
+      var delta = Math.Max(
+        model.StartFrame - minimumFrame,
+        Math.Min(model.EndFrame - maximumFrame, requestedDelta));
+      result.AppliedDelta = delta;
+
+      foreach (var trackGroup in valid.GroupBy(selection => selection.TrackId))
+      {
+        var track = model.FindTrack(trackGroup.Key);
+        var moving = trackGroup
+          .Select(selection => new
+          {
+            Selection = selection,
+            Key = track.FindKey(selection.Frame)
+          })
+          .Where(item => item.Key != null)
+          .ToList();
+        var movingKeys = new HashSet<Keyframe>(moving.Select(item => item.Key));
+        var targetFrames = new HashSet<int>(moving.Select(item => item.Selection.Frame + delta));
+        var collisions = track.Keys
+          .Where(key => targetFrames.Contains(key.Frame) && !movingKeys.Contains(key))
+          .ToList();
+        foreach (var collision in collisions)
+          track.Keys.Remove(collision);
+        result.OverwrittenCount += collisions.Count;
+
+        foreach (var item in moving)
+        {
+          item.Key.Frame = item.Selection.Frame + delta;
+          result.MovedSelections.Add(new KeySelection
+          {
+            TrackId = track.Id,
+            Frame = item.Key.Frame
+          });
+          result.MovedCount++;
+        }
+        track.SortKeys();
+      }
+
       TimelineRepository.Save(doc);
       Notify();
-      return true;
+      return result;
     }
 
     public static bool SetPivot(RhinoDoc doc, Point3d point)
@@ -525,9 +596,9 @@ namespace ProductMotionTimeline.Core
         Enabled = true
       });
       SaveAndNotify(doc);
-      ApplyFrame(doc, model.CurrentFrame, false);
+      doc.Views.Redraw();
       RhinoApp.WriteLine(
-        "ProductMotion：已建立“{0}”→“{1}”传动，角速度比 {2:0.###}。",
+        "ProductMotion：已建立“{0}”→“{1}”传动，角速度比 {2:0.###}；绑定过程未移动零件。",
         driver.Name,
         driven.Name,
         model.ConstraintForDriven(drivenTrackId).SignedRatio);
@@ -773,6 +844,19 @@ namespace ProductMotionTimeline.Core
       return origin;
     }
 
+    public static Point3d DisplayedPivotOrigin(RhinoDoc doc, AnimationTrack track)
+    {
+      var origin = PivotOrigin(track);
+      var instance = ResolveInstance(doc, track);
+      Transform baseInverse;
+      if (instance == null || !AnimationMath.SanitizeAffine(track.BaseTransform).TryGetInverse(out baseInverse))
+        return origin;
+      var delta = AnimationMath.SanitizeAffine(instance.InstanceXform) *
+                  AnimationMath.SanitizeAffine(baseInverse);
+      origin.Transform(AnimationMath.SanitizeAffine(delta));
+      return origin;
+    }
+
     public static Vector3d PivotAxis(AnimationTrack track)
     {
       var axis = Vector3d.ZAxis;
@@ -818,6 +902,107 @@ namespace ProductMotionTimeline.Core
       if (persist)
         TimelineRepository.Save(doc);
       Notify();
+    }
+
+    public static int RepairNonAffineTrackTransforms(RhinoDoc doc)
+    {
+      if (doc == null)
+        return 0;
+      var repaired = 0;
+      var metadataRepaired = 0;
+      var model = Model(doc);
+      foreach (var track in model.OrderedTracks())
+      {
+        if (!AnimationMath.HasExactAffineBottomRow(track.BaseTransform))
+        {
+          track.BaseTransform = AnimationMath.SanitizeAffine(track.BaseTransform);
+          metadataRepaired++;
+        }
+        if (!AnimationMath.HasExactAffineBottomRow(track.ParentBindTransform))
+        {
+          track.ParentBindTransform = AnimationMath.SanitizeAffine(track.ParentBindTransform);
+          metadataRepaired++;
+        }
+        if (!AnimationMath.HasExactAffineBottomRow(track.PivotTransform))
+        {
+          track.PivotTransform = AnimationMath.SanitizeAffine(track.PivotTransform);
+          metadataRepaired++;
+        }
+        var instance = ResolveInstance(doc, track);
+        if (instance == null || AnimationMath.HasExactAffineBottomRow(instance.InstanceXform))
+          continue;
+        if (ReplaceInstanceTransform(
+          doc,
+          track,
+          instance,
+          AnimationMath.SanitizeAffine(instance.InstanceXform)))
+          repaired++;
+      }
+      if (repaired > 0 || metadataRepaired > 0)
+      {
+        TimelineRepository.Save(doc);
+        doc.Views.Redraw();
+        Notify();
+        RhinoApp.WriteLine(
+          "ProductMotion：已修复 {0} 个动画块的非仿射变换残差，保持当前摆放位置不变。",
+          repaired);
+      }
+      return repaired;
+    }
+
+    public static bool PrepareUnkeyedTrackPlacement(RhinoDoc doc, AnimationTrack track)
+    {
+      if (doc == null || track == null)
+        return false;
+      var model = Model(doc);
+      if (track.ParentTrackId != Guid.Empty || model.ConstraintForDriven(track.Id) != null ||
+          !HasOnlyInitialIdentityKey(model, track))
+        return false;
+
+      var instance = ResolveInstance(doc, track);
+      if (instance == null)
+        return false;
+      var rawCurrent = instance.InstanceXform;
+      var current = AnimationMath.SanitizeAffine(rawCurrent);
+      var baseTransform = AnimationMath.SanitizeAffine(track.BaseTransform);
+      if (AnimationMath.HasExactAffineBottomRow(rawCurrent) &&
+          AnimationMath.HasExactAffineBottomRow(track.BaseTransform) &&
+          AnimationMath.AlmostEqual(current, baseTransform))
+        return false;
+      if (!AnimationMath.HasExactAffineBottomRow(rawCurrent) &&
+          !ReplaceInstanceTransform(doc, track, instance, current))
+        return false;
+
+      Transform baseInverse;
+      if (!baseTransform.TryGetInverse(out baseInverse))
+        return false;
+      var placementDelta = current * baseInverse;
+      track.BaseTransform = current;
+      track.PivotTransform = AnimationMath.SanitizeAffine(
+        placementDelta * AnimationMath.SanitizeAffine(track.PivotTransform));
+      TimelineRepository.Save(doc);
+      Notify();
+      return true;
+    }
+
+    private static bool HasOnlyInitialIdentityKey(TimelineDocument model, AnimationTrack track)
+    {
+      if (model == null || track == null || track.Keys.Count != 1 ||
+          track.Keys[0].Frame != model.StartFrame)
+        return false;
+      var pose = track.Keys[0].Pose;
+      if (pose == null)
+        return false;
+      const double tolerance = 1e-9;
+      return pose.Translation.Length <= tolerance &&
+             Math.Abs(pose.Scale.X - 1.0) <= tolerance &&
+             Math.Abs(pose.Scale.Y - 1.0) <= tolerance &&
+             Math.Abs(pose.Scale.Z - 1.0) <= tolerance &&
+             Math.Abs(pose.AxisAngleDegrees) <= tolerance &&
+             Math.Abs(pose.Rotation.X) <= tolerance &&
+             Math.Abs(pose.Rotation.Y) <= tolerance &&
+             Math.Abs(pose.Rotation.Z) <= tolerance &&
+             Math.Abs(Math.Abs(pose.Rotation.W) - 1.0) <= tolerance;
     }
 
     public static void Persist(RhinoDoc doc)
@@ -946,6 +1131,20 @@ namespace ProductMotionTimeline.Core
       return AnimationMath.MechanicalAngleDegrees(pose, track.RotationAxis);
     }
 
+    public static double DisplayedMechanicalAngle(RhinoDoc doc, AnimationTrack track)
+    {
+      if (track == null)
+        return 0.0;
+      var instance = ResolveInstance(doc, track);
+      Pose displayedPose;
+      if (instance != null && track.TryCapturePose(
+        AnimationMath.SanitizeAffine(instance.InstanceXform),
+        0.0,
+        out displayedPose))
+        return AnimationMath.MechanicalAngleDegrees(displayedPose, track.RotationAxis);
+      return EffectiveMechanicalAngle(doc, track, Model(doc).CurrentFrame);
+    }
+
     public static InstanceObject ResolveInstance(RhinoDoc doc, AnimationTrack track)
     {
       if (doc == null || track == null)
@@ -1059,24 +1258,42 @@ namespace ProductMotionTimeline.Core
       var instance = ResolveInstance(doc, track);
       if (instance == null)
         return;
-      var current = instance.InstanceXform;
-      if (AnimationMath.AlmostEqual(current, target))
+      target = AnimationMath.SanitizeAffine(target);
+      var rawCurrent = instance.InstanceXform;
+      var requiresAffineRepair = !AnimationMath.HasExactAffineBottomRow(rawCurrent);
+      var current = AnimationMath.SanitizeAffine(rawCurrent);
+      if (!requiresAffineRepair && AnimationMath.AlmostEqual(current, target))
         return;
+      ReplaceInstanceTransform(doc, track, instance, target);
+    }
 
-      Transform currentInverse;
-      if (!current.TryGetInverse(out currentInverse))
-        return;
-      var delta = target * currentInverse;
+    private static bool ReplaceInstanceTransform(
+      RhinoDoc doc,
+      AnimationTrack track,
+      InstanceObject instance,
+      Transform target)
+    {
+      target = AnimationMath.SanitizeAffine(target);
       var wasSelected = instance.IsSelected(false) > 0;
-      var newId = doc.Objects.Transform(instance.Id, delta, true);
+      var attributes = instance.Attributes.Duplicate();
+      var definition = instance.InstanceDefinition;
+      if (definition == null)
+        return false;
+      var newId = doc.Objects.AddInstanceObject(definition.Index, target, attributes);
       if (newId == Guid.Empty)
-        return;
+        return false;
+      if (!doc.Objects.Delete(instance.Id, true))
+      {
+        doc.Objects.Delete(newId, true);
+        return false;
+      }
       track.ObjectId = newId;
       if (wasSelected)
       {
         var transformed = doc.Objects.FindId(newId);
         transformed?.Select(true);
       }
+      return true;
     }
 
     private static Transform DefaultPivotTransform(RhinoDoc doc, InstanceObject instance)

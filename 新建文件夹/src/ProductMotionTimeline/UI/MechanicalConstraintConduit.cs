@@ -25,8 +25,8 @@ namespace ProductMotionTimeline.UI
         if (driver == null || driven == null)
           continue;
 
-        var start = TimelineEngine.PivotOrigin(driver);
-        var end = TimelineEngine.PivotOrigin(driven);
+        var start = TimelineEngine.DisplayedPivotOrigin(doc, driver);
+        var end = TimelineEngine.DisplayedPivotOrigin(doc, driven);
         var validation = TimelineEngine.ValidateMechanicalConstraint(doc, constraint);
         var color = validation.Severity == ValidationSeverity.Error
           ? Color.FromArgb(230, 78, 73)
@@ -39,9 +39,30 @@ namespace ProductMotionTimeline.UI
         var midpoint = (start + end) * 0.5;
         e.Display.DrawDot(
           midpoint,
-          string.Format("{0} → {1}  {2:0.###}", driver.Name, driven.Name, constraint.SignedRatio),
+          string.Format(
+            "{0}  {1} → {2}  {3}T:{4}T  比例 {5:0.###}",
+            TypeName(constraint.Type),
+            driver.Name,
+            driven.Name,
+            constraint.DriverTeeth,
+            constraint.DrivenTeeth,
+            constraint.SignedRatio),
           color,
           Color.Black);
+      }
+    }
+
+    private static string TypeName(MechanicalConstraintType type)
+    {
+      switch (type)
+      {
+        case MechanicalConstraintType.InternalGear: return "内啮合";
+        case MechanicalConstraintType.Belt: return "皮带";
+        case MechanicalConstraintType.HelicalGear: return "斜齿";
+        case MechanicalConstraintType.BevelGear: return "锥齿";
+        case MechanicalConstraintType.RackPinion: return "齿轮-齿条";
+        case MechanicalConstraintType.SameShaft: return "同轴";
+        default: return "外啮合";
       }
     }
   }

@@ -215,6 +215,23 @@ namespace ProductMotionTimeline.Core
       return true;
     }
 
+    public static Transform SanitizeAffine(Transform transform)
+    {
+      transform.M30 = 0.0;
+      transform.M31 = 0.0;
+      transform.M32 = 0.0;
+      transform.M33 = 1.0;
+      return transform;
+    }
+
+    public static bool HasExactAffineBottomRow(Transform transform)
+    {
+      return transform.M30 == 0.0 &&
+             transform.M31 == 0.0 &&
+             transform.M32 == 0.0 &&
+             transform.M33 == 1.0;
+    }
+
     public static double SmoothStep(double t)
     {
       t = Math.Max(0.0, Math.Min(1.0, t));
