@@ -210,6 +210,8 @@ Windows 环境需要：
 - .NET 8 SDK / Targeting Pack。
 - Rhino 7 和/或 Rhino 8。
 
+0.4.7 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
+
 在 PowerShell 中进入本文件夹后运行：
 
 ```powershell
