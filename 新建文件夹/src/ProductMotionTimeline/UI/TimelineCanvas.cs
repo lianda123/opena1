@@ -36,6 +36,7 @@ namespace ProductMotionTimeline.UI
     private readonly SolidBrush _marqueeBrush = new SolidBrush(Color.FromArgb(55, 74, 177, 235));
     private readonly SolidBrush _playheadBrush = new SolidBrush(Color.FromArgb(255, 86, 77));
     private readonly HashSet<KeySelection> _selectedKeys = new HashSet<KeySelection>();
+    private readonly HashSet<KeySelection> _dragKeys = new HashSet<KeySelection>();
 
     private Guid _dragTrackId = Guid.Empty;
     private int _dragOriginalFrame = -1;
@@ -53,6 +54,7 @@ namespace ProductMotionTimeline.UI
 
     public event Action KeySelectionChanged;
     public event Action KeyActivated;
+    public event Action<string> OperationCompleted;
 
     public IEnumerable<KeySelection> SelectedKeys
     {
@@ -160,15 +162,16 @@ namespace ProductMotionTimeline.UI
 
         foreach (var key in track.Keys)
         {
-          var frame = track.Id == _dragTrackId && key.Frame == _dragOriginalFrame
-            ? _dragPreviewFrame
-            : key.Frame;
-          var x = FrameToX(frame, model, width);
-          var keySelected = _selectedKeys.Contains(new KeySelection
+          var keySelection = new KeySelection
           {
             TrackId = track.Id,
             Frame = key.Frame
-          });
+          };
+          var frame = _dragKeys.Contains(keySelection)
+            ? key.Frame + _dragPreviewFrame - _dragOriginalFrame
+            : key.Frame;
+          var x = FrameToX(frame, model, width);
+          var keySelected = _selectedKeys.Contains(keySelection);
           DrawDiamond(
             graphics,
             x,
@@ -293,15 +296,23 @@ namespace ProductMotionTimeline.UI
         {
           var selection = new KeySelection { TrackId = track.Id, Frame = hit.Frame };
           if (HasModifier(e, Keys.Alt))
+          {
             _selectedKeys.Remove(selection);
+            KeySelectionChanged?.Invoke();
+            TimelineEngine.ApplyFrame(doc, hit.Frame, false);
+            Invalidate();
+            return;
+          }
           else if (HasModifier(e, Keys.Shift))
             _selectedKeys.Add(selection);
-          else
+          else if (!_selectedKeys.Contains(selection))
           {
             _selectedKeys.Clear();
             _selectedKeys.Add(selection);
           }
           KeySelectionChanged?.Invoke();
+          _dragKeys.Clear();
+          _dragKeys.UnionWith(_selectedKeys);
           _dragTrackId = track.Id;
           _dragOriginalFrame = hit.Frame;
           _dragPreviewFrame = hit.Frame;
@@ -343,7 +354,8 @@ namespace ProductMotionTimeline.UI
       else if (_dragTrackId != Guid.Empty)
       {
         var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
-        _dragPreviewFrame = XToFrame(e.Location.X, model, ClientSize.Width);
+        var requested = XToFrame(e.Location.X, model, ClientSize.Width) - _dragOriginalFrame;
+        _dragPreviewFrame = _dragOriginalFrame + ClampDragDelta(model, requested);
         Invalidate();
       }
       else if (_scrubbing)
@@ -376,12 +388,21 @@ namespace ProductMotionTimeline.UI
       }
       else if (_dragTrackId != Guid.Empty)
       {
-        var newFrame = _dragPreviewFrame;
-        TimelineEngine.MoveKey(doc, _dragTrackId, _dragOriginalFrame, newFrame);
-        var oldSelection = new KeySelection { TrackId = _dragTrackId, Frame = _dragOriginalFrame };
-        if (_selectedKeys.Remove(oldSelection))
-          _selectedKeys.Add(new KeySelection { TrackId = _dragTrackId, Frame = newFrame });
-        TimelineEngine.ApplyFrame(doc, newFrame, true);
+        var requestedDelta = _dragPreviewFrame - _dragOriginalFrame;
+        var result = TimelineEngine.MoveKeys(doc, _dragKeys, requestedDelta);
+        if (string.IsNullOrWhiteSpace(result.ErrorMessage))
+        {
+          _selectedKeys.Clear();
+          _selectedKeys.UnionWith(result.MovedSelections);
+          TimelineEngine.ApplyFrame(doc, _dragOriginalFrame + result.AppliedDelta, true);
+          OperationCompleted?.Invoke(
+            $"已整体移动 {result.MovedCount} 个关键帧，保持原间距" +
+            (result.OverwrittenCount > 0 ? $"；覆盖 {result.OverwrittenCount} 个目标关键帧。" : "。"));
+        }
+        else
+        {
+          OperationCompleted?.Invoke(result.ErrorMessage);
+        }
         KeySelectionChanged?.Invoke();
       }
       else if (_scrubbing)
@@ -390,6 +411,7 @@ namespace ProductMotionTimeline.UI
       }
 
       _dragTrackId = Guid.Empty;
+      _dragKeys.Clear();
       _dragOriginalFrame = -1;
       _dragPreviewFrame = -1;
       _scrubbing = false;
@@ -399,6 +421,17 @@ namespace ProductMotionTimeline.UI
       _rowDropAfter = false;
       _rowDragging = false;
       Invalidate();
+    }
+
+    private int ClampDragDelta(TimelineDocument model, int requestedDelta)
+    {
+      if (model == null || _dragKeys.Count == 0)
+        return 0;
+      var minimumFrame = _dragKeys.Min(selection => selection.Frame);
+      var maximumFrame = _dragKeys.Max(selection => selection.Frame);
+      return Math.Max(
+        model.StartFrame - minimumFrame,
+        Math.Min(model.EndFrame - maximumFrame, requestedDelta));
     }
 
     private void OnMouseDoubleClick(object sender, MouseEventArgs e)
@@ -443,6 +476,14 @@ namespace ProductMotionTimeline.UI
     public void ClearKeySelection()
     {
       _selectedKeys.Clear();
+      KeySelectionChanged?.Invoke();
+      Invalidate();
+    }
+
+    public void ReplaceKeySelection(IEnumerable<KeySelection> selections)
+    {
+      _selectedKeys.Clear();
+      _selectedKeys.UnionWith(selections ?? Enumerable.Empty<KeySelection>());
       KeySelectionChanged?.Invoke();
       Invalidate();
     }
