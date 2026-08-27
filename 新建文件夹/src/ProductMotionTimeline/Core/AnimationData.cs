@@ -179,7 +179,17 @@ namespace ProductMotionTimeline.Core
   internal sealed class KeyPasteResult
   {
     public int PastedCount { get; set; }
-    public int SkippedExistingCount { get; set; }
+    public int OverwrittenCount { get; set; }
+    public List<KeySelection> PastedSelections { get; } = new List<KeySelection>();
+    public string ErrorMessage { get; set; }
+  }
+
+  internal sealed class KeyMoveResult
+  {
+    public int MovedCount { get; set; }
+    public int OverwrittenCount { get; set; }
+    public int AppliedDelta { get; set; }
+    public List<KeySelection> MovedSelections { get; } = new List<KeySelection>();
     public string ErrorMessage { get; set; }
   }
 

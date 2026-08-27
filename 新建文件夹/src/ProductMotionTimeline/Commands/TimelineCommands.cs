@@ -18,6 +18,7 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      TimelineEngine.RepairNonAffineTrackTransforms(doc);
       Panels.OpenPanel(TimelinePanel.PanelId);
       return Result.Success;
     }
@@ -195,6 +196,7 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var driver = TimelineEngine.Model(doc).SelectedTrack;
       if (driver == null)
       {
@@ -247,14 +249,10 @@ namespace ProductMotionTimeline.Commands
       if (drivenCount < 1)
         return Result.Cancel;
 
-      var driverAngle = TimelineEngine.EffectiveMechanicalAngle(
-        doc,
-        driver,
-        TimelineEngine.Model(doc).CurrentFrame);
-      var drivenAngle = TimelineEngine.EffectiveMechanicalAngle(
-        doc,
-        driven,
-        TimelineEngine.Model(doc).CurrentFrame);
+      TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driver);
+      TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driven);
+      var driverAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driver);
+      var drivenAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driven);
       var direction = selectedType == MechanicalConstraintType.SameShaft &&
                       TimelineEngine.PivotAxis(driver) * TimelineEngine.PivotAxis(driven) < 0.0
         ? -1.0
@@ -313,6 +311,7 @@ namespace ProductMotionTimeline.Commands
   {
     internal static Result Run(RhinoDoc doc, MechanicalConstraintType type)
     {
+      TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var driverInstance = TrackFactory.GetOrCreateGroupPart(
         doc,
         "选择主动件（可在现有Rhino组内单独选择；多选后按回车）",
@@ -366,9 +365,10 @@ namespace ProductMotionTimeline.Commands
       if (drivenCount < 1)
         return Result.Cancel;
 
-      var frame = TimelineEngine.Model(doc).CurrentFrame;
-      var driverAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driver, frame);
-      var drivenAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driven, frame);
+      TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driver);
+      TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driven);
+      var driverAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driver);
+      var drivenAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driven);
       var template = new MechanicalConstraint
       {
         Type = type,
@@ -471,6 +471,7 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var model = TimelineEngine.Model(doc);
       var driver = model.SelectedTrack;
       if (driver == null)
@@ -511,6 +512,10 @@ namespace ProductMotionTimeline.Commands
         if (driven == null || driven.Id == driver.Id)
           continue;
 
+        TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driver);
+        TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driven);
+        drivenInstance = TimelineEngine.ResolveInstance(doc, driven);
+
         GearParameters drivenGear;
         var hasDrivenGear = GearPartMetadata.TryRead(drivenInstance, out drivenGear);
         if (hasDrivenGear && drivenGear.Type == GearPartType.Rack)
@@ -524,9 +529,8 @@ namespace ProductMotionTimeline.Commands
         var direction = TimelineEngine.PivotAxis(driver) * TimelineEngine.PivotAxis(driven) < 0.0
           ? -1.0
           : 1.0;
-        var frame = model.CurrentFrame;
-        var driverAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driver, frame);
-        var drivenAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driven, frame);
+        var driverAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driver);
+        var drivenAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driven);
         var preview = new MechanicalConstraint
         {
           DriverTrackId = driver.Id,
@@ -580,6 +584,7 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var model = TimelineEngine.Model(doc);
       var driver = model.SelectedTrack;
       if (driver == null)
@@ -641,6 +646,9 @@ namespace ProductMotionTimeline.Commands
         var driven = TimelineEngine.AddTrack(doc, drivenInstance);
         if (driven == null || driven.Id == driver.Id)
           continue;
+        TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driver);
+        TimelineEngine.PrepareUnkeyedTrackPlacement(doc, driven);
+        drivenInstance = TimelineEngine.ResolveInstance(doc, driven);
         string ignored;
         if (!hasDriverGear)
           TimelineEngine.TryAutoSetPivot(doc, driver, out ignored);
@@ -697,7 +705,7 @@ namespace ProductMotionTimeline.Commands
           return Result.Cancel;
         var pressure = hasDriverGear ? driverGear.PressureAngleDegrees : 20.0;
         var frame = model.CurrentFrame;
-        var driverAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driver, frame);
+        var driverAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driver);
         var phaseAngle = 0.0;
         var phaseDistance = 0.0;
         var direction = type == MechanicalConstraintType.SameShaft &&
@@ -712,7 +720,7 @@ namespace ProductMotionTimeline.Commands
         }
         else
         {
-          var drivenAngle = TimelineEngine.EffectiveMechanicalAngle(doc, driven, frame);
+          var drivenAngle = TimelineEngine.DisplayedMechanicalAngle(doc, driven);
           var preview = new MechanicalConstraint
           {
             Type = type,

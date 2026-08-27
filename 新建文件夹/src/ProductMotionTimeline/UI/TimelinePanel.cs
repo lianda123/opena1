@@ -93,7 +93,7 @@ namespace ProductMotionTimeline.UI
         Button("全选当前轨道", SelectAllKeys),
         Button("清除选择", ClearSelectedKeys),
         Button("复制所选", CopyKey),
-        Button("粘贴到所选物体", PasteKey));
+        Button("粘贴到目标轨道/帧", PasteKey));
 
       var settings = Horizontal(
         new Label { Text = "起始" }, _start,
@@ -216,6 +216,7 @@ namespace ProductMotionTimeline.UI
       _scaleZ.ValueChanged += (sender, args) => UpdatePoseChannels();
       _canvas.KeySelectionChanged += RefreshFromModel;
       _canvas.KeyActivated += KeyActivated;
+      _canvas.OperationCompleted += message => _status.Text = message;
       _constraints.SelectedIndexChanged += (sender, args) => ConstraintSelectionChanged();
       _templatePlacement.SelectedIndexChanged += (sender, args) => UpdateTemplatePlacement();
       _templateGap.ValueChanged += (sender, args) => UpdateTemplatePlacement();
@@ -469,7 +470,13 @@ namespace ProductMotionTimeline.UI
       if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
         _status.Text = result.ErrorMessage;
       else
-        _status.Text = $"已粘贴 {result.PastedCount} 个关键帧；目标已有关键帧的 {result.SkippedExistingCount} 个位置未覆盖。";
+      {
+        _canvas.ReplaceKeySelection(result.PastedSelections);
+        _status.Text = $"已粘贴 {result.PastedCount} 个关键帧到当前目标位置" +
+                       (result.OverwrittenCount > 0
+                         ? $"；覆盖 {result.OverwrittenCount} 个原关键帧。"
+                         : "。");
+      }
     }
 
     private void SelectAllKeys()

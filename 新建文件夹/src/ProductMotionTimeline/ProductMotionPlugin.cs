@@ -1,7 +1,10 @@
 using System;
+using System.Linq;
 using System.Runtime.InteropServices;
 using ProductMotionTimeline.Core;
 using ProductMotionTimeline.UI;
+using Rhino;
+using Rhino.DocObjects;
 using Rhino.PlugIns;
 using Rhino.UI;
 
@@ -23,15 +26,29 @@ namespace ProductMotionTimeline
       TimelineRepository.Initialize();
       Panels.RegisterPanel(this, typeof(TimelinePanel), "产品动态时间轴", null);
       _mechanicalConduit = new MechanicalConstraintConduit { Enabled = true };
+      RhinoDoc.SelectObjects += OnRhinoObjectsSelected;
       return LoadReturnCode.Success;
     }
 
     protected override void OnShutdown()
     {
       TimelineRepository.Shutdown();
+      RhinoDoc.SelectObjects -= OnRhinoObjectsSelected;
       if (_mechanicalConduit != null)
         _mechanicalConduit.Enabled = false;
       base.OnShutdown();
+    }
+
+    private static void OnRhinoObjectsSelected(object sender, RhinoObjectSelectionEventArgs e)
+    {
+      if (e == null || !e.Selected || TimelineEngine.SynchronizingRhinoSelection)
+        return;
+      var doc = e.Document ?? RhinoDoc.ActiveDoc;
+      var selected = e.RhinoObjects?
+        .OfType<InstanceObject>()
+        .LastOrDefault();
+      if (doc != null && selected != null)
+        TimelineEngine.SelectTrackFromRhinoObject(doc, selected);
     }
   }
 }

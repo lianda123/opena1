@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.6."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.7."""
 
 from pathlib import Path
 import re
@@ -52,6 +52,12 @@ def inverse_translation(m):
     return translation(-m[0][3], -m[1][3], -m[2][3])
 
 
+def sanitize_affine(m):
+    result = [row[:] for row in m]
+    result[3] = [0.0, 0.0, 0.0, 1.0]
+    return result
+
+
 def assert_balanced_csharp(path: Path):
     text = path.read_text(encoding="utf-8")
     stripped = re.sub(r'//.*?$|/\*.*?\*/|@?"(?:""|\\.|[^"\\])*"', "", text, flags=re.M | re.S)
@@ -71,6 +77,13 @@ def main():
     assert gear_center_distance("InternalGear", 2.0, 10, 30) == 20.0
     assert crank_slider_x(0.0, 10.0, 30.0) == 40.0
     assert abs(rack_travel(360.0, 2.0, 20) - 40.0 * 3.141592653589793) < 1e-9
+    contaminated = translation(12.0, -5.0, 3.0)
+    contaminated[3] = [1e-19, -2e-20, 7e-21, 1.0 + 1e-15]
+    cleaned = sanitize_affine(contaminated)
+    assert cleaned[:3] == contaminated[:3]
+    assert cleaned[3] == [0.0, 0.0, 0.0, 1.0]
+    selected_frames = [10, 24, 40]
+    assert [frame + 7 for frame in selected_frames] == [17, 31, 47]
 
     # Parent moved +5; child own target remains +13, so inherited result is +18.
     parent_world = translation(15.0, 0.0, 0.0)
@@ -92,6 +105,7 @@ def main():
     conduit = (SRC / "UI" / "MechanicalConstraintConduit.cs").read_text(encoding="utf-8")
     gear_geometry = (SRC / "Core" / "GearGeometryGenerator.cs").read_text(encoding="utf-8")
     gear_metadata = (SRC / "Core" / "GearPartMetadata.cs").read_text(encoding="utf-8")
+    plugin = (SRC / "ProductMotionPlugin.cs").read_text(encoding="utf-8")
 
     required = [
         "ParentTrackId",
@@ -112,7 +126,9 @@ def main():
         "SetParent", "EffectiveMechanicalAngle", "UpdateCurrentKeyInterpolation",
         "TemplateStartFrame", "UpdateTemplatePlacement", "ReorderTrack",
         "CopyKeys", "PasteCopiedKeys", "SelectedRhinoTrackIds",
-        "UpdateCurrentKeyPoseChannels"
+        "UpdateCurrentKeyPoseChannels", "MoveKeys", "OverwrittenCount",
+        "PastedSelections", "RepairNonAffineTrackTransforms", "PrepareUnkeyedTrackPlacement",
+        "DisplayedMechanicalAngle", "DisplayedPivotOrigin", "ReplaceInstanceTransform"
     ]:
         assert token in engine, token
 
@@ -147,7 +163,7 @@ def main():
         "平滑：缓入缓出", "线性：匀速", "阶梯：保持后跳变",
         "SelectedIndexChanged", "PMTExternalGear", "PMTInternalGear", "PMTBelt",
         "PMTBindMultiple", "PMTSameShaft", "同轴复合齿轮", "PMTGearFactory", "接在全部动作末尾",
-        "全选当前轨道", "复制所选", "粘贴到所选物体", "关键帧属性",
+        "全选当前轨道", "复制所选", "粘贴到目标轨道/帧", "关键帧属性",
         "移动 X", "旋转角°", "缩放 X"
     ]:
         assert token in panel, token
@@ -157,22 +173,29 @@ def main():
         "_rowDragTrackId", "DrawTrackDropIndicator", "UpdateTrackDrop",
         "轨道（上下拖动）", "_trackDropPen", "MouseDoubleClick",
         "_marqueeSelecting", "ApplyMarqueeSelection", "Keys.Shift", "Keys.Alt",
-        "SelectAllKeys", "KeySelectionChanged", "_selectedTrackPen"
+        "SelectAllKeys", "KeySelectionChanged", "_selectedTrackPen",
+        "_dragKeys", "OperationCompleted", "ReplaceKeySelection", "ClampDragDelta"
     ]:
         assert token in canvas, token
     assert "右键框选，Shift 加选，Alt 减选" in panel
     assert "doc.Objects.UnselectAll()" in engine
     assert "instance?.Select(true)" in engine
-    assert "SkippedExistingCount" in engine
-    assert "freshStartPlaceholder" in engine
-    assert "IsIdentityPose" in engine
+    assert "SkippedExistingCount" not in engine
+    assert "freshStartPlaceholder" not in engine
+    assert "target.UpsertKey" in engine
+    assert "AddInstanceObject" in engine
+    assert "SanitizeAffine" in animation_math
+    assert "HasExactAffineBottomRow" in animation_math
+    assert "RhinoDoc.SelectObjects" in plugin
+    assert "RhinoObjectSelectionEventArgs" in plugin
+    assert "SelectTrackFromRhinoObject" in plugin
     assert "KeySelection" in data
 
     for token in ["TryDetect", "TryGetCircle", "IsCoaxial", "MatchingCircularEdges"]:
         assert token in axis_detector, token
     for token in ["GenerateReciprocation", "GenerateRebound", "GenerateCrankSlider", "GenerateFourBar"]:
         assert token in templates, token
-    for token in ["DrawLine", "DrawDot", "SignedRatio"]:
+    for token in ["DrawLine", "DrawDot", "SignedRatio", "DisplayedPivotOrigin", "TypeName"]:
         assert token in conduit, token
     for token in ["Module", "PressureAngleDegrees", "ExpectedCenterDistance", "ValidateMechanicalConstraint"]:
         assert token in data + engine, token
@@ -205,7 +228,12 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.6</Version>" in project
+    assert "<Version>0.4.7</Version>" in project
+
+    add_constraint_body = engine.split("public static bool AddMechanicalConstraint(", 2)[-1]
+    add_constraint_body = add_constraint_body.split("public static bool UpdateMechanicalConstraint", 1)[0]
+    assert "ApplyFrame" not in add_constraint_body
+    assert "绑定过程未移动零件" in add_constraint_body
 
     for path in SRC.rglob("*.cs"):
         assert_balanced_csharp(path)
@@ -215,11 +243,12 @@ def main():
         "组内零件", "父子层级", "外啮合齿轮", "几何/运动学校验",
         "Gumball", "缓入缓出", "保持后跳变",
         "一主多从机构网络", "动作自动衔接", "齿轮生成器合并",
-        "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮"
+        "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮",
+        "双向联动", "整体移动", "任意位置覆盖粘贴", "绑定过程未移动零件"
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.6 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.7 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":
