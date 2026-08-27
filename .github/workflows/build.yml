@@ -2,6 +2,12 @@ name: Build ProductMotion Timeline for Rhino 7 and 8
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - product-motion-0.4.7-interaction-gear
+    paths:
+      - "新建文件夹/**"
+      - ".github/workflows/build.yml"
   push:
     branches:
       - main
