@@ -210,6 +210,7 @@ def main():
     assert "Panels.OpenPanel" not in gear_commands
     assert 'PackageReference Include="RhinoWindows" Version="7.*"' in project
     assert 'PackageReference Include="RhinoWindows" Version="8.*"' in project
+    assert '<Reference Include="System.Windows.Forms" />' in project
     for token in [
         "_trackScroll", "_pageScroll", "ExpandContentHeight = false",
         "_canvas.MouseWheel += ScrollTrackList", "Height = 160",
