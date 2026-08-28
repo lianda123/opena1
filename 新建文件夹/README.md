@@ -1,10 +1,17 @@
-# ProductMotion Timeline 0.4.7（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.8（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.7 完成轨道与物体双向选中、框选关键帧整体移动、任意轨道/帧位置覆盖粘贴，并修复齿轮绑定后不显示关系线、未卡帧零件意外移位等问题。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.8 在双向选中、框选整体移动和任意位置覆盖粘贴的基础上，补齐关键帧与齿轮绑定的 Rhino 撤回/重做，并修复齿轮撤回时生成重复实例的问题。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.4.7 主要改进
+## 0.4.8 主要改进
+
+- 关键帧撤回：插入、删除、数值编辑、批量粘贴和框选整体移动都可使用 Rhino `Undo/Redo`。
+- 框选的多个关键帧作为一个撤回步骤，保留彼此间距。
+- 一主多从、串联和同轴批量绑定作为一个撤回步骤，撤回后关系线和文字同步消失。
+- 齿轮撤回不复制：Block 姿态更新改用 Rhino 原生单次变换，撤回不再恢复出额外副本。
+- `PMTimeline` 会把时间轴移到 Rhino 底部，形成类似 Blender/C4D 的横向操作区；Rhino 7/8 Windows 都可用。
+- 轨道可视高度缩小为约 160px；鼠标在轨道中滚轮只浏览轨道，鼠标在其他位置时滚动整个插件页面。
 
 - 轨道和 Rhino 物体现在双向联动：点击轨道会亮起对应物体，在视口选中动画 Block 也会自动定位并亮起对应轨道。
 - 右键框选、`Shift` 加选或 `Alt` 减选后，拖动任意一个已选关键帧，全部已选帧会按同一帧差整体移动并保持原间距。
@@ -20,7 +27,7 @@
 - 点击轨道行或轨道名会立即选中对应 Rhino 动画物体；当前轨道显示蓝色边条和圆点，避免看不出正在编辑哪个零件。
 - 双击关键帧会切换到该帧，并在“关键帧属性”栏显示移动 X/Y/Z、连续轴旋转角度和缩放 X/Y/Z；修改数值会立即更新该帧和视口。
 - 在关键帧区域按鼠标右键拖框可框选关键帧；`Shift` 增加选择，`Alt` 从现有选择中减去，也可一键选择当前轨道全部关键帧。
-- 可复制单个、部分或全部关键帧，并粘贴到一个或多个所选 Rhino 物体；0.4.7 已将“已有帧跳过”更新为任意位置覆盖粘贴。
+- 可复制单个、部分或全部关键帧，并粘贴到一个或多个所选 Rhino 物体；已支持任意位置覆盖粘贴。
 - 复制的位移、旋转和缩放是相对轨道基础姿态，应用到其他部件后可直接复用动作；超过原结束帧时会自动延长时间轴。
 
 ### 0.4.5 同轴复合齿轮
@@ -136,7 +143,7 @@
 
 ### 一个主动件联动整套机构
 
-1. 先选主动齿轮：可以点时间轴里的主动轨道，也可直接在 Rhino 视口选中主动齿轮；0.4.7 会双向同步。
+1. 先选主动齿轮：可以点时间轴里的主动轨道，也可直接在 Rhino 视口选中主动齿轮；两者会双向同步。
 2. 点“一主多从/串联”或运行 `PMTBindMultiple`。
 3. 生成器制作的齿轮选 `Auto`；普通模型可手动指定传动类型。
 4. 在视口中一次选择多个从动部件，按回车。
@@ -210,7 +217,7 @@ Windows 环境需要：
 - .NET 8 SDK / Targeting Pack。
 - Rhino 7 和/或 Rhino 8。
 
-0.4.7 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
+0.4.8 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
 
 在 PowerShell 中进入本文件夹后运行：
 
@@ -222,9 +229,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.7-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.7-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.7-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.8-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.8-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.8-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

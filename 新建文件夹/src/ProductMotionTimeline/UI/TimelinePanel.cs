@@ -44,6 +44,19 @@ namespace ProductMotionTimeline.UI
     private readonly Label _status = new Label { TextColor = Color.FromArgb(180, 185, 194) };
     private readonly Button _play = new Button { Text = "▶ 播放" };
     private readonly UITimer _timer = new UITimer();
+    private readonly Scrollable _trackScroll = new Scrollable
+    {
+      Border = BorderType.None,
+      Height = 160,
+      ExpandContentWidth = true,
+      ExpandContentHeight = false
+    };
+    private readonly Scrollable _pageScroll = new Scrollable
+    {
+      Border = BorderType.None,
+      ExpandContentWidth = true,
+      ExpandContentHeight = false
+    };
     private bool _suppress;
 
     public TimelinePanel()
@@ -167,27 +180,29 @@ namespace ProductMotionTimeline.UI
         Button("锥齿轮", () => RhinoApp.RunScript("_PMTCreateBevelGear", false)),
         Button("齿条", () => RhinoApp.RunScript("_PMTCreateRack", false)));
 
-      var scroll = new Scrollable { Content = _canvas, Border = BorderType.None };
-      var root = new TableLayout
+      _trackScroll.Content = _canvas;
+      var page = new TableLayout
       {
         Padding = new Padding(8),
         Spacing = new Size(6, 6)
       };
-      root.Rows.Add(new TableRow(transport));
-      root.Rows.Add(new TableRow(keyTools));
-      root.Rows.Add(new TableRow(settings));
-      root.Rows.Add(new TableRow(new TableCell(scroll, true)) { ScaleHeight = true });
-      root.Rows.Add(new TableRow(trackTools));
-      root.Rows.Add(new TableRow(keyEditor));
-      root.Rows.Add(new TableRow(hierarchyTools));
-      root.Rows.Add(new TableRow(mechanicalTools));
-      root.Rows.Add(new TableRow(constraintSelectionTools));
-      root.Rows.Add(new TableRow(_constraints));
-      root.Rows.Add(new TableRow(gearTools));
-      root.Rows.Add(new TableRow(motionTemplates));
-      root.Rows.Add(new TableRow(_relationship));
-      root.Rows.Add(new TableRow(_status));
-      Content = root;
+      page.Rows.Add(new TableRow(transport));
+      page.Rows.Add(new TableRow(keyTools));
+      page.Rows.Add(new TableRow(settings));
+      page.Rows.Add(new TableRow(_trackScroll));
+      page.Rows.Add(new TableRow(trackTools));
+      page.Rows.Add(new TableRow(keyEditor));
+      page.Rows.Add(new TableRow(hierarchyTools));
+      page.Rows.Add(new TableRow(mechanicalTools));
+      page.Rows.Add(new TableRow(constraintSelectionTools));
+      page.Rows.Add(new TableRow(_constraints));
+      page.Rows.Add(new TableRow(gearTools));
+      page.Rows.Add(new TableRow(motionTemplates));
+      page.Rows.Add(new TableRow(_relationship));
+      page.Rows.Add(new TableRow(_status));
+      page.Rows.Add(new TableRow { ScaleHeight = true });
+      _pageScroll.Content = page;
+      Content = _pageScroll;
     }
 
     private void WireEvents()
@@ -217,9 +232,22 @@ namespace ProductMotionTimeline.UI
       _canvas.KeySelectionChanged += RefreshFromModel;
       _canvas.KeyActivated += KeyActivated;
       _canvas.OperationCompleted += message => _status.Text = message;
+      _canvas.MouseWheel += ScrollTrackList;
       _constraints.SelectedIndexChanged += (sender, args) => ConstraintSelectionChanged();
       _templatePlacement.SelectedIndexChanged += (sender, args) => UpdateTemplatePlacement();
       _templateGap.ValueChanged += (sender, args) => UpdateTemplatePlacement();
+    }
+
+    private void ScrollTrackList(object sender, MouseEventArgs e)
+    {
+      var direction = Math.Sign(e.Delta.Height);
+      if (direction == 0)
+        return;
+      var position = _trackScroll.ScrollPosition;
+      _trackScroll.ScrollPosition = new Point(
+        position.X,
+        Math.Max(0, position.Y - direction * 75));
+      e.Handled = true;
     }
 
     private void RefreshFromModel()
@@ -291,6 +319,8 @@ namespace ProductMotionTimeline.UI
         ? "先点“添加部件”；若对象已打组但只想动画其中一部分，请点“组内零件”。"
         : $"轨道：{track.Name}　帧：{model.CurrentFrame}　关键帧：{track.Keys.Count}　已选关键帧：{selectedKeyCount}　右键框选，Shift 加选，Alt 减选。";
       _canvas.RefreshHeight();
+      _trackScroll.UpdateScrollSizes();
+      _pageScroll.UpdateScrollSizes();
       _suppress = false;
     }
 

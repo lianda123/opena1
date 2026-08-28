@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.7."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.8."""
 
 from pathlib import Path
 import re
@@ -97,12 +97,14 @@ def main():
     commands = "\n".join(path.read_text(encoding="utf-8") for path in (SRC / "Commands").glob("*.cs"))
     project = (SRC / "ProductMotionTimeline.csproj").read_text(encoding="utf-8")
     repository = (SRC / "Core" / "TimelineRepository.cs").read_text(encoding="utf-8")
+    undo_manager = (SRC / "Core" / "TimelineUndoManager.cs").read_text(encoding="utf-8")
     animation_math = (SRC / "Core" / "AnimationMath.cs").read_text(encoding="utf-8")
     panel = (SRC / "UI" / "TimelinePanel.cs").read_text(encoding="utf-8")
     canvas = (SRC / "UI" / "TimelineCanvas.cs").read_text(encoding="utf-8")
     axis_detector = (SRC / "Core" / "AxisDetector.cs").read_text(encoding="utf-8")
     templates = (SRC / "Core" / "MotionTemplateGenerator.cs").read_text(encoding="utf-8")
     conduit = (SRC / "UI" / "MechanicalConstraintConduit.cs").read_text(encoding="utf-8")
+    docking = (SRC / "UI" / "TimelineDocking.cs").read_text(encoding="utf-8")
     gear_geometry = (SRC / "Core" / "GearGeometryGenerator.cs").read_text(encoding="utf-8")
     gear_metadata = (SRC / "Core" / "GearPartMetadata.cs").read_text(encoding="utf-8")
     plugin = (SRC / "ProductMotionPlugin.cs").read_text(encoding="utf-8")
@@ -183,13 +185,26 @@ def main():
     assert "SkippedExistingCount" not in engine
     assert "freshStartPlaceholder" not in engine
     assert "target.UpsertKey" in engine
-    assert "AddInstanceObject" in engine
+    replace_transform = engine.split("private static bool ReplaceInstanceTransform", 1)[1]
+    replace_transform = replace_transform.split("private static Transform DefaultPivotTransform", 1)[0]
+    assert "doc.Objects.Transform(instance.Id, delta, true)" in replace_transform
+    assert "AddInstanceObject" not in replace_transform
+    assert "doc.Objects.Delete" not in replace_transform
     assert "SanitizeAffine" in animation_math
     assert "HasExactAffineBottomRow" in animation_math
     assert "RhinoDoc.SelectObjects" in plugin
     assert "RhinoObjectSelectionEventArgs" in plugin
     assert "SelectTrackFromRhinoObject" in plugin
     assert "KeySelection" in data
+    for token in ["Panels.PanelDockBar", "DockBarDockLocation.Bottom", "RecalcRhinoLayout"]:
+        assert token in docking, token
+    assert 'PackageReference Include="RhinoWindows" Version="7.*"' in project
+    assert 'PackageReference Include="RhinoWindows" Version="8.*"' in project
+    for token in [
+        "_trackScroll", "_pageScroll", "ExpandContentHeight = false",
+        "_canvas.MouseWheel += ScrollTrackList", "Height = 160"
+    ]:
+        assert token in panel, token
 
     for token in ["TryDetect", "TryGetCircle", "IsCoaxial", "MatchingCircularEdges"]:
         assert token in axis_detector, token
@@ -228,7 +243,27 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.7</Version>" in project
+    assert "<Version>0.4.8</Version>" in project
+
+    for token in [
+        "AddCustomUndoEvent", "BeginUndoRecord", "EndUndoRecord",
+        "TimelineRepository.Capture", "TimelineRepository.Restore",
+        "OnCustomUndo", "NotifyTimelineRestored"
+    ]:
+        assert token in undo_manager + engine, token
+    assert "RhinoDoc.BeginSaveDocument" in repository
+    assert "TimelineUndoManager.Begin" in engine
+    for operation in [
+        "InsertOrUpdateKey", "DeleteKey", "PasteKey", "PasteCopiedKeys",
+        "MoveKeys", "UpdateCurrentKeyRotationChannel",
+        "UpdateCurrentKeyPoseChannels", "UpdateCurrentKeyInterpolation",
+        "AddMechanicalConstraint", "UpdateMechanicalConstraint",
+        "DeleteMechanicalConstraint", "DeleteConstraintForDriven"
+    ]:
+        body = engine.split("public static", 1)[-1] if operation not in engine else engine.split(operation, 1)[1]
+        assert "TimelineUndoManager.Begin" in body[:6000], operation
+    assert "BeginUndoScope" in commands
+    assert "整体移动 ProductMotion 关键帧" in canvas
 
     add_constraint_body = engine.split("public static bool AddMechanicalConstraint(", 2)[-1]
     add_constraint_body = add_constraint_body.split("public static bool UpdateMechanicalConstraint", 1)[0]
@@ -244,11 +279,12 @@ def main():
         "Gumball", "缓入缓出", "保持后跳变",
         "一主多从机构网络", "动作自动衔接", "齿轮生成器合并",
         "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮",
-        "双向联动", "整体移动", "任意位置覆盖粘贴", "绑定过程未移动零件"
+        "双向联动", "整体移动", "任意位置覆盖粘贴", "绑定过程未移动零件",
+        "关键帧撤回", "齿轮撤回不复制"
     ]:
         assert phrase in readme, phrase
 
-    print("ProductMotion Timeline 0.4.7 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.8 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

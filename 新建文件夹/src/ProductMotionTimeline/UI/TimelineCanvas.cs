@@ -389,19 +389,22 @@ namespace ProductMotionTimeline.UI
       else if (_dragTrackId != Guid.Empty)
       {
         var requestedDelta = _dragPreviewFrame - _dragOriginalFrame;
-        var result = TimelineEngine.MoveKeys(doc, _dragKeys, requestedDelta);
-        if (string.IsNullOrWhiteSpace(result.ErrorMessage))
+        using (TimelineEngine.BeginUndoScope(doc, "整体移动 ProductMotion 关键帧"))
         {
-          _selectedKeys.Clear();
-          _selectedKeys.UnionWith(result.MovedSelections);
-          TimelineEngine.ApplyFrame(doc, _dragOriginalFrame + result.AppliedDelta, true);
-          OperationCompleted?.Invoke(
-            $"已整体移动 {result.MovedCount} 个关键帧，保持原间距" +
-            (result.OverwrittenCount > 0 ? $"；覆盖 {result.OverwrittenCount} 个目标关键帧。" : "。"));
-        }
-        else
-        {
-          OperationCompleted?.Invoke(result.ErrorMessage);
+          var result = TimelineEngine.MoveKeys(doc, _dragKeys, requestedDelta);
+          if (string.IsNullOrWhiteSpace(result.ErrorMessage))
+          {
+            _selectedKeys.Clear();
+            _selectedKeys.UnionWith(result.MovedSelections);
+            TimelineEngine.ApplyFrame(doc, _dragOriginalFrame + result.AppliedDelta, true);
+            OperationCompleted?.Invoke(
+              $"已整体移动 {result.MovedCount} 个关键帧，保持原间距" +
+              (result.OverwrittenCount > 0 ? $"；覆盖 {result.OverwrittenCount} 个目标关键帧。" : "。"));
+          }
+          else
+          {
+            OperationCompleted?.Invoke(result.ErrorMessage);
+          }
         }
         KeySelectionChanged?.Invoke();
       }

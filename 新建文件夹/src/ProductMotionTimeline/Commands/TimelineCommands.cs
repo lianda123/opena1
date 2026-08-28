@@ -19,7 +19,7 @@ namespace ProductMotionTimeline.Commands
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
       TimelineEngine.RepairNonAffineTrackTransforms(doc);
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.OpenAtBottom();
       return Result.Success;
     }
   }
@@ -196,6 +196,9 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      var undoScope = TimelineEngine.BeginUndoScope(doc, "建立 ProductMotion 机械传动");
+      try
+      {
       TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var driver = TimelineEngine.Model(doc).SelectedTrack;
       if (driver == null)
@@ -294,6 +297,11 @@ namespace ProductMotionTimeline.Commands
         direction)
         ? Result.Success
         : Result.Failure;
+      }
+      finally
+      {
+        undoScope.Dispose();
+      }
     }
 
     private static int GetPositiveInteger(string prompt, int defaultValue)
@@ -311,6 +319,9 @@ namespace ProductMotionTimeline.Commands
   {
     internal static Result Run(RhinoDoc doc, MechanicalConstraintType type)
     {
+      var undoScope = TimelineEngine.BeginUndoScope(doc, "快速建立 ProductMotion 齿轮传动");
+      try
+      {
       TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var driverInstance = TrackFactory.GetOrCreateGroupPart(
         doc,
@@ -422,6 +433,11 @@ namespace ProductMotionTimeline.Commands
       RhinoApp.WriteLine(
         "ProductMotion：快速传动已完成。只需给主动件设置关键帧；普通Gumball绕轴旋转和连续转角都可驱动从动件。");
       return Result.Success;
+      }
+      finally
+      {
+        undoScope.Dispose();
+      }
     }
 
     private static int GetPositiveInteger(string prompt, int defaultValue)
@@ -471,6 +487,9 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      var undoScope = TimelineEngine.BeginUndoScope(doc, "建立 ProductMotion 同轴传动网");
+      try
+      {
       TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var model = TimelineEngine.Model(doc);
       var driver = model.SelectedTrack;
@@ -575,6 +594,11 @@ namespace ProductMotionTimeline.Commands
         "ProductMotion：已建立 {0} 条同轴刚性关系；上下齿轮角速度相同，后级传动仍读取各自齿数。",
         successCount);
       return successCount > 0 ? Result.Success : Result.Nothing;
+      }
+      finally
+      {
+        undoScope.Dispose();
+      }
     }
   }
 
@@ -584,6 +608,9 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
+      var undoScope = TimelineEngine.BeginUndoScope(doc, "建立 ProductMotion 一主多从/串联传动");
+      try
+      {
       TimelineEngine.RepairNonAffineTrackTransforms(doc);
       var model = TimelineEngine.Model(doc);
       var driver = model.SelectedTrack;
@@ -791,6 +818,11 @@ namespace ProductMotionTimeline.Commands
         successCount,
         warningCount);
       return successCount > 0 ? Result.Success : Result.Nothing;
+      }
+      finally
+      {
+        undoScope.Dispose();
+      }
     }
 
     private static double AxisComponent(Vector3d vector, RotationAxis axis)

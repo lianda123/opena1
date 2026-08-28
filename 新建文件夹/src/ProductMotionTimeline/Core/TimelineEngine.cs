@@ -29,6 +29,16 @@ namespace ProductMotionTimeline.Core
       return TimelineRepository.Get(doc);
     }
 
+    public static IDisposable BeginUndoScope(RhinoDoc doc, string description)
+    {
+      return TimelineUndoManager.Begin(doc, description);
+    }
+
+    internal static void NotifyTimelineRestored(RhinoDoc doc)
+    {
+      Notify();
+    }
+
     public static AnimationTrack AddTrack(RhinoDoc doc, InstanceObject instance)
     {
       if (doc == null || instance == null)
@@ -62,10 +72,13 @@ namespace ProductMotionTimeline.Core
         Interpolation = InterpolationMode.Smooth
       });
 
-      model.Tracks.Add(track);
-      model.SelectedTrackId = track.Id;
-      SetTrackTag(doc, instance.Id, track.Id);
-      SaveAndNotify(doc);
+      using (TimelineUndoManager.Begin(doc, "添加 ProductMotion 动画轨道"))
+      {
+        model.Tracks.Add(track);
+        model.SelectedTrackId = track.Id;
+        SetTrackTag(doc, instance.Id, track.Id);
+        SaveAndNotify(doc);
+      }
       return track;
     }
 
@@ -179,8 +192,11 @@ namespace ProductMotionTimeline.Core
         return false;
       }
 
-      track.UpsertKey(model.CurrentFrame, pose, interpolation);
-      SaveAndNotify(doc);
+      using (TimelineUndoManager.Begin(doc, "插入/更新 ProductMotion 关键帧"))
+      {
+        track.UpsertKey(model.CurrentFrame, pose, interpolation);
+        SaveAndNotify(doc);
+      }
       return true;
     }
 
@@ -188,11 +204,15 @@ namespace ProductMotionTimeline.Core
     {
       var model = Model(doc);
       var track = model.SelectedTrack;
-      if (track == null || !track.DeleteKey(model.CurrentFrame))
+      if (track == null || track.FindKey(model.CurrentFrame) == null)
         return false;
-      TimelineRepository.Save(doc);
-      ApplyFrame(doc, model.CurrentFrame, false);
-      Notify();
+      using (TimelineUndoManager.Begin(doc, "删除 ProductMotion 关键帧"))
+      {
+        track.DeleteKey(model.CurrentFrame);
+        TimelineRepository.Save(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+        Notify();
+      }
       return true;
     }
 
@@ -219,8 +239,11 @@ namespace ProductMotionTimeline.Core
       var track = model.SelectedTrack;
       if (track == null)
         return false;
-      track.UpsertKey(model.CurrentFrame, _keyClipboard.Pose, _keyClipboard.Interpolation);
-      SaveAndNotify(doc);
+      using (TimelineUndoManager.Begin(doc, "粘贴 ProductMotion 关键帧"))
+      {
+        track.UpsertKey(model.CurrentFrame, _keyClipboard.Pose, _keyClipboard.Interpolation);
+        SaveAndNotify(doc);
+      }
       return true;
     }
 
@@ -290,38 +313,41 @@ namespace ProductMotionTimeline.Core
         return result;
       }
 
-      var sourceStart = _keyClipboardGroups.SelectMany(group => group.Keys).Min(key => key.Frame);
-      var maxFrame = model.EndFrame;
-      for (var targetIndex = 0; targetIndex < targets.Count; targetIndex++)
+      using (TimelineUndoManager.Begin(doc, "批量粘贴 ProductMotion 关键帧"))
       {
-        var target = targets[targetIndex];
-        var source = _keyClipboardGroups.Count == 1
-          ? _keyClipboardGroups[0]
-          : _keyClipboardGroups[targetIndex];
-        foreach (var sourceKey in source.Keys)
+        var sourceStart = _keyClipboardGroups.SelectMany(group => group.Keys).Min(key => key.Frame);
+        var maxFrame = model.EndFrame;
+        for (var targetIndex = 0; targetIndex < targets.Count; targetIndex++)
         {
-          var targetFrame = model.CurrentFrame + sourceKey.Frame - sourceStart;
-          if (targetFrame < model.StartFrame)
-            continue;
-          maxFrame = Math.Max(maxFrame, targetFrame);
-          var existing = target.FindKey(targetFrame);
-          if (existing != null)
-            result.OverwrittenCount++;
-          target.UpsertKey(targetFrame, sourceKey.Pose, sourceKey.Interpolation);
-          result.PastedCount++;
-          result.PastedSelections.Add(new KeySelection
+          var target = targets[targetIndex];
+          var source = _keyClipboardGroups.Count == 1
+            ? _keyClipboardGroups[0]
+            : _keyClipboardGroups[targetIndex];
+          foreach (var sourceKey in source.Keys)
           {
-            TrackId = target.Id,
-            Frame = targetFrame
-          });
+            var targetFrame = model.CurrentFrame + sourceKey.Frame - sourceStart;
+            if (targetFrame < model.StartFrame)
+              continue;
+            maxFrame = Math.Max(maxFrame, targetFrame);
+            var existing = target.FindKey(targetFrame);
+            if (existing != null)
+              result.OverwrittenCount++;
+            target.UpsertKey(targetFrame, sourceKey.Pose, sourceKey.Interpolation);
+            result.PastedCount++;
+            result.PastedSelections.Add(new KeySelection
+            {
+              TrackId = target.Id,
+              Frame = targetFrame
+            });
+          }
         }
-      }
 
-      if (result.PastedCount > 0)
-      {
-        model.EndFrame = maxFrame;
-        SaveAndNotify(doc);
-        ApplyFrame(doc, model.CurrentFrame, false);
+        if (result.PastedCount > 0)
+        {
+          model.EndFrame = maxFrame;
+          SaveAndNotify(doc);
+          ApplyFrame(doc, model.CurrentFrame, false);
+        }
       }
       return result;
     }
@@ -365,41 +391,44 @@ namespace ProductMotionTimeline.Core
         Math.Min(model.EndFrame - maximumFrame, requestedDelta));
       result.AppliedDelta = delta;
 
-      foreach (var trackGroup in valid.GroupBy(selection => selection.TrackId))
+      using (TimelineUndoManager.Begin(doc, "整体移动 ProductMotion 关键帧"))
       {
-        var track = model.FindTrack(trackGroup.Key);
-        var moving = trackGroup
-          .Select(selection => new
-          {
-            Selection = selection,
-            Key = track.FindKey(selection.Frame)
-          })
-          .Where(item => item.Key != null)
-          .ToList();
-        var movingKeys = new HashSet<Keyframe>(moving.Select(item => item.Key));
-        var targetFrames = new HashSet<int>(moving.Select(item => item.Selection.Frame + delta));
-        var collisions = track.Keys
-          .Where(key => targetFrames.Contains(key.Frame) && !movingKeys.Contains(key))
-          .ToList();
-        foreach (var collision in collisions)
-          track.Keys.Remove(collision);
-        result.OverwrittenCount += collisions.Count;
-
-        foreach (var item in moving)
+        foreach (var trackGroup in valid.GroupBy(selection => selection.TrackId))
         {
-          item.Key.Frame = item.Selection.Frame + delta;
-          result.MovedSelections.Add(new KeySelection
-          {
-            TrackId = track.Id,
-            Frame = item.Key.Frame
-          });
-          result.MovedCount++;
-        }
-        track.SortKeys();
-      }
+          var track = model.FindTrack(trackGroup.Key);
+          var moving = trackGroup
+            .Select(selection => new
+            {
+              Selection = selection,
+              Key = track.FindKey(selection.Frame)
+            })
+            .Where(item => item.Key != null)
+            .ToList();
+          var movingKeys = new HashSet<Keyframe>(moving.Select(item => item.Key));
+          var targetFrames = new HashSet<int>(moving.Select(item => item.Selection.Frame + delta));
+          var collisions = track.Keys
+            .Where(key => targetFrames.Contains(key.Frame) && !movingKeys.Contains(key))
+            .ToList();
+          foreach (var collision in collisions)
+            track.Keys.Remove(collision);
+          result.OverwrittenCount += collisions.Count;
 
-      TimelineRepository.Save(doc);
-      Notify();
+          foreach (var item in moving)
+          {
+            item.Key.Frame = item.Selection.Frame + delta;
+            result.MovedSelections.Add(new KeySelection
+            {
+              TrackId = track.Id,
+              Frame = item.Key.Frame
+            });
+            result.MovedCount++;
+          }
+          track.SortKeys();
+        }
+
+        TimelineRepository.Save(doc);
+        Notify();
+      }
       return result;
     }
 
@@ -579,24 +608,27 @@ namespace ProductMotionTimeline.Core
         return false;
       }
 
-      model.Constraints.RemoveAll(item => item.DrivenTrackId == drivenTrackId);
-      model.Constraints.Add(new MechanicalConstraint
+      using (TimelineUndoManager.Begin(doc, "建立 ProductMotion 机械传动"))
       {
-        DriverTrackId = driverTrackId,
-        DrivenTrackId = drivenTrackId,
-        Type = type,
-        DriverTeeth = driverTeeth,
-        DrivenTeeth = drivenTeeth,
-        Module = Math.Max(0.0, module),
-        PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees),
-        PhaseOffsetDegrees = phaseOffsetDegrees,
-        PhaseOffsetDistance = phaseOffsetDistance,
-        DrivenLinearAxis = drivenLinearAxis,
-        DirectionMultiplier = directionMultiplier < 0.0 ? -1.0 : 1.0,
-        Enabled = true
-      });
-      SaveAndNotify(doc);
-      doc.Views.Redraw();
+        model.Constraints.RemoveAll(item => item.DrivenTrackId == drivenTrackId);
+        model.Constraints.Add(new MechanicalConstraint
+        {
+          DriverTrackId = driverTrackId,
+          DrivenTrackId = drivenTrackId,
+          Type = type,
+          DriverTeeth = driverTeeth,
+          DrivenTeeth = drivenTeeth,
+          Module = Math.Max(0.0, module),
+          PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees),
+          PhaseOffsetDegrees = phaseOffsetDegrees,
+          PhaseOffsetDistance = phaseOffsetDistance,
+          DrivenLinearAxis = drivenLinearAxis,
+          DirectionMultiplier = directionMultiplier < 0.0 ? -1.0 : 1.0,
+          Enabled = true
+        });
+        SaveAndNotify(doc);
+        doc.Views.Redraw();
+      }
       RhinoApp.WriteLine(
         "ProductMotion：已建立“{0}”→“{1}”传动，角速度比 {2:0.###}；绑定过程未移动零件。",
         driver.Name,
@@ -622,28 +654,34 @@ namespace ProductMotionTimeline.Core
       var constraint = model.Constraints.FirstOrDefault(item => item.Id == constraintId);
       if (constraint == null || driverTeeth < 1 || drivenTeeth < 1 || module < 0.0)
         return false;
-      constraint.Type = type;
-      constraint.DriverTeeth = driverTeeth;
-      constraint.DrivenTeeth = drivenTeeth;
-      constraint.Module = module;
-      constraint.PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees);
-      constraint.PhaseOffsetDegrees = phaseOffsetDegrees;
-      constraint.PhaseOffsetDistance = phaseOffsetDistance;
-      constraint.DrivenLinearAxis = drivenLinearAxis;
-      constraint.DirectionMultiplier = directionMultiplier < 0.0 ? -1.0 : 1.0;
-      SaveAndNotify(doc);
-      ApplyFrame(doc, model.CurrentFrame, false);
+      using (TimelineUndoManager.Begin(doc, "编辑 ProductMotion 机械传动"))
+      {
+        constraint.Type = type;
+        constraint.DriverTeeth = driverTeeth;
+        constraint.DrivenTeeth = drivenTeeth;
+        constraint.Module = module;
+        constraint.PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees);
+        constraint.PhaseOffsetDegrees = phaseOffsetDegrees;
+        constraint.PhaseOffsetDistance = phaseOffsetDistance;
+        constraint.DrivenLinearAxis = drivenLinearAxis;
+        constraint.DirectionMultiplier = directionMultiplier < 0.0 ? -1.0 : 1.0;
+        SaveAndNotify(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+      }
       return true;
     }
 
     public static bool DeleteMechanicalConstraint(RhinoDoc doc, Guid constraintId)
     {
       var model = Model(doc);
-      var removed = model.Constraints.RemoveAll(item => item.Id == constraintId) > 0;
-      if (!removed)
+      if (model.Constraints.All(item => item.Id != constraintId))
         return false;
-      SaveAndNotify(doc);
-      ApplyFrame(doc, model.CurrentFrame, false);
+      using (TimelineUndoManager.Begin(doc, "删除 ProductMotion 机械传动"))
+      {
+        model.Constraints.RemoveAll(item => item.Id == constraintId);
+        SaveAndNotify(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+      }
       return true;
     }
 
@@ -869,11 +907,14 @@ namespace ProductMotionTimeline.Core
     public static bool DeleteConstraintForDriven(RhinoDoc doc, Guid drivenTrackId)
     {
       var model = Model(doc);
-      var removed = model.Constraints.RemoveAll(item => item.DrivenTrackId == drivenTrackId) > 0;
-      if (!removed)
+      if (model.Constraints.All(item => item.DrivenTrackId != drivenTrackId))
         return false;
-      SaveAndNotify(doc);
-      ApplyFrame(doc, model.CurrentFrame, false);
+      using (TimelineUndoManager.Begin(doc, "删除 ProductMotion 机械传动"))
+      {
+        model.Constraints.RemoveAll(item => item.DrivenTrackId == drivenTrackId);
+        SaveAndNotify(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+      }
       return true;
     }
 
@@ -908,38 +949,47 @@ namespace ProductMotionTimeline.Core
     {
       if (doc == null)
         return 0;
+      var model = Model(doc);
+      var needsRepair = model.OrderedTracks().Any(track =>
+        !AnimationMath.HasExactAffineBottomRow(track.BaseTransform) ||
+        !AnimationMath.HasExactAffineBottomRow(track.ParentBindTransform) ||
+        !AnimationMath.HasExactAffineBottomRow(track.PivotTransform) ||
+        (ResolveInstance(doc, track) != null &&
+         !AnimationMath.HasExactAffineBottomRow(ResolveInstance(doc, track).InstanceXform)));
+      if (!needsRepair)
+        return 0;
+
       var repaired = 0;
       var metadataRepaired = 0;
-      var model = Model(doc);
-      foreach (var track in model.OrderedTracks())
+      using (TimelineUndoManager.Begin(doc, "修复 ProductMotion 动画块变换"))
       {
-        if (!AnimationMath.HasExactAffineBottomRow(track.BaseTransform))
+        foreach (var track in model.OrderedTracks())
         {
-          track.BaseTransform = AnimationMath.SanitizeAffine(track.BaseTransform);
-          metadataRepaired++;
+          if (!AnimationMath.HasExactAffineBottomRow(track.BaseTransform))
+          {
+            track.BaseTransform = AnimationMath.SanitizeAffine(track.BaseTransform);
+            metadataRepaired++;
+          }
+          if (!AnimationMath.HasExactAffineBottomRow(track.ParentBindTransform))
+          {
+            track.ParentBindTransform = AnimationMath.SanitizeAffine(track.ParentBindTransform);
+            metadataRepaired++;
+          }
+          if (!AnimationMath.HasExactAffineBottomRow(track.PivotTransform))
+          {
+            track.PivotTransform = AnimationMath.SanitizeAffine(track.PivotTransform);
+            metadataRepaired++;
+          }
+          var instance = ResolveInstance(doc, track);
+          if (instance == null || AnimationMath.HasExactAffineBottomRow(instance.InstanceXform))
+            continue;
+          if (ReplaceInstanceTransform(
+            doc,
+            track,
+            instance,
+            AnimationMath.SanitizeAffine(instance.InstanceXform)))
+            repaired++;
         }
-        if (!AnimationMath.HasExactAffineBottomRow(track.ParentBindTransform))
-        {
-          track.ParentBindTransform = AnimationMath.SanitizeAffine(track.ParentBindTransform);
-          metadataRepaired++;
-        }
-        if (!AnimationMath.HasExactAffineBottomRow(track.PivotTransform))
-        {
-          track.PivotTransform = AnimationMath.SanitizeAffine(track.PivotTransform);
-          metadataRepaired++;
-        }
-        var instance = ResolveInstance(doc, track);
-        if (instance == null || AnimationMath.HasExactAffineBottomRow(instance.InstanceXform))
-          continue;
-        if (ReplaceInstanceTransform(
-          doc,
-          track,
-          instance,
-          AnimationMath.SanitizeAffine(instance.InstanceXform)))
-          repaired++;
-      }
-      if (repaired > 0 || metadataRepaired > 0)
-      {
         TimelineRepository.Save(doc);
         doc.Views.Redraw();
         Notify();
@@ -1058,10 +1108,14 @@ namespace ProductMotionTimeline.Core
       var key = track?.FindKey(model.CurrentFrame);
       if (track == null || key == null)
         return false;
-      track.RotationAxis = axis;
-      key.Pose.AxisAngleDegrees = angleDegrees;
-      TimelineRepository.Save(doc);
-      ApplyFrame(doc, model.CurrentFrame, false);
+      using (TimelineUndoManager.Begin(doc, "编辑 ProductMotion 关键帧旋转"))
+      {
+        track.RotationAxis = axis;
+        key.Pose.AxisAngleDegrees = angleDegrees;
+        TimelineRepository.Save(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+        Notify();
+      }
       return true;
     }
 
@@ -1080,13 +1134,17 @@ namespace ProductMotionTimeline.Core
       if (Math.Abs(scale.X) < 1e-6 || Math.Abs(scale.Y) < 1e-6 || Math.Abs(scale.Z) < 1e-6)
         return false;
 
-      track.RotationAxis = axis;
-      key.Pose.Translation = translation;
-      key.Pose.Scale = scale;
-      if (model.ConstraintForDriven(track.Id) == null)
-        key.Pose.AxisAngleDegrees = angleDegrees;
-      TimelineRepository.Save(doc);
-      ApplyFrame(doc, model.CurrentFrame, false);
+      using (TimelineUndoManager.Begin(doc, "编辑 ProductMotion 关键帧属性"))
+      {
+        track.RotationAxis = axis;
+        key.Pose.Translation = translation;
+        key.Pose.Scale = scale;
+        if (model.ConstraintForDriven(track.Id) == null)
+          key.Pose.AxisAngleDegrees = angleDegrees;
+        TimelineRepository.Save(doc);
+        ApplyFrame(doc, model.CurrentFrame, false);
+        Notify();
+      }
       return true;
     }
 
@@ -1098,9 +1156,12 @@ namespace ProductMotionTimeline.Core
       var key = model.SelectedTrack?.FindKey(model.CurrentFrame);
       if (key == null)
         return false;
-      key.Interpolation = interpolation;
-      TimelineRepository.Save(doc);
-      Notify();
+      using (TimelineUndoManager.Begin(doc, "编辑 ProductMotion 关键帧插值"))
+      {
+        key.Interpolation = interpolation;
+        TimelineRepository.Save(doc);
+        Notify();
+      }
       return true;
     }
 
@@ -1275,18 +1336,14 @@ namespace ProductMotionTimeline.Core
     {
       target = AnimationMath.SanitizeAffine(target);
       var wasSelected = instance.IsSelected(false) > 0;
-      var attributes = instance.Attributes.Duplicate();
-      var definition = instance.InstanceDefinition;
-      if (definition == null)
+      Transform currentInverse;
+      var current = AnimationMath.SanitizeAffine(instance.InstanceXform);
+      if (!current.TryGetInverse(out currentInverse))
         return false;
-      var newId = doc.Objects.AddInstanceObject(definition.Index, target, attributes);
+      var delta = AnimationMath.SanitizeAffine(target * currentInverse);
+      var newId = doc.Objects.Transform(instance.Id, delta, true);
       if (newId == Guid.Empty)
         return false;
-      if (!doc.Objects.Delete(instance.Id, true))
-      {
-        doc.Objects.Delete(newId, true);
-        return false;
-      }
       track.ObjectId = newId;
       if (wasSelected)
       {

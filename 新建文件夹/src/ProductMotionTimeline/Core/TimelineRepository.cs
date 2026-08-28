@@ -16,11 +16,13 @@ namespace ProductMotionTimeline.Core
     public static void Initialize()
     {
       RhinoDoc.CloseDocument += OnCloseDocument;
+      RhinoDoc.BeginSaveDocument += OnBeginSaveDocument;
     }
 
     public static void Shutdown()
     {
       RhinoDoc.CloseDocument -= OnCloseDocument;
+      RhinoDoc.BeginSaveDocument -= OnBeginSaveDocument;
       Documents.Clear();
     }
 
@@ -43,68 +45,10 @@ namespace ProductMotionTimeline.Core
     {
       if (doc == null)
         return;
-      var model = Get(doc);
-      if (model == null)
-        return;
 
       try
       {
-        using (var stream = new MemoryStream())
-        using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
-        {
-          writer.Write(Magic);
-          writer.Write(TimelineDocument.DataVersion);
-          writer.Write(model.StartFrame);
-          writer.Write(model.EndFrame);
-          writer.Write(model.CurrentFrame);
-          writer.Write(model.FramesPerSecond);
-          writer.Write(model.LoopPlayback);
-          WriteGuid(writer, model.SelectedTrackId);
-          writer.Write((int)model.TemplatePlacement);
-          writer.Write(model.TemplateGapFrames);
-          writer.Write(model.Tracks.Count);
-
-          foreach (var track in model.Tracks)
-          {
-            WriteGuid(writer, track.Id);
-            WriteGuid(writer, track.ObjectId);
-            writer.Write(track.Name ?? string.Empty);
-            writer.Write(track.Enabled);
-            writer.Write((int)track.RotationAxis);
-            WriteTransform(writer, track.BaseTransform);
-            WriteTransform(writer, track.PivotTransform);
-            WriteGuid(writer, track.ParentTrackId);
-            WriteTransform(writer, track.ParentBindTransform);
-            writer.Write(track.Keys.Count);
-            foreach (var key in track.Keys)
-            {
-              writer.Write(key.Frame);
-              writer.Write((int)key.Interpolation);
-              WritePose(writer, key.Pose);
-            }
-          }
-
-          writer.Write(model.Constraints.Count);
-          foreach (var constraint in model.Constraints)
-          {
-            WriteGuid(writer, constraint.Id);
-            WriteGuid(writer, constraint.DriverTrackId);
-            WriteGuid(writer, constraint.DrivenTrackId);
-            writer.Write((int)constraint.Type);
-            writer.Write(constraint.DriverTeeth);
-            writer.Write(constraint.DrivenTeeth);
-            writer.Write(constraint.PhaseOffsetDegrees);
-            writer.Write(constraint.Enabled);
-            writer.Write(constraint.Module);
-            writer.Write(constraint.PressureAngleDegrees);
-            writer.Write(constraint.PhaseOffsetDistance);
-            writer.Write((int)constraint.DrivenLinearAxis);
-            writer.Write(constraint.DirectionMultiplier);
-          }
-
-          writer.Flush();
-          doc.Strings.SetString(DocumentKey, Convert.ToBase64String(stream.ToArray()));
-        }
+        doc.Strings.SetString(DocumentKey, Capture(doc));
       }
       catch (Exception exception)
       {
@@ -112,11 +56,91 @@ namespace ProductMotionTimeline.Core
       }
     }
 
+    internal static string Capture(RhinoDoc doc)
+    {
+      var model = Get(doc);
+      if (model == null)
+        return string.Empty;
+
+      using (var stream = new MemoryStream())
+      using (var writer = new BinaryWriter(stream, Encoding.UTF8, true))
+      {
+        writer.Write(Magic);
+        writer.Write(TimelineDocument.DataVersion);
+        writer.Write(model.StartFrame);
+        writer.Write(model.EndFrame);
+        writer.Write(model.CurrentFrame);
+        writer.Write(model.FramesPerSecond);
+        writer.Write(model.LoopPlayback);
+        WriteGuid(writer, model.SelectedTrackId);
+        writer.Write((int)model.TemplatePlacement);
+        writer.Write(model.TemplateGapFrames);
+        writer.Write(model.Tracks.Count);
+
+        foreach (var track in model.Tracks)
+        {
+          WriteGuid(writer, track.Id);
+          WriteGuid(writer, track.ObjectId);
+          writer.Write(track.Name ?? string.Empty);
+          writer.Write(track.Enabled);
+          writer.Write((int)track.RotationAxis);
+          WriteTransform(writer, track.BaseTransform);
+          WriteTransform(writer, track.PivotTransform);
+          WriteGuid(writer, track.ParentTrackId);
+          WriteTransform(writer, track.ParentBindTransform);
+          writer.Write(track.Keys.Count);
+          foreach (var key in track.Keys)
+          {
+            writer.Write(key.Frame);
+            writer.Write((int)key.Interpolation);
+            WritePose(writer, key.Pose);
+          }
+        }
+
+        writer.Write(model.Constraints.Count);
+        foreach (var constraint in model.Constraints)
+        {
+          WriteGuid(writer, constraint.Id);
+          WriteGuid(writer, constraint.DriverTrackId);
+          WriteGuid(writer, constraint.DrivenTrackId);
+          writer.Write((int)constraint.Type);
+          writer.Write(constraint.DriverTeeth);
+          writer.Write(constraint.DrivenTeeth);
+          writer.Write(constraint.PhaseOffsetDegrees);
+          writer.Write(constraint.Enabled);
+          writer.Write(constraint.Module);
+          writer.Write(constraint.PressureAngleDegrees);
+          writer.Write(constraint.PhaseOffsetDistance);
+          writer.Write((int)constraint.DrivenLinearAxis);
+          writer.Write(constraint.DirectionMultiplier);
+        }
+
+        writer.Flush();
+        return Convert.ToBase64String(stream.ToArray());
+      }
+    }
+
+    internal static bool Restore(RhinoDoc doc, string encoded)
+    {
+      if (doc == null || string.IsNullOrWhiteSpace(encoded))
+        return false;
+      var model = Deserialize(encoded, false);
+      if (model == null)
+        return false;
+      model.ClampSettings();
+      Documents[doc.RuntimeSerialNumber] = model;
+      return true;
+    }
+
     private static TimelineDocument Load(RhinoDoc doc)
+    {
+      return Deserialize(doc.Strings.GetValue(DocumentKey), true);
+    }
+
+    private static TimelineDocument Deserialize(string encoded, bool reportFailure)
     {
       try
       {
-        var encoded = doc.Strings.GetValue(DocumentKey);
         if (string.IsNullOrWhiteSpace(encoded))
           return null;
 
@@ -212,9 +236,16 @@ namespace ProductMotionTimeline.Core
       }
       catch (Exception exception)
       {
-        RhinoApp.WriteLine("ProductMotion：读取动画数据失败，将使用空时间轴：{0}", exception.Message);
+        if (reportFailure)
+          RhinoApp.WriteLine("ProductMotion：读取动画数据失败，将使用空时间轴：{0}", exception.Message);
         return null;
       }
+    }
+
+    private static void OnBeginSaveDocument(object sender, DocumentSaveEventArgs e)
+    {
+      if (e.Document != null && Documents.ContainsKey(e.Document.RuntimeSerialNumber))
+        Save(e.Document);
     }
 
     private static void OnCloseDocument(object sender, DocumentEventArgs e)
