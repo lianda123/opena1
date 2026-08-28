@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.12."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.13."""
 
 from pathlib import Path
 import re
@@ -164,12 +164,21 @@ def main():
 
     for token in [
         "平滑：缓入缓出", "线性：匀速", "阶梯：保持后跳变",
-        "SelectedIndexChanged", "PMTExternalGear", "PMTInternalGear", "PMTBelt",
-        "PMTBindMultiple", "PMTSameShaft", "同轴复合齿轮", "PMTGearFactory", "接在全部动作末尾",
+        "SelectedIndexChanged", "PMTBindMultiple", "一主多从/串联",
+        "PMTGearFactory", "接在全部动作末尾",
         "全选当前轨道", "复制所选", "粘贴到目标轨道/帧", "关键帧属性",
         "移动 X", "旋转角°", "缩放 X"
     ]:
         assert token in panel, token
+    mechanical_tools = panel.split("var mechanicalTools", 1)[1]
+    mechanical_tools = mechanical_tools.split("var constraintSelectionTools", 1)[0]
+    for token in ["一主多从/串联", "PMTBindMultiple", "编辑选中", "检查全部", "删除选中"]:
+        assert token in mechanical_tools, token
+    for token in [
+        "外啮合齿轮", "内啮合齿轮", "皮带传动", "同轴复合齿轮",
+        "PMTExternalGear", "PMTInternalGear", "PMTBelt", "PMTSameShaft"
+    ]:
+        assert token not in mechanical_tools, token
     for token in ["_smoothSegmentPen", "_linearSegmentPen", "_constantSegmentPen"]:
         assert token in canvas, token
     for token in [
@@ -268,7 +277,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.12</Version>" in project
+    assert "<Version>0.4.13</Version>" in project
 
     for token in [
         "AddCustomUndoEvent", "BeginUndoRecord", "EndUndoRecord",
@@ -307,12 +316,13 @@ def main():
         "双向联动", "整体移动", "任意位置覆盖粘贴", "绑定过程未移动零件",
         "关键帧撤回", "齿轮撤回不复制", "标准 Rhino 标签面板",
         "不再创建、移动或强制停靠到窗口底部", "占满侧边面板",
-        "删除 260–600px 限制", "内部黑色时间轴画布", "大块白色空白"
+        "删除 260–600px 限制", "黑色时间轴画布", "大块白色空白",
+        "机械约束栏移除", "统一选择", "旧单类型命令只在底层保留兼容"
     ]:
         assert phrase in readme, phrase
     assert "PMTResetTimelineLayout" not in readme
 
-    print("ProductMotion Timeline 0.4.12 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.13 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

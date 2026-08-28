@@ -148,10 +148,6 @@ namespace ProductMotionTimeline.UI
 
       var mechanicalTools = Horizontal(
         new Label { Text = "机械约束" },
-        Button("外啮合齿轮", () => RhinoApp.RunScript("_PMTExternalGear", false)),
-        Button("内啮合齿轮", () => RhinoApp.RunScript("_PMTInternalGear", false)),
-        Button("皮带传动", () => RhinoApp.RunScript("_PMTBelt", false)),
-        Button("同轴复合齿轮", () => RhinoApp.RunScript("_PMTSameShaft", false)),
         Button("一主多从/串联", () => RhinoApp.RunScript("_PMTBindMultiple", false)),
         Button("编辑选中", () => RhinoApp.RunScript("_PMTEditMechanical", false)),
         Button("检查全部", () => RhinoApp.RunScript("_PMTValidateMechanical", false)),
