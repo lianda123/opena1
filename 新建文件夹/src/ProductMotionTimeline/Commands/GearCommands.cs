@@ -92,7 +92,7 @@ namespace ProductMotionTimeline.Commands
       if (track == null)
         return Result.Failure;
       TimelineEngine.SetPivotPlane(doc, track, plane);
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.Open();
       RhinoApp.WriteLine(
         "ProductMotion：已生成 {0}，并自动建立时间轴轨道。{1}{2}",
         name,

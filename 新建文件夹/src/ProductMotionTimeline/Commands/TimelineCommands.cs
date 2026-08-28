@@ -19,8 +19,18 @@ namespace ProductMotionTimeline.Commands
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
       TimelineEngine.RepairNonAffineTrackTransforms(doc);
-      TimelineDocking.OpenAtBottom();
+      TimelineDocking.Open();
       return Result.Success;
+    }
+  }
+
+  public sealed class ResetTimelineLayoutCommand : Command
+  {
+    public override string EnglishName => "PMTResetTimelineLayout";
+
+    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
+    {
+      return TimelineDocking.ResetToBottom() ? Result.Success : Result.Failure;
     }
   }
 
@@ -34,7 +44,7 @@ namespace ProductMotionTimeline.Commands
       if (instance == null)
         return Result.Cancel;
       TimelineEngine.AddTrack(doc, instance);
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.Open();
       return Result.Success;
     }
   }
@@ -49,7 +59,7 @@ namespace ProductMotionTimeline.Commands
       if (instance == null)
         return Result.Cancel;
       TimelineEngine.AddTrack(doc, instance);
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.Open();
       RhinoApp.WriteLine("ProductMotion：已把所选组内零件建立为独立动画轨道，可继续设置父级或关键帧。");
       return Result.Success;
     }
@@ -429,7 +439,7 @@ namespace ProductMotionTimeline.Commands
       var validation = TimelineEngine.ValidateMechanicalConstraint(doc, added);
       RhinoApp.WriteLine("ProductMotion：啮合检查：{0}。", validation.Message);
 
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.Open();
       RhinoApp.WriteLine(
         "ProductMotion：快速传动已完成。只需给主动件设置关键帧；普通Gumball绕轴旋转和连续转角都可驱动从动件。");
       return Result.Success;
@@ -589,7 +599,7 @@ namespace ProductMotionTimeline.Commands
       }
 
       TimelineEngine.SelectTrack(doc, driver.Id);
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.Open();
       RhinoApp.WriteLine(
         "ProductMotion：已建立 {0} 条同轴刚性关系；上下齿轮角速度相同，后级传动仍读取各自齿数。",
         successCount);
@@ -811,7 +821,7 @@ namespace ProductMotionTimeline.Commands
       }
 
       TimelineEngine.SelectTrack(doc, driver.Id);
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.Open();
       RhinoApp.WriteLine(
         "ProductMotion：已从“{0}”建立 {1} 条分支传动（{2} 条需要检查）；这些从动件仍可继续驱动下一级。",
         driver.Name,
@@ -1167,7 +1177,7 @@ namespace ProductMotionTimeline.Commands
 
     protected override Result RunCommand(RhinoDoc doc, RunMode mode)
     {
-      Panels.OpenPanel(TimelinePanel.PanelId);
+      TimelineDocking.Open();
       TimelinePanel.RequestTogglePlayback();
       return Result.Success;
     }

@@ -24,7 +24,7 @@ namespace ProductMotionTimeline
     protected override LoadReturnCode OnLoad(ref string errorMessage)
     {
       TimelineRepository.Initialize();
-      Panels.RegisterPanel(this, typeof(TimelinePanel), "产品动态时间轴", null);
+      TimelineDocking.Initialize(this);
       _mechanicalConduit = new MechanicalConstraintConduit { Enabled = true };
       RhinoDoc.SelectObjects += OnRhinoObjectsSelected;
       return LoadReturnCode.Success;

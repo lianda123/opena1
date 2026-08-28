@@ -58,6 +58,7 @@ namespace ProductMotionTimeline.UI
       ExpandContentHeight = false
     };
     private bool _suppress;
+    private int _responsiveTrackHeight = 160;
 
     public TimelinePanel()
     {
@@ -236,6 +237,28 @@ namespace ProductMotionTimeline.UI
       _constraints.SelectedIndexChanged += (sender, args) => ConstraintSelectionChanged();
       _templatePlacement.SelectedIndexChanged += (sender, args) => UpdateTemplatePlacement();
       _templateGap.ValueChanged += (sender, args) => UpdateTemplatePlacement();
+      SizeChanged += (sender, args) => UpdateResponsiveTrackHeight();
+      Shown += (sender, args) => UpdateResponsiveTrackHeight();
+    }
+
+    private void UpdateResponsiveTrackHeight()
+    {
+      var width = ClientSize.Width;
+      var height = ClientSize.Height;
+      if (width <= 0 || height <= 0)
+        return;
+
+      var sideLayout = height > width + 120;
+      var desired = sideLayout
+        ? Math.Max(260, Math.Min(600, height - 320))
+        : 160;
+      if (desired == _responsiveTrackHeight)
+        return;
+
+      _responsiveTrackHeight = desired;
+      _trackScroll.Height = desired;
+      _trackScroll.UpdateScrollSizes();
+      _pageScroll.UpdateScrollSizes();
     }
 
     private void ScrollTrackList(object sender, MouseEventArgs e)
