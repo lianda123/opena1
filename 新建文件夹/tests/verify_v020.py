@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.10."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.11."""
 
 from pathlib import Path
 import re
@@ -214,11 +214,15 @@ def main():
     assert '<Reference Include="System.Windows.Forms" />' not in project
     for token in [
         "_trackScroll", "_pageScroll", "ExpandContentHeight = false",
-        "_canvas.MouseWheel += ScrollTrackList", "Height = 160",
-        "UpdateResponsiveTrackHeight", "height > width + 120",
-        "Math.Max(260, Math.Min(600, height - 320))"
+        "ExpandContentHeight = true", "_canvas.MouseWheel += ScrollTrackList",
+        "Height = 160", "new TableCell(_trackScroll, true)", "ScaleHeight = true"
     ]:
         assert token in panel, token
+    for token in [
+        "UpdateResponsiveTrackHeight", "height > width + 120",
+        "Math.Max(260", "Math.Min(600", "_responsiveTrackHeight"
+    ]:
+        assert token not in panel, token
 
     for token in ["TryDetect", "TryGetCircle", "IsCoaxial", "MatchingCircularEdges"]:
         assert token in axis_detector, token
@@ -257,7 +261,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.10</Version>" in project
+    assert "<Version>0.4.11</Version>" in project
 
     for token in [
         "AddCustomUndoEvent", "BeginUndoRecord", "EndUndoRecord",
@@ -295,12 +299,13 @@ def main():
         "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮",
         "双向联动", "整体移动", "任意位置覆盖粘贴", "绑定过程未移动零件",
         "关键帧撤回", "齿轮撤回不复制", "标准 Rhino 标签面板",
-        "不再创建、移动或强制停靠到窗口底部", "260–600px"
+        "不再创建、移动或强制停靠到窗口底部", "占满侧边面板",
+        "删除 260–600px 限制"
     ]:
         assert phrase in readme, phrase
     assert "PMTResetTimelineLayout" not in readme
 
-    print("ProductMotion Timeline 0.4.10 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.11 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

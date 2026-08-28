@@ -55,10 +55,9 @@ namespace ProductMotionTimeline.UI
     {
       Border = BorderType.None,
       ExpandContentWidth = true,
-      ExpandContentHeight = false
+      ExpandContentHeight = true
     };
     private bool _suppress;
-    private int _responsiveTrackHeight = 160;
 
     public TimelinePanel()
     {
@@ -190,7 +189,7 @@ namespace ProductMotionTimeline.UI
       page.Rows.Add(new TableRow(transport));
       page.Rows.Add(new TableRow(keyTools));
       page.Rows.Add(new TableRow(settings));
-      page.Rows.Add(new TableRow(_trackScroll));
+      page.Rows.Add(new TableRow(new TableCell(_trackScroll, true)) { ScaleHeight = true });
       page.Rows.Add(new TableRow(trackTools));
       page.Rows.Add(new TableRow(keyEditor));
       page.Rows.Add(new TableRow(hierarchyTools));
@@ -201,7 +200,6 @@ namespace ProductMotionTimeline.UI
       page.Rows.Add(new TableRow(motionTemplates));
       page.Rows.Add(new TableRow(_relationship));
       page.Rows.Add(new TableRow(_status));
-      page.Rows.Add(new TableRow { ScaleHeight = true });
       _pageScroll.Content = page;
       Content = _pageScroll;
     }
@@ -237,28 +235,6 @@ namespace ProductMotionTimeline.UI
       _constraints.SelectedIndexChanged += (sender, args) => ConstraintSelectionChanged();
       _templatePlacement.SelectedIndexChanged += (sender, args) => UpdateTemplatePlacement();
       _templateGap.ValueChanged += (sender, args) => UpdateTemplatePlacement();
-      SizeChanged += (sender, args) => UpdateResponsiveTrackHeight();
-      Shown += (sender, args) => UpdateResponsiveTrackHeight();
-    }
-
-    private void UpdateResponsiveTrackHeight()
-    {
-      var width = ClientSize.Width;
-      var height = ClientSize.Height;
-      if (width <= 0 || height <= 0)
-        return;
-
-      var sideLayout = height > width + 120;
-      var desired = sideLayout
-        ? Math.Max(260, Math.Min(600, height - 320))
-        : 160;
-      if (desired == _responsiveTrackHeight)
-        return;
-
-      _responsiveTrackHeight = desired;
-      _trackScroll.Height = desired;
-      _trackScroll.UpdateScrollSizes();
-      _pageScroll.UpdateScrollSizes();
     }
 
     private void ScrollTrackList(object sender, MouseEventArgs e)
