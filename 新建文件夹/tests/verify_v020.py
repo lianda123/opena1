@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.9."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.10."""
 
 from pathlib import Path
 import re
@@ -197,21 +197,21 @@ def main():
     assert "RhinoObjectSelectionEventArgs" in plugin
     assert "SelectTrackFromRhinoObject" in plugin
     assert "KeySelection" in data
+    for token in ["Panels.RegisterPanel", "Panels.OpenPanel", "产品动态时间轴"]:
+        assert token in docking, token
     for token in [
         "Rhino7TimelineDockBar", "DockBarCreateOptions", "DockBarDockLocation.Bottom",
         "DockBarDockStyle.Any", "SetContentControl", "ObjectAsIWin32Window",
         "Panels.PanelDockBar", "RecalcRhinoLayout", "PMTResetTimelineLayout",
-        "_rhino7InitialBottomApplied"
+        "_rhino7InitialBottomApplied", "RhinoWindows", "System.Windows.Forms"
     ]:
-        source = docking + commands
-        assert token in source, token
+        assert token not in docking + commands + project, token
     assert "TimelineDocking.Initialize(this)" in plugin
     assert "Panels.RegisterPanel(this" not in plugin
     assert "Panels.OpenPanel" not in commands
     assert "Panels.OpenPanel" not in gear_commands
-    assert 'PackageReference Include="RhinoWindows" Version="7.*"' in project
-    assert 'PackageReference Include="RhinoWindows" Version="8.*"' in project
-    assert '<Reference Include="System.Windows.Forms" />' in project
+    assert 'PackageReference Include="RhinoWindows"' not in project
+    assert '<Reference Include="System.Windows.Forms" />' not in project
     for token in [
         "_trackScroll", "_pageScroll", "ExpandContentHeight = false",
         "_canvas.MouseWheel += ScrollTrackList", "Height = 160",
@@ -257,7 +257,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.9</Version>" in project
+    assert "<Version>0.4.10</Version>" in project
 
     for token in [
         "AddCustomUndoEvent", "BeginUndoRecord", "EndUndoRecord",
@@ -294,12 +294,13 @@ def main():
         "一主多从机构网络", "动作自动衔接", "齿轮生成器合并",
         "渐开线直齿", "斜齿", "锥齿", "齿条", "同轴复合齿轮",
         "双向联动", "整体移动", "任意位置覆盖粘贴", "绑定过程未移动零件",
-        "关键帧撤回", "齿轮撤回不复制", "真正的底部 DockBar",
-        "PMTResetTimelineLayout", "260–600px"
+        "关键帧撤回", "齿轮撤回不复制", "标准 Rhino 标签面板",
+        "不再创建、移动或强制停靠到窗口底部", "260–600px"
     ]:
         assert phrase in readme, phrase
+    assert "PMTResetTimelineLayout" not in readme
 
-    print("ProductMotion Timeline 0.4.9 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.10 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

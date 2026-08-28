@@ -1,17 +1,16 @@
-# ProductMotion Timeline 0.4.9（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.10（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.9 为 Rhino 7 提供真正的底部 DockBar，并让侧边布局自动扩大轨道区；同时完整保留 0.4.8 的撤回/重做与齿轮撤回防复制修复。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.10 取消底部 DockBar，Rhino 7/8 均恢复标准侧边面板；完整保留 0.4.8 的撤回/重做、滚动与齿轮撤回防复制修复，并保留侧边轨道自适应容量。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
 
-## 0.4.9 主要改进
+## 0.4.10 主要改进
 
-- Rhino 7 使用独立的 `RhinoWindows.Controls.DockBar` 托管时间轴，首次打开默认位于 Rhino 窗口底部，不再依赖只能左右停靠的普通面板。
-- Rhino 8 继续使用原生标签面板，并在首次打开时移动到底部。
-- `PMTimeline` 自动使用当前 Rhino 版本对应的界面容器；用户不需要选择 Rhino 7/8 模式。
-- 新增 `PMTResetTimelineLayout`，可随时把浮动或侧边的时间轴恢复到底部。
-- 横向底部布局保持约 160px 的紧凑轨道高度；纵向侧边布局根据可用高度自动扩大到 260–600px，恢复并超过 0.4.7 的可见轨道数量。
-- 轨道区和页面区继续分别响应鼠标滚轮；布局从底部拖到侧面或从侧面拖回底部时自动切换轨道高度。
+- Rhino 7、Rhino 8 都恢复标准 Rhino 标签面板，不再创建、移动或强制停靠到窗口底部。
+- `PMTimeline` 只负责打开时间轴侧边面板；面板继续沿用 Rhino 自己保存的左侧、右侧或浮动位置。
+- 侧边轨道区根据可用高度自动扩大到 260–600px，可显示约 9–22 条轨道，保留 0.4.7 接近的轨道容量。
+- 鼠标位于轨道区时滚轮浏览轨道；鼠标位于插件其他区域时滚动整个页面。
+- 不再依赖 `RhinoWindows` 或 WinForms DockBar，Rhino 7/8 界面结构重新统一。
 
 ### 0.4.8 撤回与交互改进
 
@@ -186,7 +185,6 @@
 | 命令 | 作用 |
 | --- | --- |
 | `PMTimeline` | 打开时间轴面板 |
-| `PMTResetTimelineLayout` | 将时间轴恢复到 Rhino 窗口底部 |
 | `PMTAddPart` | 从选择对象创建完整动画部件和轨道 |
 | `PMTAddGroupPart` | 从 Rhino 组内单独选择部分零件建立轨道 |
 | `PMTKey` | 在当前帧插入/覆盖平滑关键帧 |
@@ -226,7 +224,7 @@ Windows 环境需要：
 - .NET 8 SDK / Targeting Pack。
 - Rhino 7 和/或 Rhino 8。
 
-0.4.9 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
+0.4.10 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
 
 在 PowerShell 中进入本文件夹后运行：
 
@@ -238,9 +236,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.9-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.9-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.9-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.10-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.10-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.10-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

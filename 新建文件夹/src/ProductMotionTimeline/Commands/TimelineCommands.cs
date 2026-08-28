@@ -24,16 +24,6 @@ namespace ProductMotionTimeline.Commands
     }
   }
 
-  public sealed class ResetTimelineLayoutCommand : Command
-  {
-    public override string EnglishName => "PMTResetTimelineLayout";
-
-    protected override Result RunCommand(RhinoDoc doc, RunMode mode)
-    {
-      return TimelineDocking.ResetToBottom() ? Result.Success : Result.Failure;
-    }
-  }
-
   public sealed class AddAnimationPartCommand : Command
   {
     public override string EnglishName => "PMTAddPart";

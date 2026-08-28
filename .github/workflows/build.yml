@@ -9,6 +9,7 @@ on:
       - product-motion-0.4.7-interaction-gear
       - product-motion-0.4.8-undo
       - product-motion-0.4.9-rhino7-dockbar
+      - product-motion-0.4.10-side-panel
     paths:
       - "新建文件夹/**"
       - ".github/workflows/build.yml"
@@ -45,22 +46,22 @@ jobs:
       - name: Upload Rhino 7 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: ProductMotionTimeline-0.4.9-rhino7
-          path: 新建文件夹/dist/ProductMotionTimeline-0.4.9-rhino7.zip
+          name: ProductMotionTimeline-0.4.10-rhino7
+          path: 新建文件夹/dist/ProductMotionTimeline-0.4.10-rhino7.zip
           if-no-files-found: error
 
       - name: Upload Rhino 8 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: ProductMotionTimeline-0.4.9-rhino8
-          path: 新建文件夹/dist/ProductMotionTimeline-0.4.9-rhino8.zip
+          name: ProductMotionTimeline-0.4.10-rhino8
+          path: 新建文件夹/dist/ProductMotionTimeline-0.4.10-rhino8.zip
           if-no-files-found: error
 
       - name: Upload combined package
         uses: actions/upload-artifact@v4
         with:
-          name: ProductMotionTimeline-0.4.9-rhino7-rhino8
-          path: 新建文件夹/dist/ProductMotionTimeline-0.4.9-rhino7-rhino8.zip
+          name: ProductMotionTimeline-0.4.10-rhino7-rhino8
+          path: 新建文件夹/dist/ProductMotionTimeline-0.4.10-rhino7-rhino8.zip
           if-no-files-found: error
 
       - name: Publish permanent combined installer
@@ -68,12 +69,12 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path downloads -Force | Out-Null
-          Copy-Item -LiteralPath 新建文件夹/dist/ProductMotionTimeline-0.4.9-rhino7-rhino8.zip -Destination downloads/ProductMotionTimeline-0.4.9-rhino7-rhino8.zip -Force
+          Copy-Item -LiteralPath 新建文件夹/dist/ProductMotionTimeline-0.4.10-rhino7-rhino8.zip -Destination downloads/ProductMotionTimeline-0.4.10-rhino7-rhino8.zip -Force
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add downloads/ProductMotionTimeline-0.4.9-rhino7-rhino8.zip
+          git add downloads/ProductMotionTimeline-0.4.10-rhino7-rhino8.zip
           git diff --cached --quiet
           if ($LASTEXITCODE -ne 0) {
-            git commit -m "Publish ProductMotion Timeline 0.4.9 installer"
+            git commit -m "Publish ProductMotion Timeline 0.4.10 installer"
             git push
           }
