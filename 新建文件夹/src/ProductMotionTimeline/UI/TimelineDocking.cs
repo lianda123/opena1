@@ -15,6 +15,7 @@ namespace ProductMotionTimeline.UI
   {
 #if NETFRAMEWORK
     private static Rhino7TimelineDockBar _rhino7DockBar;
+    private static bool _rhino7InitialBottomApplied;
 #else
     private static bool _rhino8InitialBottomApplied;
 #endif
@@ -46,7 +47,14 @@ namespace ProductMotionTimeline.UI
 #if NETFRAMEWORK
         if (_rhino7DockBar == null && ProductMotionPlugin.Instance != null)
           Initialize(ProductMotionPlugin.Instance);
-        return DockBar.Show(Rhino7TimelineDockBar.BarId, false);
+        var shown = DockBar.Show(Rhino7TimelineDockBar.BarId, false);
+        if (!_rhino7InitialBottomApplied)
+        {
+          _rhino7InitialBottomApplied = true;
+          DockBar.Dock(Rhino7TimelineDockBar.BarId, DockBarDockLocation.Bottom);
+          DockBar.RecalcRhinoLayout(true);
+        }
+        return shown;
 #else
         Panels.OpenPanel(TimelinePanel.PanelId);
         if (!_rhino8InitialBottomApplied)
