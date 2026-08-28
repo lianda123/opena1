@@ -291,8 +291,10 @@ namespace ProductMotionTimeline.Commands
       }
 
       TimelineDocking.Open();
-      RhinoApp.WriteLine("ProductMotion：已生成太阳轮 {0}T、{1} 个行星轮 {2}T、内齿圈 {3}T 和行星架。",
-        parameters.SunTeeth, parameters.PlanetCount, parameters.PlanetTeeth, parameters.RingTeeth);
+      RhinoApp.WriteLine(string.Format(
+        System.Globalization.CultureInfo.InvariantCulture,
+        "ProductMotion：已生成太阳轮 {0}T、{1} 个行星轮 {2}T、内齿圈 {3}T 和行星架。",
+        parameters.SunTeeth, parameters.PlanetCount, parameters.PlanetTeeth, parameters.RingTeeth));
       RhinoApp.WriteLine("ProductMotion：{0}。", validation.Message);
       RhinoApp.WriteLine("ProductMotion：{0}。", PlanetaryGearSetGenerator.TransmissionDescription(parameters));
       if (Math.Min(parameters.SunTeeth, parameters.PlanetTeeth) < 17 &&
