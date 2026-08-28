@@ -31,4 +31,5 @@
 - [MechanismMaker](./MechanismMaker)
 - [WoodSheetLayout](./WoodSheetLayout)
 - [WoodThicknessAdjuster](./WoodThicknessAdjuster)
+- [WoodJoint Pro](./WoodJointPro)
 - [ProductMotion Timeline](./新建文件夹)

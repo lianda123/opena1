@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    <OutputType>Library</OutputType>
+    <TargetExt>.rhp</TargetExt>
+    <AppendTargetFrameworkToOutputPath>true</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(Configuration)\</OutputPath>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <LangVersion>latest</LangVersion>
+    <PlatformTarget>AnyCPU</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <NoWarn>1701;1702;NU1701;1591</NoWarn>
+    <Title>WoodJoint Pro</Title>
+    <Company>Lianda Design Tools</Company>
+    <Product>WoodJoint Pro for Rhino</Product>
+    <Description>Parametric plywood joints, snap tabs, finger joints and shaft-hole calibration for Rhino.</Description>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+    <PackageReference Include="RhinoCommon" Version="7.0.20314.3001" ExcludeAssets="runtime" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <PackageReference Include="RhinoCommon" Version="8.*" ExcludeAssets="runtime" />
+    <PackageReference Include="System.Drawing.Common" Version="8.0.0" ExcludeAssets="runtime" />
+  </ItemGroup>
+</Project>

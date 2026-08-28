@@ -1,0 +1,13 @@
+name: WoodJointPro
+version: 1.0.0
+authors:
+  - Lianda Design Tools
+description: Parametric plywood cross slots, T slots, tabs, snap joints, finger joints and 2mm shaft holes.
+url: https://github.com/lianda123/opena1
+keywords:
+  - wood
+  - plywood
+  - joint
+  - laser-cut
+  - snap-fit
+  - rhino
