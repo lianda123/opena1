@@ -24,6 +24,7 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <PackageReference Include="RhinoCommon" Version="7.*" ExcludeAssets="runtime" />
     <PackageReference Include="RhinoWindows" Version="7.*" ExcludeAssets="runtime" />
+    <Reference Include="System.Windows.Forms" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
