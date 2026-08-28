@@ -200,7 +200,8 @@ def main():
     for token in [
         "Rhino7TimelineDockBar", "DockBarCreateOptions", "DockBarDockLocation.Bottom",
         "DockBarDockStyle.Any", "SetContentControl", "ObjectAsIWin32Window",
-        "Panels.PanelDockBar", "RecalcRhinoLayout", "PMTResetTimelineLayout"
+        "Panels.PanelDockBar", "RecalcRhinoLayout", "PMTResetTimelineLayout",
+        "_rhino7InitialBottomApplied"
     ]:
         source = docking + commands
         assert token in source, token
