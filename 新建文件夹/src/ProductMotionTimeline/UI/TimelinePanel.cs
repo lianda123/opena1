@@ -49,7 +49,7 @@ namespace ProductMotionTimeline.UI
       Border = BorderType.None,
       Height = 160,
       ExpandContentWidth = true,
-      ExpandContentHeight = false
+      ExpandContentHeight = true
     };
     private readonly Scrollable _pageScroll = new Scrollable
     {

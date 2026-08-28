@@ -1,8 +1,15 @@
-# ProductMotion Timeline 0.4.11（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.12（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.11 恢复 0.4.7 的轨道剩余空间铺满方式，取消 600px 高度上限和高宽比误判；同时完整保留标准侧边面板、双滚动、撤回/重做与齿轮撤回防复制修复。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.12 让内部黑色时间轴画布随轨道容器一起铺满，修复0.4.11只有外层轨道行扩展、画布仍停留在约160px的问题；其余稳定功能全部保留。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
+
+## 0.4.12 主要改进
+
+- `_trackScroll` 改为纵向扩展内容，黑色时间轴画布会真正覆盖轨道行的全部高度。
+- 轨道较少时，空余区域继续显示深色时间轴网格，不再出现大块白色空白。
+- 轨道较多、内容高度超过可见范围时，仍使用轨道区自己的滚轮上下浏览。
+- 外层页面滚动、标准侧边面板、关键帧与齿轮撤销以及0.4.7/0.4.8交互全部保持不变。
 
 ## 0.4.11 主要改进
 
@@ -232,7 +239,7 @@ Windows 环境需要：
 - .NET 8 SDK / Targeting Pack。
 - Rhino 7 和/或 Rhino 8。
 
-0.4.11 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
+0.4.12 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
 
 在 PowerShell 中进入本文件夹后运行：
 
@@ -244,9 +251,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.11-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.11-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.11-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.12-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.12-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.12-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

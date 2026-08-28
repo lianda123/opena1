@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.11."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.12."""
 
 from pathlib import Path
 import re
@@ -213,11 +213,18 @@ def main():
     assert 'PackageReference Include="RhinoWindows"' not in project
     assert '<Reference Include="System.Windows.Forms" />' not in project
     for token in [
-        "_trackScroll", "_pageScroll", "ExpandContentHeight = false",
-        "ExpandContentHeight = true", "_canvas.MouseWheel += ScrollTrackList",
+        "_trackScroll", "_pageScroll", "ExpandContentHeight = true",
+        "_canvas.MouseWheel += ScrollTrackList",
         "Height = 160", "new TableCell(_trackScroll, true)", "ScaleHeight = true"
     ]:
         assert token in panel, token
+    track_scroll_initializer = panel.split("private readonly Scrollable _trackScroll", 1)[1]
+    track_scroll_initializer = track_scroll_initializer.split("private readonly Scrollable _pageScroll", 1)[0]
+    page_scroll_initializer = panel.split("private readonly Scrollable _pageScroll", 1)[1]
+    page_scroll_initializer = page_scroll_initializer.split("private bool _suppress", 1)[0]
+    assert "ExpandContentHeight = true" in track_scroll_initializer
+    assert "ExpandContentHeight = true" in page_scroll_initializer
+    assert "ExpandContentHeight = false" not in panel
     for token in [
         "UpdateResponsiveTrackHeight", "height > width + 120",
         "Math.Max(260", "Math.Min(600", "_responsiveTrackHeight"
@@ -261,7 +268,7 @@ def main():
     assert "DataVersion = 5" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.11</Version>" in project
+    assert "<Version>0.4.12</Version>" in project
 
     for token in [
         "AddCustomUndoEvent", "BeginUndoRecord", "EndUndoRecord",
@@ -300,12 +307,12 @@ def main():
         "双向联动", "整体移动", "任意位置覆盖粘贴", "绑定过程未移动零件",
         "关键帧撤回", "齿轮撤回不复制", "标准 Rhino 标签面板",
         "不再创建、移动或强制停靠到窗口底部", "占满侧边面板",
-        "删除 260–600px 限制"
+        "删除 260–600px 限制", "内部黑色时间轴画布", "大块白色空白"
     ]:
         assert phrase in readme, phrase
     assert "PMTResetTimelineLayout" not in readme
 
-    print("ProductMotion Timeline 0.4.11 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.12 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":
