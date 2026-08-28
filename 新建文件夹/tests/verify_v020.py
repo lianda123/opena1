@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static and mathematical regression checks for ProductMotion Timeline 0.4.13."""
+"""Static and mathematical regression checks for ProductMotion Timeline 0.4.14."""
 
 from pathlib import Path
 import re
@@ -33,6 +33,19 @@ def crank_slider_x(theta: float, radius: float, rod: float) -> float:
 def rack_travel(driver_angle: float, module: float, driver_teeth: int) -> float:
     import math
     return driver_angle / 360.0 * math.pi * module * driver_teeth
+
+
+def planetary_ring_teeth(sun_teeth: int, planet_teeth: int) -> int:
+    return sun_teeth + 2 * planet_teeth
+
+
+def planetary_carrier_ratio(input_teeth: int, fixed_teeth: int) -> float:
+    return input_teeth / (input_teeth + fixed_teeth)
+
+
+def planetary_planet_local_ratio(input_teeth: int, planet_teeth: int, fixed_teeth: int, internal_input: bool) -> float:
+    magnitude = input_teeth * fixed_teeth / (planet_teeth * (input_teeth + fixed_teeth))
+    return magnitude if internal_input else -magnitude
 
 
 def translation(x: float, y: float, z: float):
@@ -77,6 +90,13 @@ def main():
     assert gear_center_distance("InternalGear", 2.0, 10, 30) == 20.0
     assert crank_slider_x(0.0, 10.0, 30.0) == 40.0
     assert abs(rack_travel(360.0, 2.0, 20) - 40.0 * 3.141592653589793) < 1e-9
+    assert planetary_ring_teeth(24, 18) == 60
+    assert (24 + 60) % 3 == 0
+    assert (24 + 60) % 4 == 0
+    assert abs(planetary_carrier_ratio(24, 60) - 2.0 / 7.0) < 1e-12
+    assert abs(planetary_carrier_ratio(60, 24) - 5.0 / 7.0) < 1e-12
+    assert abs(planetary_planet_local_ratio(24, 18, 60, False) + 20.0 / 21.0) < 1e-12
+    assert abs(planetary_planet_local_ratio(60, 18, 24, True) - 20.0 / 21.0) < 1e-12
     contaminated = translation(12.0, -5.0, 3.0)
     contaminated[3] = [1e-19, -2e-20, 7e-21, 1.0 + 1e-15]
     cleaned = sanitize_affine(contaminated)
@@ -108,6 +128,7 @@ def main():
     docking = (SRC / "UI" / "TimelineDocking.cs").read_text(encoding="utf-8")
     gear_geometry = (SRC / "Core" / "GearGeometryGenerator.cs").read_text(encoding="utf-8")
     gear_metadata = (SRC / "Core" / "GearPartMetadata.cs").read_text(encoding="utf-8")
+    planetary = (SRC / "Core" / "PlanetaryGearSetGenerator.cs").read_text(encoding="utf-8")
     plugin = (SRC / "ProductMotionPlugin.cs").read_text(encoding="utf-8")
 
     required = [
@@ -118,6 +139,9 @@ def main():
         "InternalGear",
         "Belt",
         "HelicalGear", "BevelGear", "RackPinion", "SameShaft", "TemplatePlacementMode",
+        "PlanetaryCarrier", "PlanetaryPlanetExternalInput", "PlanetaryPlanetInternalInput",
+        "PlanetaryRingFixedCarrier",
+        "ReferenceTeeth", "IsPlanetary",
         "WouldCreateParentCycle",
         "WouldCreateConstraintCycle",
     ]
@@ -153,6 +177,7 @@ def main():
         "PMTSameShaft",
         "PMTGearFactory", "PMTCreateSpurGear", "PMTCreateInternalGear",
         "PMTCreateHelicalGear", "PMTCreateBevelGear", "PMTCreateRack",
+        "PMTCreatePlanetaryGearSet",
     ]:
         assert command in command_names, command
 
@@ -166,6 +191,7 @@ def main():
         "平滑：缓入缓出", "线性：匀速", "阶梯：保持后跳变",
         "SelectedIndexChanged", "PMTBindMultiple", "一主多从/串联",
         "PMTGearFactory", "接在全部动作末尾",
+        "行星齿轮组", "PMTCreatePlanetaryGearSet",
         "全选当前轨道", "复制所选", "粘贴到目标轨道/帧", "关键帧属性",
         "移动 X", "旋转角°", "缩放 X"
     ]:
@@ -181,6 +207,10 @@ def main():
         assert token not in mechanical_tools, token
     for token in ["_smoothSegmentPen", "_linearSegmentPen", "_constantSegmentPen"]:
         assert token in canvas, token
+    assert "private const int PreferredWidth = 520" in canvas
+    refresh_height = canvas.split("public void RefreshHeight()", 1)[1].split("private void OnPaint", 1)[0]
+    assert "new Size(PreferredWidth" in refresh_height
+    assert "new Size(Size.Width" not in refresh_height
     for token in [
         "_rowDragTrackId", "DrawTrackDropIndicator", "UpdateTrackDrop",
         "轨道（上下拖动）", "_trackDropPen", "MouseDoubleClick",
@@ -258,6 +288,21 @@ def main():
     for token in ["GearPartType", "InferConstraintType", "HelixAngleDegrees", "RackLength", "OutputPitchReference"]:
         assert token in gear_metadata, token
     for token in [
+        "Zr=Zs+2Zp", "CompatiblePlanetCounts", "PlanetsOverlap",
+        "PlanetCenterDistance", "CreateCarrierGeometry", "TransmissionDescription",
+        "RingPlane", "RotatePlane",
+        "PlanetaryFixedMember", "Brep.CreateBooleanDifference"
+    ]:
+        assert token in planetary, token
+    for token in [
+        "太阳轮齿数 Zs", "行星轮齿数 Zp", "行星轮数量 N",
+        "固定内齿圈_太阳轮输入_行星架输出", "固定太阳轮_内齿圈输入_行星架输出",
+        "固定行星架_太阳轮输入_内齿圈输出", "生成 ProductMotion 行星齿轮组",
+        "PlanetaryGearSetGenerator.Validate", "PlanetaryPlanetExternalInput",
+        "PlanetaryPlanetInternalInput", "PlanetaryRingFixedCarrier"
+    ]:
+        assert token in gear_commands, token
+    for token in [
         'LocalizeStringPair("Auto", "自动识别")',
         'LocalizeStringPair("ExternalGear", "外啮合齿轮")',
         'LocalizeStringPair("RackPinion", "齿轮齿条传动")',
@@ -274,10 +319,12 @@ def main():
     assert "ConstraintsForDriver" in data
     assert "EvaluateRackDistance" in data
 
-    assert "DataVersion = 5" in data
+    assert "DataVersion = 6" in data
     assert "version < 2 || version > TimelineDocument.DataVersion" in repository
+    assert "writer.Write(constraint.ReferenceTeeth)" in repository
+    assert "version >= 6" in repository
     assert "net48;net8.0" in project
-    assert "<Version>0.4.13</Version>" in project
+    assert "<Version>0.4.14</Version>" in project
 
     for token in [
         "AddCustomUndoEvent", "BeginUndoRecord", "EndUndoRecord",
@@ -318,11 +365,13 @@ def main():
         "不再创建、移动或强制停靠到窗口底部", "占满侧边面板",
         "删除 260–600px 限制", "黑色时间轴画布", "大块白色空白",
         "机械约束栏移除", "统一选择", "旧单类型命令只在底层保留兼容"
+        , "帧刻度和关键帧视觉间距持续变大", "PMTCreatePlanetaryGearSet",
+        "Zr=Zs+2Zp", "Willis", "24 / 18 / 60"
     ]:
         assert phrase in readme, phrase
     assert "PMTResetTimelineLayout" not in readme
 
-    print("ProductMotion Timeline 0.4.13 static/mathematical checks passed.")
+    print("ProductMotion Timeline 0.4.14 static/mathematical checks passed.")
 
 
 if __name__ == "__main__":

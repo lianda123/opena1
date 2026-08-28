@@ -10,6 +10,7 @@ namespace ProductMotionTimeline.UI
 {
   internal sealed class TimelineCanvas : Drawable
   {
+    private const int PreferredWidth = 520;
     private const float HeaderWidth = 190f;
     private const float RulerHeight = 30f;
     private const float RowHeight = 25f;
@@ -73,7 +74,7 @@ namespace ProductMotionTimeline.UI
 
     public TimelineCanvas()
     {
-      Size = new Size(520, 190);
+      Size = new Size(PreferredWidth, 190);
       Paint += OnPaint;
       MouseDown += OnMouseDown;
       MouseMove += OnMouseMove;
@@ -85,7 +86,11 @@ namespace ProductMotionTimeline.UI
     {
       var model = TimelineEngine.Model(RhinoDoc.ActiveDoc);
       var rows = Math.Max(4, model?.Tracks.Count ?? 0);
-      Size = new Size(Size.Width, (int)(RulerHeight + rows * RowHeight + 4));
+      // Eto writes the expanded layout width back to Size. Reusing Size.Width here on
+      // every playback tick made the preferred canvas width grow cumulatively, which
+      // visually stretched the frame ruler and key spacing. Keep one stable preferred
+      // width; Scrollable still expands it to the actual side-panel width when needed.
+      Size = new Size(PreferredWidth, (int)(RulerHeight + rows * RowHeight + 4));
       Invalidate();
     }
 

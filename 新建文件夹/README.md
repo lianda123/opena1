@@ -1,8 +1,18 @@
-# ProductMotion Timeline 0.4.13（Rhino 7 / 8）
+# ProductMotion Timeline 0.4.14（Rhino 7 / 8）
 
-面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.13 精简机械约束栏，删除四个错误且重复的单类型绑定按钮，统一通过正确的“一主多从/串联”流程建立外啮合、内啮合、皮带和同轴复合关系。
+面向产品机构动态演示的 Rhino 关键帧时间轴插件。0.4.14 修复播放刷新后时间轴首选宽度累积、帧刻度和关键帧视觉间距持续变大的问题，并加入带 Willis 运动关系的行星齿轮组快捷生成器。
 
 界面预览：[docs/UI_PREVIEW.svg](docs/UI_PREVIEW.svg)
+
+## 0.4.14 主要改进
+
+- 时间轴刷新不再把面板实际宽度反复写回首选宽度；播放、暂停、切帧和增删轨道都不会继续拉大帧距。
+- 新增“行星齿轮组”按钮和 `PMTCreatePlanetaryGearSet`，综合生成器中也可选择“行星齿轮组”。
+- 默认参数为太阳轮 24 齿、行星轮 18 齿、内齿圈自动计算为 60 齿、3 个行星轮、模数 1、压力角 20°。
+- 自动检查 `Zr=Zs+2Zp`、`(Zs+Zr) mod N=0`、统一模数/压力角及相邻行星轮齿顶圆防重叠。
+- 一次生成太阳轮、全部行星轮、内齿圈和带中心孔/行星轴孔的行星架；每个零件自动建立轨道和正确轴心。
+- 支持固定内齿圈、固定太阳轮、固定行星架和只生成几何四种预设；前三种按 Willis 公式自动建立传动关系。
+- 整组生成和传动写入同一个 Rhino 撤销步骤；既有模型与时间轴对象不会被移动。
 
 ## 0.4.13 主要改进
 
@@ -199,6 +209,17 @@
 
 齿条目前作为从动件；齿轮每转一圈，齿条移动 `π × 模数 × 齿数`。
 
+### 快捷生成行星齿轮组
+
+1. 点击“行星齿轮组”或运行 `PMTCreatePlanetaryGearSet`，指定机构中心。
+2. 输入太阳轮齿数 `Zs` 和行星轮齿数 `Zp`；内齿圈自动按 `Zr=Zs+2Zp` 计算。
+3. 输入行星轮数量 `N`；插件检查 `(Zs+Zr) mod N=0`，并检查相邻行星轮不会碰撞。
+4. 输入统一模数、压力角、厚度、轴孔和行星架参数。
+5. 选择固定内齿圈、固定太阳轮、固定行星架，或只生成几何。
+6. 生成后只需要给命令自动选中的输入轨道设置旋转关键帧；其余轨道按 Willis 关系计算。
+
+默认 `24 / 18 / 60`、3 个行星轮时：固定内齿圈、太阳轮输入、行星架输出的减速比为 `3.5:1`。行星约束是成组关系，不能在“编辑选中”中单独改一条；要换齿数或固定件时撤销后重新生成。
+
 ### 衔接多个动作模板
 
 在“动作模板”一行选择放置方式。“接在全部动作末尾”会自动找到当前最后一个关键帧，加上“间隔帧”后生成下一段，因此可以按“齿轮转动→锅盖弹起→平底锅摆动→柜门回弹”连续排序。
@@ -228,6 +249,7 @@
 | `PMTGearFactory` | 打开综合齿轮/齿条生成器 |
 | `PMTCreateSpurGear` | 生成渐开线直齿轮实体并自动建轨 |
 | `PMTCreateInternalGear` | 生成内齿轮实体并自动建轨 |
+| `PMTCreatePlanetaryGearSet` | 生成并按 Willis 公式绑定太阳轮、行星轮、内齿圈和行星架 |
 | `PMTCreateHelicalGear` | 生成可设左/右旋角的斜齿轮 |
 | `PMTCreateBevelGear` | 生成可设节锥角的锥齿轮 |
 | `PMTCreateRack` | 生成渐开线齿轮配套齿条 |
@@ -243,7 +265,7 @@ Windows 环境需要：
 - .NET 8 SDK / Targeting Pack。
 - Rhino 7 和/或 Rhino 8。
 
-0.4.13 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
+0.4.14 发布门禁会同时执行静态/数学回归、Rhino 7 `net48` 编译和 Rhino 8 `net8.0` 编译，三项全部成功才生成双版本安装包。
 
 在 PowerShell 中进入本文件夹后运行：
 
@@ -255,9 +277,9 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 
 - `dist\net48\ProductMotionTimeline.rhp`：Rhino 7。
 - `dist\net8.0\ProductMotionTimeline.rhp`：Rhino 8。
-- `dist\ProductMotionTimeline-0.4.13-rhino7.zip`：Rhino 7 安装包。
-- `dist\ProductMotionTimeline-0.4.13-rhino8.zip`：Rhino 8 安装包。
-- `dist\ProductMotionTimeline-0.4.13-rhino7-rhino8.zip`：双版本发布包。
+- `dist\ProductMotionTimeline-0.4.14-rhino7.zip`：Rhino 7 安装包。
+- `dist\ProductMotionTimeline-0.4.14-rhino8.zip`：Rhino 8 安装包。
+- `dist\ProductMotionTimeline-0.4.14-rhino7-rhino8.zip`：双版本发布包。
 
 ## 安装
 

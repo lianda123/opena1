@@ -595,7 +595,8 @@ namespace ProductMotionTimeline.Core
       double pressureAngleDegrees,
       double phaseOffsetDistance = 0.0,
       RotationAxis drivenLinearAxis = RotationAxis.X,
-      double directionMultiplier = 1.0)
+      double directionMultiplier = 1.0,
+      int referenceTeeth = 0)
     {
       var model = Model(doc);
       var driver = model.FindTrack(driverTrackId);
@@ -618,6 +619,7 @@ namespace ProductMotionTimeline.Core
           Type = type,
           DriverTeeth = driverTeeth,
           DrivenTeeth = drivenTeeth,
+          ReferenceTeeth = Math.Max(0, referenceTeeth),
           Module = Math.Max(0.0, module),
           PressureAngleDegrees = Math.Max(1.0, pressureAngleDegrees),
           PhaseOffsetDegrees = phaseOffsetDegrees,
@@ -711,6 +713,10 @@ namespace ProductMotionTimeline.Core
       var drivenOrigin = PivotOrigin(driven);
       var driverAxis = PivotAxis(driver);
       var drivenAxis = PivotAxis(driven);
+      if (constraint.IsPlanetary)
+        return ValidatePlanetaryConstraint(
+          doc, model, constraint, driver, driven,
+          driverOrigin, drivenOrigin, driverAxis, drivenAxis);
       if (constraint.Type == MechanicalConstraintType.SameShaft)
       {
         if (Math.Abs(driverAxis * drivenAxis) < Math.Cos(Math.PI / 90.0))
@@ -872,6 +878,124 @@ namespace ProductMotionTimeline.Core
         "真实啮合通过：中心距 {0:0.###}，模数 {1:0.###}",
         result.ActualCenterDistance,
         constraint.Module);
+      return result;
+    }
+
+    private static MechanicalValidationResult ValidatePlanetaryConstraint(
+      RhinoDoc doc,
+      TimelineDocument model,
+      MechanicalConstraint constraint,
+      AnimationTrack driver,
+      AnimationTrack driven,
+      Point3d driverOrigin,
+      Point3d drivenOrigin,
+      Vector3d driverAxis,
+      Vector3d drivenAxis)
+    {
+      var result = new MechanicalValidationResult();
+      if (Math.Abs(driverAxis * drivenAxis) < Math.Cos(Math.PI / 90.0))
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "行星机构转轴不平行（偏差超过 2°）";
+        return result;
+      }
+      if (constraint.DriverTeeth < 1 || constraint.DrivenTeeth < 1)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "行星机构齿数数据不完整";
+        return result;
+      }
+
+      var delta = drivenOrigin - driverOrigin;
+      result.ActualCenterDistance = (delta - driverAxis * (delta * driverAxis)).Length;
+      var tolerance = Math.Max(doc.ModelAbsoluteTolerance * 5.0, constraint.Module * 0.05);
+      if (constraint.Type == MechanicalConstraintType.PlanetaryCarrier)
+      {
+        if (result.ActualCenterDistance > Math.Max(tolerance, 1e-6))
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = string.Format(
+            "行星架与输入件不同轴，偏心 {0:0.###}", result.ActualCenterDistance);
+          return result;
+        }
+        result.Message = string.Format(
+          "Willis 行星架关系有效：输出/输入 {0:0.####}", constraint.SignedRatio);
+        return result;
+      }
+
+      if (constraint.Type == MechanicalConstraintType.PlanetaryRingFixedCarrier)
+      {
+        if (constraint.ReferenceTeeth < 1 ||
+            constraint.DrivenTeeth != constraint.DriverTeeth + 2 * constraint.ReferenceTeeth)
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = "固定行星架模式的齿数不满足 Zr=Zs+2Zp";
+          return result;
+        }
+        if (result.ActualCenterDistance > Math.Max(tolerance, 1e-6))
+        {
+          result.Severity = ValidationSeverity.Error;
+          result.Message = string.Format(
+            "固定行星架模式的太阳轮和内齿圈不同轴，偏心 {0:0.###}",
+            result.ActualCenterDistance);
+          return result;
+        }
+        result.Message = string.Format(
+          "固定行星架关系有效：内齿圈/太阳轮 {0:0.####}（反向）",
+          constraint.SignedRatio);
+        return result;
+      }
+
+      if (constraint.ReferenceTeeth < 1)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "行星轮约束缺少固定件齿数";
+        return result;
+      }
+      var toothRelationValid = constraint.Type == MechanicalConstraintType.PlanetaryPlanetExternalInput
+        ? constraint.ReferenceTeeth == constraint.DriverTeeth + 2 * constraint.DrivenTeeth
+        : constraint.DriverTeeth == constraint.ReferenceTeeth + 2 * constraint.DrivenTeeth;
+      if (!toothRelationValid)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "行星轮齿数关系不满足 Zr=Zs+2Zp";
+        return result;
+      }
+      if (constraint.Module <= 0.0)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "行星机构必须设置统一模数";
+        return result;
+      }
+
+      result.ExpectedCenterDistance = constraint.Type == MechanicalConstraintType.PlanetaryPlanetExternalInput
+        ? constraint.Module * (constraint.DriverTeeth + constraint.DrivenTeeth) * 0.5
+        : constraint.Module * (constraint.DriverTeeth - constraint.DrivenTeeth) * 0.5;
+      if (Math.Abs(result.ActualCenterDistance - result.ExpectedCenterDistance) > tolerance)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = string.Format(
+          "行星轮中心距 {0:0.###}，应为 {1:0.###}",
+          result.ActualCenterDistance,
+          result.ExpectedCenterDistance);
+        return result;
+      }
+
+      var carrier = model.FindTrack(driven.ParentTrackId);
+      var carrierConstraint = carrier == null ? null : model.ConstraintForDriven(carrier.Id);
+      if (carrier == null || carrierConstraint == null ||
+          carrierConstraint.Type != MechanicalConstraintType.PlanetaryCarrier ||
+          carrierConstraint.DriverTrackId != driver.Id)
+      {
+        result.Severity = ValidationSeverity.Error;
+        result.Message = "行星轮缺少正确的行星架父级或 Willis 行星架约束";
+        return result;
+      }
+
+      result.Message = string.Format(
+        "Willis 行星轮关系有效：相对行星架比例 {0:0.####}，中心距 {1:0.###}",
+        constraint.SignedRatio,
+        result.ActualCenterDistance);
       return result;
     }
 

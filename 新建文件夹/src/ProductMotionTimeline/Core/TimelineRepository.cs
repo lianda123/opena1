@@ -113,6 +113,7 @@ namespace ProductMotionTimeline.Core
           writer.Write(constraint.PhaseOffsetDistance);
           writer.Write((int)constraint.DrivenLinearAxis);
           writer.Write(constraint.DirectionMultiplier);
+          writer.Write(constraint.ReferenceTeeth);
         }
 
         writer.Flush();
@@ -227,6 +228,8 @@ namespace ProductMotionTimeline.Core
                 constraint.DrivenLinearAxis = (RotationAxis)reader.ReadInt32();
                 constraint.DirectionMultiplier = reader.ReadDouble();
               }
+              if (version >= 6)
+                constraint.ReferenceTeeth = reader.ReadInt32();
               model.Constraints.Add(constraint);
             }
           }

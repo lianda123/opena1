@@ -865,6 +865,12 @@ namespace ProductMotionTimeline.Commands
         RhinoApp.WriteLine("ProductMotion：请先在传动关系列表中选中一项。");
         return Result.Nothing;
       }
+      if (constraint.IsPlanetary)
+      {
+        RhinoApp.WriteLine(
+          "ProductMotion：行星齿轮关系由齿数组和固定件共同计算，不能单独改一条；请撤销后重新运行 PMTCreatePlanetaryGearSet。");
+        return Result.Nothing;
+      }
 
       var type = constraint.Type;
       var typeGetter = new GetOption();

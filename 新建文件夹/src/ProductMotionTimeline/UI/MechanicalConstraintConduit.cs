@@ -62,6 +62,10 @@ namespace ProductMotionTimeline.UI
         case MechanicalConstraintType.BevelGear: return "锥齿";
         case MechanicalConstraintType.RackPinion: return "齿轮-齿条";
         case MechanicalConstraintType.SameShaft: return "同轴";
+        case MechanicalConstraintType.PlanetaryCarrier: return "行星架";
+        case MechanicalConstraintType.PlanetaryPlanetExternalInput: return "行星轮(太阳输入)";
+        case MechanicalConstraintType.PlanetaryPlanetInternalInput: return "行星轮(齿圈输入)";
+        case MechanicalConstraintType.PlanetaryRingFixedCarrier: return "齿圈(行星架固定)";
         default: return "外啮合";
       }
     }

@@ -172,6 +172,7 @@ namespace ProductMotionTimeline.UI
         Button("综合生成器", () => RhinoApp.RunScript("_PMTGearFactory", false)),
         Button("渐开线直齿", () => RhinoApp.RunScript("_PMTCreateSpurGear", false)),
         Button("内齿轮", () => RhinoApp.RunScript("_PMTCreateInternalGear", false)),
+        Button("行星齿轮组", () => RhinoApp.RunScript("_PMTCreatePlanetaryGearSet", false)),
         Button("斜齿轮", () => RhinoApp.RunScript("_PMTCreateHelicalGear", false)),
         Button("锥齿轮", () => RhinoApp.RunScript("_PMTCreateBevelGear", false)),
         Button("齿条", () => RhinoApp.RunScript("_PMTCreateRack", false)));
@@ -395,6 +396,10 @@ namespace ProductMotionTimeline.UI
         case MechanicalConstraintType.BevelGear: return "锥齿";
         case MechanicalConstraintType.RackPinion: return "齿轮-齿条";
         case MechanicalConstraintType.SameShaft: return "同轴刚性";
+        case MechanicalConstraintType.PlanetaryCarrier: return "Willis 行星架";
+        case MechanicalConstraintType.PlanetaryPlanetExternalInput: return "行星轮（太阳轮输入）";
+        case MechanicalConstraintType.PlanetaryPlanetInternalInput: return "行星轮（内齿圈输入）";
+        case MechanicalConstraintType.PlanetaryRingFixedCarrier: return "内齿圈（行星架固定）";
         default: return "外啮合";
       }
     }

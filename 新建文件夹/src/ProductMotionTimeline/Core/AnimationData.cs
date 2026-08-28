@@ -27,7 +27,11 @@ namespace ProductMotionTimeline.Core
     HelicalGear = 3,
     BevelGear = 4,
     RackPinion = 5,
-    SameShaft = 6
+    SameShaft = 6,
+    PlanetaryCarrier = 7,
+    PlanetaryPlanetExternalInput = 8,
+    PlanetaryPlanetInternalInput = 9,
+    PlanetaryRingFixedCarrier = 10
   }
 
   internal enum TemplatePlacementMode
@@ -60,6 +64,7 @@ namespace ProductMotionTimeline.Core
     public MechanicalConstraintType Type { get; set; } = MechanicalConstraintType.ExternalGear;
     public int DriverTeeth { get; set; } = 20;
     public int DrivenTeeth { get; set; } = 20;
+    public int ReferenceTeeth { get; set; }
     public double Module { get; set; }
     public double PressureAngleDegrees { get; set; } = 20.0;
     public double PhaseOffsetDegrees { get; set; }
@@ -74,6 +79,25 @@ namespace ProductMotionTimeline.Core
       {
         if (Type == MechanicalConstraintType.SameShaft)
           return DirectionMultiplier < 0.0 ? -1.0 : 1.0;
+        if (Type == MechanicalConstraintType.PlanetaryCarrier)
+          return Math.Max(1, DriverTeeth) /
+                 (double)(Math.Max(1, DriverTeeth) + Math.Max(1, DrivenTeeth));
+        if (Type == MechanicalConstraintType.PlanetaryRingFixedCarrier)
+          return -Math.Max(1, DriverTeeth) / (double)Math.Max(1, DrivenTeeth) *
+                 (DirectionMultiplier < 0.0 ? -1.0 : 1.0);
+        if (Type == MechanicalConstraintType.PlanetaryPlanetExternalInput ||
+            Type == MechanicalConstraintType.PlanetaryPlanetInternalInput)
+        {
+          var inputTeeth = (double)Math.Max(1, DriverTeeth);
+          var planetTeeth = (double)Math.Max(1, DrivenTeeth);
+          var fixedTeeth = (double)Math.Max(1, ReferenceTeeth);
+          var magnitude = inputTeeth * fixedTeeth /
+                          (planetTeeth * (inputTeeth + fixedTeeth));
+          var sign = Type == MechanicalConstraintType.PlanetaryPlanetExternalInput
+            ? -1.0
+            : 1.0;
+          return sign * magnitude * (DirectionMultiplier < 0.0 ? -1.0 : 1.0);
+        }
         var ratio = Math.Max(1, DriverTeeth) / (double)Math.Max(1, DrivenTeeth);
         var direction = Type == MechanicalConstraintType.ExternalGear ||
                Type == MechanicalConstraintType.HelicalGear ||
@@ -81,6 +105,17 @@ namespace ProductMotionTimeline.Core
           ? -ratio
           : ratio;
         return direction * (DirectionMultiplier < 0.0 ? -1.0 : 1.0);
+      }
+    }
+
+    public bool IsPlanetary
+    {
+      get
+      {
+        return Type == MechanicalConstraintType.PlanetaryCarrier ||
+               Type == MechanicalConstraintType.PlanetaryPlanetExternalInput ||
+               Type == MechanicalConstraintType.PlanetaryPlanetInternalInput ||
+               Type == MechanicalConstraintType.PlanetaryRingFixedCarrier;
       }
     }
 
@@ -341,7 +376,7 @@ namespace ProductMotionTimeline.Core
 
   internal sealed class TimelineDocument
   {
-    public const int DataVersion = 5;
+    public const int DataVersion = 6;
 
     public int StartFrame { get; set; } = 0;
     public int EndFrame { get; set; } = 250;

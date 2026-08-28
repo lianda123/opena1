@@ -58,17 +58,17 @@ $commonContents = @(
   (Join-Path $dist "manifest.yml")
 )
 
-$rhino7Zip = Join-Path $dist "ProductMotionTimeline-0.4.13-rhino7.zip"
+$rhino7Zip = Join-Path $dist "ProductMotionTimeline-0.4.14-rhino7.zip"
 Compress-Archive -Path (@(
   (Join-Path $dist "net48")
 ) + $commonContents) -DestinationPath $rhino7Zip -Force
 
-$rhino8Zip = Join-Path $dist "ProductMotionTimeline-0.4.13-rhino8.zip"
+$rhino8Zip = Join-Path $dist "ProductMotionTimeline-0.4.14-rhino8.zip"
 Compress-Archive -Path (@(
   (Join-Path $dist "net8.0")
 ) + $commonContents) -DestinationPath $rhino8Zip -Force
 
-$combinedZip = Join-Path $dist "ProductMotionTimeline-0.4.13-rhino7-rhino8.zip"
+$combinedZip = Join-Path $dist "ProductMotionTimeline-0.4.14-rhino7-rhino8.zip"
 $releaseContents = @(
   (Join-Path $dist "net48"),
   (Join-Path $dist "net8.0"),
