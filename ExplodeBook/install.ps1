@@ -1,18 +1,23 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [ValidateSet("7", "8", "Both")]
-  [string]$RhinoVersion = "Both"
+  [string]$RhinoVersion = "Both",
+  [ValidateSet("Core", "Framework")]
+  [string]$Rhino8Runtime = "Core"
 )
 
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $pluginId = "0BA544B2-8E36-4A71-8E3E-A33D722B04AC"
-$version = "1.0.0"
+$version = "2.0.0"
 $installRoot = Join-Path $env:LOCALAPPDATA "ExplodeBook\$version"
+if (Get-Process -Name Rhino -ErrorAction SilentlyContinue) {
+  throw "请先关闭所有 Rhino 窗口，再运行安装脚本。"
+}
 $targets = if ($RhinoVersion -eq "Both") { @("7", "8") } else { @($RhinoVersion) }
 
 foreach ($major in $targets) {
-  $framework = if ($major -eq "7") { "net48" } else { "net8.0" }
+  $framework = if ($major -eq "7" -or $Rhino8Runtime -eq "Framework") { "net48" } else { "net8.0" }
   $source = Join-Path $PSScriptRoot "$framework\ExplodeBook.rhp"
   if (-not (Test-Path $source)) {
     throw "安装包中缺少 $framework\ExplodeBook.rhp。请先完整解压 ZIP。"

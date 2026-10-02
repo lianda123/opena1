@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
   [ValidateSet("Debug", "Release")]
   [string]$Configuration = "Release"
@@ -23,6 +23,9 @@ if (Test-Path $dist) {
 New-Item -ItemType Directory -Path (Join-Path $dist "net48") -Force | Out-Null
 New-Item -ItemType Directory -Path (Join-Path $dist "net8.0") -Force | Out-Null
 
+dotnet run --project (Join-Path $projectRoot "tests\PlannerTests\PlannerTests.csproj") -c Release | Tee-Object -FilePath (Join-Path $dist "CoreTests.txt")
+if ($LASTEXITCODE -ne 0) { throw "装配核心回归测试失败，停止打包。" }
+
 dotnet restore $solution
 if ($LASTEXITCODE -ne 0) { throw "NuGet 还原失败。" }
 dotnet build $project -c $Configuration --no-restore
@@ -41,31 +44,30 @@ foreach ($extension in @("pdb", "xml")) {
   if (Test-Path $file7) { Copy-Item -LiteralPath $file7 -Destination (Join-Path $dist "net48") }
   if (Test-Path $file8) { Copy-Item -LiteralPath $file8 -Destination (Join-Path $dist "net8.0") }
 }
-foreach ($file in @("README.md", "install.ps1", "uninstall.ps1", "manifest.yml")) {
+foreach ($file in @("README.md", "QuickStart.md", "Validation.md", "install.ps1", "uninstall.ps1", "manifest.yml")) {
   Copy-Item -LiteralPath (Join-Path $projectRoot $file) -Destination $dist
 }
 
+Copy-Item -LiteralPath (Join-Path $projectRoot "samples") -Destination $dist -Recurse
+
 $common = @(
+  (Join-Path $dist "CoreTests.txt"),
+  (Join-Path $dist "QuickStart.md"),
+  (Join-Path $dist "Validation.md"),
+  (Join-Path $dist "samples"),
   (Join-Path $dist "README.md"),
   (Join-Path $dist "install.ps1"),
   (Join-Path $dist "uninstall.ps1"),
   (Join-Path $dist "manifest.yml")
 )
-$rhino7Zip = Join-Path $dist "ExplodeBook-1.0.0-rhino7.zip"
+$rhino7Zip = Join-Path $dist "ExplodeBook-2.0.0-rhino7.zip"
 Compress-Archive -Path (@((Join-Path $dist "net48")) + $common) -DestinationPath $rhino7Zip -Force
-$rhino8Zip = Join-Path $dist "ExplodeBook-1.0.0-rhino8.zip"
+$rhino8Zip = Join-Path $dist "ExplodeBook-2.0.0-rhino8.zip"
 Compress-Archive -Path (@((Join-Path $dist "net8.0")) + $common) -DestinationPath $rhino8Zip -Force
-$combinedZip = Join-Path $dist "ExplodeBook-1.0.0-rhino7-rhino8.zip"
-Compress-Archive -Path @(
-  (Join-Path $dist "net48"),
-  (Join-Path $dist "net8.0"),
-  (Join-Path $dist "README.md"),
-  (Join-Path $dist "install.ps1"),
-  (Join-Path $dist "uninstall.ps1"),
-  (Join-Path $dist "manifest.yml")
-) -DestinationPath $combinedZip -Force
+$combinedZip = Join-Path $dist "ExplodeBook-2.0.0-rhino7-rhino8.zip"
+Compress-Archive -Path (@((Join-Path $dist "net48"), (Join-Path $dist "net8.0")) + $common) -DestinationPath $combinedZip -Force
 
-Write-Host "ExplodeBook 1.0.0 编译完成。" -ForegroundColor Green
+Write-Host "ExplodeBook 2.0.0 编译完成。" -ForegroundColor Green
 Write-Host "Rhino 7: $rhino7Zip"
 Write-Host "Rhino 8: $rhino8Zip"
 Write-Host "双版本: $combinedZip"

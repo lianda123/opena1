@@ -8,7 +8,8 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <LangVersion>latest</LangVersion>
     <PlatformTarget>AnyCPU</PlatformTarget>
-    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <GenerateTargetFrameworkAttribute>false</GenerateTargetFrameworkAttribute>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
     <NoWarn>1701;1702;NU1701;1591</NoWarn>
@@ -16,17 +17,20 @@
     <Company>Lianda Design Tools</Company>
     <Product>ExplodeBook for Rhino</Product>
     <Description>Exploded views, assembly sequencing, arrows, part labels and instruction layouts for wooden products.</Description>
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <Version>2.0.0</Version>
+    <AssemblyVersion>2.0.0.0</AssemblyVersion>
+    <FileVersion>2.0.0.0</FileVersion>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">
+    <DefineConstants>$(DefineConstants);RHINO7</DefineConstants>
+  </PropertyGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
-    <PackageReference Include="RhinoCommon" Version="7.*" ExcludeAssets="runtime" />
+    <PackageReference Include="RhinoCommon" Version="7.38.24338.17001" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-    <PackageReference Include="RhinoCommon" Version="8.*" ExcludeAssets="runtime" />
+    <PackageReference Include="RhinoCommon" Version="8.35.26251.13001" ExcludeAssets="runtime" />
     <PackageReference Include="System.Drawing.Common" Version="8.0.0" ExcludeAssets="runtime" />
   </ItemGroup>
 </Project>

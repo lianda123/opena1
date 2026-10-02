@@ -1,4 +1,4 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $pluginId = "0BA544B2-8E36-4A71-8E3E-A33D722B04AC"
 foreach ($major in @("7", "8")) {
   $regPath = "HKCU:\Software\McNeel\Rhinoceros\$major.0\Plug-ins\{$pluginId}"
