@@ -11,6 +11,8 @@ internal sealed class AssemblyAnalysis
     public long PairTests, CacheHits, MeshBuilds, MeshHits, AnalysisMilliseconds;
     public List<string> ValidationErrors { get; } = new List<string>();
     public Dictionary<AssemblyPart,List<AssemblyPart>> Blockers { get; } = new Dictionary<AssemblyPart,List<AssemblyPart>>();
+    public Dictionary<AssemblyPart,string> PartIssues { get; } = new Dictionary<AssemblyPart,string>();
+    public string ProgressSummary { get; set; }
 	public List<AssemblyPart> Parts { get; } = new List<AssemblyPart>();
 
 	public List<AssemblyModule> Modules { get; } = new List<AssemblyModule>();

@@ -31,6 +31,7 @@ internal struct Box
     public Box Move(Vec v) => new Box(Min+v,Max+v);
     public Box Sweep(Vec v) => Union(Move(v));
     public bool Overlaps(Box b,double e) => Min.X<=b.Max.X+e && Max.X>=b.Min.X-e && Min.Y<=b.Max.Y+e && Max.Y>=b.Min.Y-e && Min.Z<=b.Max.Z+e && Max.Z>=b.Min.Z-e;
+    public bool InteriorOverlaps(Box b,double e) => Math.Min(Max.X,b.Max.X)-Math.Max(Min.X,b.Min.X)>e && Math.Min(Max.Y,b.Max.Y)-Math.Max(Min.Y,b.Min.Y)>e && Math.Min(Max.Z,b.Max.Z)-Math.Max(Min.Z,b.Min.Z)>e;
     public bool Contains(Vec p,double e) => p.X>=Min.X-e&&p.X<=Max.X+e&&p.Y>=Min.Y-e&&p.Y<=Max.Y+e&&p.Z>=Min.Z-e&&p.Z<=Max.Z+e;
     public double Gap(Box b) { double x=Math.Max(0,Math.Max(Min.X-b.Max.X,b.Min.X-Max.X));double y=Math.Max(0,Math.Max(Min.Y-b.Max.Y,b.Min.Y-Max.Y));double z=Math.Max(0,Math.Max(Min.Z-b.Max.Z,b.Min.Z-Max.Z));return Math.Sqrt(x*x+y*y+z*z); }
 }
@@ -138,6 +139,7 @@ internal static class Collision
     // No discrete path samples: a thin blocker cannot fall between samples.
     public static bool TriangleHit(Tri a,Tri b,Vec displacement,double start,double epsilon)
     {
+        if(!a.Bounds.Sweep(displacement).Overlaps(b.Bounds,epsilon))return false;
         Vec[] ae={a.B-a.A,a.C-a.B,a.A-a.C},be={b.B-b.A,b.C-b.B,b.A-b.C};
         Vec an=a.Normal,bn=b.Normal;double lo=start,hi=1;
         if(!Axis(a,b,an,displacement,epsilon,ref lo,ref hi)||!Axis(a,b,bn,displacement,epsilon,ref lo,ref hi))return false;
@@ -169,7 +171,7 @@ internal static class Collision
     }
     public static bool InitialOverlap(Body a,Body b,double e,Func<bool> cancel=null)
     {
-        if(!a.Bounds.Overlaps(b.Bounds,e))return false;
+        if(!a.Bounds.InteriorOverlaps(b.Bounds,e))return false;
         foreach(var sa in a.Solids)foreach(var sb in b.Solids)
         {
             if(Walk(sa.Tree,sb.Tree,new Vec(),0,e,cancel))return true;

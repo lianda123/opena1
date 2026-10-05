@@ -9,7 +9,7 @@ public sealed class ExplodeBookHelpCommand : Command
 
 	protected override Result RunCommand(RhinoDoc doc, RunMode mode)
 	{
-		RhinoApp.WriteLine("ExplodeBook 2.0.0 命令：");
+		RhinoApp.WriteLine("ExplodeBook 2.0.1 命令：");
         RhinoApp.WriteLine("  EBAnalyze / EBFocus / EBRestore / EBReport - 分析、独显阻挡、恢复、查看顺序报告");
         RhinoApp.WriteLine("  EBPathSettings / EBDefineRigid / EBClearRigid - 分析精度和刚性零件识别");
         RhinoApp.WriteLine("  EBSetModuleDirection / EBResetModuleDirection - 指定或恢复模块装入方向");

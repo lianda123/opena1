@@ -270,13 +270,16 @@ internal static class CommandHelpers
 		return Result.Success;
 	}
 
-	public static void ReportWarnings(AssemblyAnalysis analysis)
-	{
-		foreach (string error in analysis.ValidationErrors) RhinoApp.WriteLine("装配验证未通过：" + error);
+    public static void ReportWarnings(AssemblyAnalysis analysis,bool detailed=false)
+    {
         RhinoApp.WriteLine(string.Format("装配分析：{0} ms；新建网格 {1}，复用网格 {2}，路径对检查 {3}，复用检查 {4}。", analysis.AnalysisMilliseconds, analysis.MeshBuilds, analysis.MeshHits, analysis.PairTests, analysis.CacheHits));
-		foreach (string warning in analysis.Warnings)
-		{
-			RhinoApp.WriteLine("ExplodeBook：" + warning);
-		}
+        foreach (string warning in detailed?analysis.Warnings:analysis.Warnings.Take(8))
+        {
+            RhinoApp.WriteLine("ExplodeBook：" + warning);
+        }
+        if(!detailed&&analysis.Warnings.Count>8)RhinoApp.WriteLine("其余 {0} 条提示可运行 EBReport 查看。",analysis.Warnings.Count-8);
+        if(analysis.ValidationErrors.Count>0&&!string.IsNullOrEmpty(analysis.ProgressSummary))RhinoApp.WriteLine("停止阶段："+analysis.ProgressSummary);
+        // Keep actionable failures last, so accessory warnings cannot bury them.
+        foreach (string error in analysis.ValidationErrors) RhinoApp.WriteLine("装配验证未通过：" + error);
 	}
 }

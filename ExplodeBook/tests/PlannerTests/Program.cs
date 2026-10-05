@@ -37,6 +37,10 @@ internal static class Program
         Check(Collision.InitialOverlap(a,inside,1e-7),"contained solids are rejected");
         Check(Collision.InitialOverlap(a,B("same",Box(0,0,0,1,1,1)),1e-7),"coincident equal solids are rejected");
         Check(Collision.InitialOverlap(a,B("cross",Box(.5,-1,.5,1.5,2,.6)),1e-7),"transverse overlap is rejected");
+        var farA=B("farA",Box(2700,0,0,2701.00024,1,1));var farB=B("farB",Box(2701,0,0,2702,1,1));
+        Check(!Collision.InitialOverlap(farA,farB,.001),"0.00024mm rounding at distant world coordinates is treated within contact tolerance");
+        Check(Collision.InitialOverlap(B("deep",Box(2700,0,0,2701.02,1,1)),farB,.001),"real 0.02mm penetration still fails with 0.001mm contact tolerance");
+        Check(Collision.Swept(farA,farB,new Vec(10,0,0),.001),"contact tolerance cannot permit motion into the adjoining part");
         Check(!Collision.Swept(a,touch,new Vec(-10,0,0),1e-7),"leaving initial contact is allowed");
         Check(Collision.Swept(a,touch,new Vec(10,0,0),1e-7),"moving into contacting solid is blocked");
         var thin=B("thin",Box(5,-1,-1,5.001,2,2));

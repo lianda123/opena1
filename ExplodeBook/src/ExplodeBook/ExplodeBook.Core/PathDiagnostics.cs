@@ -5,6 +5,7 @@ using System.Linq;
 using Rhino;
 using Rhino.Display;
 using Rhino.DocObjects;
+using Rhino.Geometry;
 
 namespace ExplodeBook.Core;
 
@@ -16,8 +17,16 @@ internal static class PathDiagnostics
         protected override void DrawForeground(DrawEventArgs e)
         {
             if(e.RhinoDoc!=Doc)return;
-            foreach(var part in (Analysis.Blockers.Count>0?Analysis.Blockers.Keys:Analysis.Parts.Take(40)))
-                e.Display.DrawDot(part.Center,part.PartNumber+" [待修复]",Color.OrangeRed,Color.White);
+            // A global failure never proves that every selected part is faulty.
+            foreach(var part in Analysis.PartIssues.Keys.Concat(Analysis.Blockers.Keys).Distinct())
+            {
+                string reason=Analysis.PartIssues.TryGetValue(part,out var issue)?issue:"路径受阻";
+                e.Display.DrawDot(part.Center,part.PartNumber+" ["+reason+"]",Color.OrangeRed,Color.White);
+            }
+            string summary=Analysis.ValidationErrors.FirstOrDefault()??"";
+            if(summary.Length>72)summary=summary.Substring(0,72)+"…";
+            e.Display.Draw2dText("装配分析未完成："+summary,Color.DarkRed,new Point2d(12,24),false,14);
+            e.Display.Draw2dText("只有已定位的问题件显示标记；完整原因见 F2 或 EBReport。",Color.DarkRed,new Point2d(12,46),false,13);
         }
     }
     private static readonly Dictionary<uint,Markers> Displays=new Dictionary<uint,Markers>();

@@ -77,7 +77,7 @@ internal static class ExplodeBookEngine
     }
     public static int ClearGenerated(RhinoDoc doc)
     {
-        if(doc==null)return 0;PathDiagnostics.Restore(doc);var ids=Generated(doc);
+        if(doc==null)return 0;PathDiagnostics.Restore(doc);PathDiagnostics.Clear(doc);var ids=Generated(doc);
         foreach(var id in ids)doc.Objects.Delete(id,true);
         var names=new HashSet<string>((doc.Strings.GetValue(LayoutManifest)??"").Split(new[]{'\n'},StringSplitOptions.RemoveEmptyEntries));
         foreach(var page in (doc.Views.GetPageViews()??new RhinoPageView[0]).Where(p=>names.Contains(p.PageName)).ToList())page.Close();

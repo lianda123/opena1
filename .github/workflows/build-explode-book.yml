@@ -47,20 +47,20 @@ jobs:
       - name: Upload Rhino 7 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: ExplodeBook-2.0.0-rhino7
-          path: ExplodeBook/dist/ExplodeBook-2.0.0-rhino7.zip
+          name: ExplodeBook-2.0.1-rhino7
+          path: ExplodeBook/dist/ExplodeBook-2.0.1-rhino7.zip
           if-no-files-found: error
 
       - name: Upload Rhino 8 plug-in
         uses: actions/upload-artifact@v4
         with:
-          name: ExplodeBook-2.0.0-rhino8
-          path: ExplodeBook/dist/ExplodeBook-2.0.0-rhino8.zip
+          name: ExplodeBook-2.0.1-rhino8
+          path: ExplodeBook/dist/ExplodeBook-2.0.1-rhino8.zip
           if-no-files-found: error
 
       - name: Upload combined package
         uses: actions/upload-artifact@v4
         with:
-          name: ExplodeBook-2.0.0-rhino7-rhino8
-          path: ExplodeBook/dist/ExplodeBook-2.0.0-rhino7-rhino8.zip
+          name: ExplodeBook-2.0.1-rhino7-rhino8
+          path: ExplodeBook/dist/ExplodeBook-2.0.1-rhino7-rhino8.zip
           if-no-files-found: error

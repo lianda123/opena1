@@ -31,7 +31,7 @@ public sealed class FocusAssemblyCommand:Command
     }
 }
 public sealed class RestoreAssemblyCommand:Command
-{public override string EnglishName=>"EBRestore";protected override Result RunCommand(RhinoDoc doc,RunMode mode){PathDiagnostics.Restore(doc);return Result.Success;}}
+{public override string EnglishName=>"EBRestore";protected override Result RunCommand(RhinoDoc doc,RunMode mode){PathDiagnostics.Restore(doc);PathDiagnostics.Clear(doc);return Result.Success;}}
 public sealed class AssemblyPathSettingsCommand:Command
 {
     public override string EnglishName=>"EBPathSettings";
@@ -71,7 +71,8 @@ public sealed class AssemblyReportCommand:Command
     protected override Result RunCommand(RhinoDoc doc,RunMode mode)
     {
         var analysis=IntegratedAssemblyPlanner.Session(doc).Last;if(analysis==null){RhinoApp.WriteLine("先运行 EBAnalyze 或 ExplodeBook。");return Result.Nothing;}
-        CommandHelpers.ReportWarnings(analysis);
+        CommandHelpers.ReportWarnings(analysis,true);
+        foreach(var issue in analysis.PartIssues)RhinoApp.WriteLine("检查零件："+issue.Key.PartNumber+"；"+issue.Value+"；原对象 ID："+string.Join("、",issue.Key.Objects.Where(PartResolver.Physical).Select(o=>o.Id)));
         foreach(var m in analysis.Modules){RhinoApp.WriteLine("模块 {0}：{1}",m.Number,m.Name);foreach(var p in m.Parts)RhinoApp.WriteLine(string.Format(CultureInfo.InvariantCulture,"  {0:00} {1} {2}；拆出方向 ({3:F3}, {4:F3}, {5:F3})",p.ModulePartOrder,p.PartNumber,p.Name,p.AutoDirection.X,p.AutoDirection.Y,p.AutoDirection.Z));}
         foreach(var blocked in analysis.Blockers)RhinoApp.WriteLine("受阻："+blocked.Key.PartNumber+"；阻挡件："+string.Join("、",blocked.Value.Select(p=>p.PartNumber)));
         RhinoApp.WriteLine("报告为最近一次分析；修改模型后重新运行 EBAnalyze。");return Result.Success;

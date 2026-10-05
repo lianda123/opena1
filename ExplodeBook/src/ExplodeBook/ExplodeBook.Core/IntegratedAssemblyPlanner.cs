@@ -43,7 +43,7 @@ internal static class IntegratedAssemblyPlanner
         var timer=Stopwatch.StartNew();long builds=session.MeshBuilds,hits=session.MeshHits;
         double units=settings.ModelUnitsPerMillimeter;
         double error=settings.MeshToleranceMillimeters*units;
-        double epsilon=Math.Max(1e-9*units,Math.Min(doc.ModelAbsoluteTolerance*.001,1e-6*units));
+        double epsilon=Math.Max(1e-9*units,Math.Min(doc.ModelAbsoluteTolerance,0.001*units));
         double travel=Math.Max(analysis.Bounds.Diagonal.Length*2,100*units);
         Func<string> budget=()=>timer.Elapsed.TotalSeconds>settings.AnalysisTimeoutSeconds?"分析超过时间上限，保留诊断且停止出图；可拆分模块或提高分析时间。":null;
         Func<bool> cancel=()=> {string exceeded=budget();if(exceeded!=null)throw new TimeoutException(exceeded);return AnalysisCancellation.Check();};
@@ -53,7 +53,9 @@ internal static class IntegratedAssemblyPlanner
         {
             foreach(var part in analysis.Parts)
             {
+                analysis.ProgressSummary="处理零件 "+(bodies.Count+analysis.PartIssues.Count+1)+"/"+analysis.Parts.Count+"："+part.PartNumber;
                 if(cancel())throw new OperationCanceledException();if(budget()!=null)throw new TimeoutException(budget());
+                try {
                 var body=BuildBody(part,doc,session,error);
                 body.ForcedBase=part.IsForcedBase;
                 if(part.HasExactExplosionOffset&&part.HasCustomDirection&&Math.Abs(V(part.ExactExplosionOffset).Unit.Dot(V(part.CustomDirection).Unit)-1)>1e-6)
@@ -71,20 +73,32 @@ internal static class IntegratedAssemblyPlanner
                     }
                 }
                 bodies[part]=body;
+                }
+                catch(OperationCanceledException){throw;}
+                catch(TimeoutException){throw;}
+                catch(Exception ex)
+                {
+                    string label=ex.Message.Contains("25万")?"网格过密":ex.Message.Contains("分析网格")?"网格生成失败":ex.Message.Contains("方向冲突")?"方向冲突":ex.Message.Contains("未封闭")||ex.Message.Contains("无效")?"实体需检查":"分析失败";
+                    analysis.PartIssues[part]=label;analysis.ValidationErrors.Add(ex.Message.StartsWith(part.PartNumber,StringComparison.Ordinal)?ex.Message:part.PartNumber+"："+ex.Message);
+                }
             }
+            if(analysis.ValidationErrors.Count>0)return;
             // Final assembly overlap is checked across module boundaries as well.
+            analysis.ProgressSummary="检查最终装配位置";
             var all=bodies.Values.ToList();
             var preliminary=new Plan();
             foreach(var pair in SequencePlanner.SpatialPairs(all,epsilon))
             {
                 if(cancel())throw new OperationCanceledException();if(budget()!=null)throw new TimeoutException(budget());
                 bool overlap=session.Pairs.Get(scope+"|initial|"+pair.Item1.Id+"|"+pair.Item2.Id,()=>Collision.InitialOverlap(pair.Item1,pair.Item2,epsilon,cancel),out bool cached);
-                if(overlap){preliminary.Errors.Add("最终装配位置有实体重叠："+pair.Item1.Name+" / "+pair.Item2.Name);preliminary.Blocked[pair.Item1.Id]=new List<string>{pair.Item2.Id};preliminary.Blocked[pair.Item2.Id]=new List<string>{pair.Item1.Id};}
+                if(cached)analysis.CacheHits++;else analysis.PairTests++;
+                if(overlap){preliminary.Errors.Add("最终装配位置有实体重叠："+pair.Item1.Name+" / "+pair.Item2.Name);AddBlocker(preliminary,pair.Item1.Id,pair.Item2.Id);AddBlocker(preliminary,pair.Item2.Id,pair.Item1.Id);}
             }
             if(preliminary.Errors.Count>0){Record(analysis,preliminary,bodies);return;}
             analysis.Modules.Clear();
             foreach(var group in analysis.Parts.GroupBy(p=>string.IsNullOrWhiteSpace(p.Subassembly)?"主体模块":p.Subassembly.Trim(),StringComparer.OrdinalIgnoreCase))
             {
+                analysis.ProgressSummary="检查模块内部："+group.Key;
                 var module=new AssemblyModule{Name=group.Key,Sequence=analysis.Modules.Count+1};
                 module.Parts.AddRange(group);module.Bounds=group.Select(p=>p.Bounds).Aggregate(BoundingBox.Union);module.SizeScore=group.Sum(p=>p.SizeScore);analysis.Modules.Add(module);
                 var local=group.Select(p=>bodies[p]).ToList();
@@ -118,6 +132,7 @@ internal static class IntegratedAssemblyPlanner
             // Global manual part ranks also constrain whole-module assembly.
             foreach(var a in analysis.Modules)foreach(var b in analysis.Modules.Where(m=>m!=a))
                 if(a.Parts.Any(p=>ReadInt(p,"ExplodeBook.Order")>0&&b.Parts.Any(q=>ReadInt(q,"ExplodeBook.Order")>ReadInt(p,"ExplodeBook.Order"))))moduleBodies[b].Predecessors.Add(moduleBodies[a].Id);
+            analysis.ProgressSummary="检查模块总装路径";
             var modulePlan=new SequencePlanner(session.Pairs,epsilon,travel,scope,cancel,budget).Solve(moduleBodies.Values.ToList());
             analysis.PairTests+=modulePlan.PairTests;analysis.CacheHits+=modulePlan.CacheHits;
             if(!modulePlan.Success)
@@ -127,7 +142,7 @@ internal static class IntegratedAssemblyPlanner
                 {
                     var a=moduleBodies.First(m=>m.Value.Id==entry.Key).Key;
                     var blocked=moduleBodies.Where(m=>entry.Value.Contains(m.Value.Id)).SelectMany(m=>m.Key.Parts).ToList();
-                    foreach(var part in a.Parts)analysis.Blockers[part]=blocked;
+                    foreach(var part in a.Parts){analysis.Blockers[part]=blocked;analysis.PartIssues[part]="模块装入受阻";}
                 }
                 return;
             }
@@ -143,7 +158,7 @@ internal static class IntegratedAssemblyPlanner
             analysis.Signature=Hash(string.Join(";",analysis.Parts.Select(p=>bodies[p].Id+":"+p.PartNumber+":"+p.Name+":"+p.AssemblyOrder+":"+p.ModuleOrder+":"+V(p.AutoDirection).Key+":"+string.Join(",",p.Objects.Select(o=>o.Attributes.Name+":"+o.Attributes.ObjectColor.ToArgb()+":"+o.Attributes.ColorSource+":"+o.Attributes.LayerIndex+":"+doc.Layers[o.Attributes.LayerIndex].Color.ToArgb()))))+string.Join(";",analysis.Modules.Select(m=>m.Name+":"+V(m.AutoDirection).Key))+LinkedBookManager.Serialize(settings));
         }
         catch(Exception ex)
-        {analysis.ValidationErrors.Add(ex is OperationCanceledException?"分析已取消，未生成说明书。":ex.Message);}
+        {analysis.PlanVerified=false;analysis.ValidationErrors.Add((ex is OperationCanceledException?"分析已取消，未生成说明书。":ex.Message)+(string.IsNullOrEmpty(analysis.ProgressSummary)?"":"（进度："+analysis.ProgressSummary+"）"));}
         finally
         {
             analysis.AnalysisMilliseconds=timer.ElapsedMilliseconds;analysis.MeshBuilds=session.MeshBuilds-builds;analysis.MeshHits=session.MeshHits-hits;
@@ -171,16 +186,24 @@ internal static class IntegratedAssemblyPlanner
         {
             var part=bodies.First(p=>p.Value.Id==entry.Key).Key;
             analysis.Blockers[part]=bodies.Where(p=>entry.Value.Contains(p.Value.Id)).Select(p=>p.Key).ToList();
+            analysis.PartIssues[part]=plan.Errors.Any(e=>e.Contains("重叠"))?"位置重叠，需核对":"路径受阻";
         }
     }
+    private static void AddBlocker(Plan plan,string part,string obstacle)
+    {if(!plan.Blocked.TryGetValue(part,out var list))plan.Blocked[part]=list=new List<string>();if(!list.Contains(obstacle))list.Add(obstacle);}
     private static Body BuildBody(AssemblyPart part,RhinoDoc doc,PlanningSession cache,double error)
     {
         var geometry=new List<GeometryBase>();var signature=new StringBuilder();
         try {
         foreach(var obj in part.Objects.Where(PartResolver.Physical))Collect(obj,Transform.Identity,geometry,signature,new HashSet<Guid>(),0);
-        string key=Hash(signature+"|"+Format(error));
+        string key=Hash(signature+"|local-mesh-v201|"+Format(error));
         if(!cache.Meshes.TryGetValue(key,out var solids))
         {
+            // Keep tessellation close to the origin. Single-precision mesh
+            // vertices at large world coordinates otherwise invent penetration.
+            var origin=geometry.Select(g=>g.GetBoundingBox(true)).Aggregate(BoundingBox.Union).Center;
+            var local=Transform.Translation(-V(origin).X,-V(origin).Y,-V(origin).Z);
+            foreach(var g in geometry){if(g is Mesh original)original.Vertices.UseDoublePrecisionVertices=true;if(!g.Transform(local))throw new InvalidOperationException(part.PartNumber+"：分析副本变换失败。");}
             solids=new List<Solid>();
             foreach(var g in geometry)
             {
@@ -193,15 +216,18 @@ internal static class IntegratedAssemblyPlanner
                     Brep brep=g as Brep;
                     if(brep==null){converted=(g as Extrusion)?.ToBrep()??(g as SubD)?.ToBrep();brep=converted;}
                     if(brep==null||!brep.IsValid||!brep.IsSolid)throw new InvalidOperationException(part.PartNumber+"：曲面未封闭或实体无效；请先修复实体。");
-                    var mp=new MeshingParameters(0.5);mp.Tolerance=error;mp.RelativeTolerance=0;mp.RefineGrid=true;mp.SimplePlanes=true;
-                    var meshes=Mesh.CreateFromBrep(brep,mp);if(meshes==null||meshes.Length==0)throw new InvalidOperationException(part.PartNumber+"：无法生成分析网格。");
-                    mesh=new Mesh();try {foreach(var m in meshes)mesh.Append(m);}finally {foreach(var m in meshes)m?.Dispose();}
-                    mesh.Vertices.CombineIdentical(true,true);mesh.Weld(Math.PI);mesh.UnifyNormals();
-                    if(!mesh.IsClosed)throw new InvalidOperationException(part.PartNumber+"：分析网格出现开口，停止排序。");
+                    mesh=CreateAnalysisMesh(brep,error,true);
+                    if(mesh==null||!mesh.IsClosed||!mesh.IsValid)
+                    {
+                        mesh?.Dispose();mesh=null;
+                        if(AnalysisCancellation.Check())throw new OperationCanceledException();
+                        mesh=CreateAnalysisMesh(brep,error*.5,false);
+                    }
+                    if(mesh==null||!mesh.IsClosed||!mesh.IsValid)throw new InvalidOperationException(part.PartNumber+"：原实体有效封闭，但两次生成的分析网格仍未闭合；停止排序，请检查该件的微小边或修剪边，不要修复全部板件。");
                 }
                 mesh.Faces.ConvertQuadsToTriangles();
                 if(mesh.Faces.Count>250000)throw new InvalidOperationException(part.PartNumber+"：网格超过25万三角面，请简化该零件或提高网格容差。");
-                var triangles=new List<Tri>();foreach(var f in mesh.Faces)triangles.Add(new Tri(V(mesh.Vertices.Point3dAt(f.A)),V(mesh.Vertices.Point3dAt(f.B)),V(mesh.Vertices.Point3dAt(f.C))));
+                var triangles=new List<Tri>();foreach(var f in mesh.Faces)triangles.Add(new Tri(V(mesh.Vertices.Point3dAt(f.A))+V(origin),V(mesh.Vertices.Point3dAt(f.B))+V(origin),V(mesh.Vertices.Point3dAt(f.C))+V(origin)));
                 solids.Add(new Solid(triangles));
                 }finally {mesh?.Dispose();converted?.Dispose();}
             }
@@ -212,6 +238,19 @@ internal static class IntegratedAssemblyPlanner
         if(!body.Valid)throw new InvalidOperationException(part.PartNumber+"：没有可分析的封闭实体。");
         return body;
         } finally {foreach(var g in geometry)g.Dispose();}
+    }
+    private static Mesh CreateAnalysisMesh(Brep brep,double error,bool simplePlanes)
+    {
+        using var mp=new MeshingParameters(0.5){Tolerance=error,RelativeTolerance=0,RefineGrid=true,SimplePlanes=simplePlanes,JaggedSeams=false,ClosedObjectPostProcess=true};
+#if RHINO8
+        mp.DoublePrecision=true;
+#endif
+        var pieces=Mesh.CreateFromBrep(brep,mp);
+        if(pieces==null||pieces.Length==0)return null;
+        var mesh=new Mesh();mesh.Vertices.UseDoublePrecisionVertices=true;
+        try {foreach(var piece in pieces)mesh.Append(piece);mesh.Vertices.CombineIdentical(true,true);mesh.Weld(Math.PI);mesh.UnifyNormals();return mesh;}
+        catch {mesh.Dispose();throw;}
+        finally {foreach(var piece in pieces)piece?.Dispose();}
     }
     private static void Collect(RhinoObject obj,Transform transform,List<GeometryBase> output,StringBuilder signature,HashSet<Guid> stack,int depth)
     {
