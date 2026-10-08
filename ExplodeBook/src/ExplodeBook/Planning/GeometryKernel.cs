@@ -100,7 +100,20 @@ internal sealed class Solid
         Vec n=t.Normal;double length=n.Length;if(length<1e-15||Math.Abs((p-t.A).Dot(n))/length>e)return false;
         Vec u=t.B-t.A,v=t.C-t.A,w=p-t.A;double uu=u.Dot(u),uv=u.Dot(v),vv=v.Dot(v),wu=w.Dot(u),wv=w.Dot(v),den=uu*vv-uv*uv;
         if(Math.Abs(den)<1e-24)return false;double b=(vv*wu-uv*wv)/den,c=(uu*wv-uv*wu)/den;
-        return b>=-1e-9&&c>=-1e-9&&b+c<=1+1e-9;
+        if(b>=0&&c>=0&&b+c<=1)return true;
+        // Tolerance is a distance in model units, not a fixed barycentric
+        // fraction. Independently tessellated shared edges may differ by a
+        // fraction of the document tolerance, especially far from the origin.
+        // Points within that distance of an edge are boundary contact too.
+        return SegmentDistanceSquared(p,t.A,t.B)<=e*e ||
+               SegmentDistanceSquared(p,t.B,t.C)<=e*e ||
+               SegmentDistanceSquared(p,t.C,t.A)<=e*e;
+    }
+    private static double SegmentDistanceSquared(Vec p,Vec a,Vec b)
+    {
+        Vec edge=b-a;double length=edge.Dot(edge);
+        double fraction=length>1e-30?Math.Max(0,Math.Min(1,(p-a).Dot(edge)/length)):0;
+        Vec delta=p-(a+edge*fraction);return delta.Dot(delta);
     }
     private static bool RayBox(Box box,Vec o,Vec d,double e)
     {

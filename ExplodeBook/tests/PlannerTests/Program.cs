@@ -17,6 +17,14 @@ internal static class Program
     static Body B(string id,Solid solid){var b=new Body{Id=id,Name=id};b.Solids.Add(solid);return b;}
     static Solid Rotate(Solid solid,double angle) => new Solid(solid.Triangles.Select(t=>new Tri(Rot(t.A,angle),Rot(t.B,angle),Rot(t.C,angle))));
     static Vec Rot(Vec p,double angle)=>new Vec(p.X*Math.Cos(angle)-p.Y*Math.Sin(angle),p.X*Math.Sin(angle)+p.Y*Math.Cos(angle),p.Z);
+    static Vec FloatVertex(Vec p)=>new Vec((float)p.X,(float)p.Y,(float)p.Z);
+    static Solid CachedContactMesh(Solid solid,double angle,bool subdivide)
+    {
+        var triangles=solid.Triangles.AsEnumerable();
+        if(subdivide)triangles=triangles.SelectMany(t=>new[]{new Tri(t.A,t.B,t.Center),new Tri(t.B,t.C,t.Center),new Tri(t.C,t.A,t.Center)});
+        Vec Place(Vec p)=>FloatVertex(Rot(p,angle)+new Vec(2726.6317,23.91318,11.9531));
+        return new Solid(triangles.Select(t=>new Tri(Place(t.A),Place(t.B),Place(t.C))));
+    }
     static bool AnalyticSweep(Box a,Box b,Vec displacement)
     {
         double lo=0,hi=1;
@@ -41,6 +49,16 @@ internal static class Program
         Check(!Collision.InitialOverlap(farA,farB,.001),"0.00024mm rounding at distant world coordinates is treated within contact tolerance");
         Check(Collision.InitialOverlap(B("deep",Box(2700,0,0,2701.02,1,1)),farB,.001),"real 0.02mm penetration still fails with 0.001mm contact tolerance");
         Check(Collision.Swept(farA,farB,new Vec(10,0,0),.001),"contact tolerance cannot permit motion into the adjoining part");
+        bool edgeContacts=true;
+        for(int i=1;i<=60;i++) {
+            double theta=i*Math.PI/137;
+            var coarse=B("coarse",CachedContactMesh(Box(0,0,0,2.5,30,3),theta,false));
+            var fine=B("fine",CachedContactMesh(Box(2.5,0,0,5,30,3),theta,true));
+            edgeContacts &= !Collision.InitialOverlap(coarse,fine,.001);
+        }
+        Check(edgeContacts,"60 independently tessellated rotated face/edge contacts at X=2700 stay within 0.001mm tolerance");
+        var nearBoundary=CachedContactMesh(Box(0,0,0,2.5,30,3),.37,false);
+        Check(!nearBoundary.Inside(FloatVertex(Rot(new Vec(2.4996,0,1.5),.37)+new Vec(2726.6317,23.91318,11.9531)),.001),"a point near the meeting of trimmed face edges is boundary contact");
         Check(!Collision.Swept(a,touch,new Vec(-10,0,0),1e-7),"leaving initial contact is allowed");
         Check(Collision.Swept(a,touch,new Vec(10,0,0),1e-7),"moving into contacting solid is blocked");
         var thin=B("thin",Box(5,-1,-1,5.001,2,2));

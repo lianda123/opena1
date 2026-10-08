@@ -114,8 +114,10 @@ internal static class LinkedBookManager
 		{
 			if (clearSameKeyOnOtherLinkedSources)
 			{
-				foreach (RhinoObject item in from item in LinkedSources(doc)
-					where !selectedIds.Contains(item.Id)
+				foreach (RhinoObject item in from item in doc.Objects.GetObjectList(ObjectType.AnyObject)
+                    where !item.IsDeleted && !item.IsInstanceDefinitionGeometry
+                    where item.Attributes.GetUserString(AssemblyAnalyzer.GeneratedKey) != "1"
+					where !selectedIds.Contains(item.Id) && item.Attributes.GetUserString(key) != null
 					select item)
 				{
 					ObjectAttributes objectAttributes = item.Attributes.Duplicate();

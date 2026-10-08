@@ -1,4 +1,4 @@
-﻿[CmdletBinding()]
+[CmdletBinding()]
 param(
   [ValidateSet("7", "8", "Both")]
   [string]$RhinoVersion = "Both",
@@ -9,7 +9,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 $pluginId = "0BA544B2-8E36-4A71-8E3E-A33D722B04AC"
-$version = "2.0.1"
+$version = "2.0.2"
 $installRoot = Join-Path $env:LOCALAPPDATA "ExplodeBook\$version"
 if (Get-Process -Name Rhino -ErrorAction SilentlyContinue) {
   throw "请先关闭所有 Rhino 窗口，再运行安装脚本。"

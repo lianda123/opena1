@@ -20,6 +20,7 @@ internal static class CommandHelpers
         bool ordered=prompt.Contains("先后")||prompt.Contains("顺序点选");
         bool singlePart=prompt.Contains("选择一个")||prompt.Contains("单独指定")||prompt.Contains("需要调整");
         getter.GroupSelect = !ordered&&!singlePart;
+		getter.OneByOnePostSelect = ordered;
 		getter.SubObjectSelect = false;
 		getter.GeometryFilter = ObjectType.AnyObject;
         getter.EnablePreSelect(enable: !ordered, ignoreUnacceptablePreselectedObjects: true);

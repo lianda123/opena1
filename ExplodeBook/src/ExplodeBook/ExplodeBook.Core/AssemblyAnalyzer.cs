@@ -184,7 +184,9 @@ internal static class AssemblyAnalyzer
 		{
 			return 0;
 		}
-		foreach (List<RhinoObject> item in BuildGroupedComponents(orderedSelection))
+        var orderedObjects = orderedSelection.Where(o => o != null).ToList();
+        var selectedIds = new HashSet<Guid>(orderedObjects.Select(o => o.Id));
+		foreach (List<RhinoObject> item in BuildGroupedComponents(orderedObjects))
 		{
 			string text = NormalizeModuleName(ReadString(item, "ExplodeBook.Subassembly"));
 			if (!orderedModules.Contains(text, StringComparer.OrdinalIgnoreCase))
@@ -204,10 +206,16 @@ internal static class AssemblyAnalyzer
 		int num = 0;
 		using (AutoUpdateController.Suppress())
 		{
-			foreach (RhinoObject item2 in LinkedBookManager.LinkedSources(doc))
+			// Modules are defined before the first successful book. Restricting
+			// this to linked sources silently wrote zero ranks in that workflow.
+			foreach (RhinoObject item2 in doc.Objects.GetObjectList(ObjectType.AnyObject)
+                .Where(o => !o.IsDeleted && !o.IsInstanceDefinitionGeometry &&
+                    o.Attributes.GetUserString(GeneratedKey) != GeneratedValue &&
+                    o.Attributes.GetUserString("WoodSheetLayout.FlatCopy") != "1"))
 			{
 				string key = NormalizeModuleName(item2.Attributes.GetUserString("ExplodeBook.Subassembly"));
-				if (dictionary.TryGetValue(key, out var value))
+				if ((!string.IsNullOrWhiteSpace(item2.Attributes.GetUserString(SubassemblyKey)) ||
+                    selectedIds.Contains(item2.Id)) && dictionary.TryGetValue(key, out var value))
 				{
 					ObjectAttributes objectAttributes = item2.Attributes.Duplicate();
 					objectAttributes.SetUserString("ExplodeBook.ModuleOrder", value.ToString(CultureInfo.InvariantCulture));

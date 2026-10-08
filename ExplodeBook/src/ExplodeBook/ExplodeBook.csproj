@@ -17,9 +17,9 @@
     <Company>Lianda Design Tools</Company>
     <Product>ExplodeBook for Rhino</Product>
     <Description>Exploded views, assembly sequencing, arrows, part labels and instruction layouts for wooden products.</Description>
-    <Version>2.0.1</Version>
-    <AssemblyVersion>2.0.1.0</AssemblyVersion>
-    <FileVersion>2.0.1.0</FileVersion>
+    <Version>2.0.2</Version>
+    <AssemblyVersion>2.0.2.0</AssemblyVersion>
+    <FileVersion>2.0.2.0</FileVersion>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(TargetFramework)' == 'net48'">

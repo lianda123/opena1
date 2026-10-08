@@ -38,7 +38,7 @@ internal static class PathDiagnostics
         doc.Views.Redraw();
     }
     public static void Clear(RhinoDoc doc)
-    {if(Displays.TryGetValue(doc.RuntimeSerialNumber,out var m)){m.Enabled=false;Displays.Remove(doc.RuntimeSerialNumber);}}
+    {if(Displays.TryGetValue(doc.RuntimeSerialNumber,out var m)){m.Enabled=false;Displays.Remove(doc.RuntimeSerialNumber);doc.Views.Redraw();}}
     public static bool Focus(RhinoDoc doc,Guid source)
     {
         Restore(doc);var analysis=IntegratedAssemblyPlanner.Session(doc).Last;if(analysis==null)return false;
