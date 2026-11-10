@@ -1,0 +1,36 @@
+name: Build DielineUV
+
+on:
+  push:
+    paths:
+      - 'DielineUV/**'
+      - '.github/workflows/build-dieline-uv.yml'
+  pull_request:
+    paths:
+      - 'DielineUV/**'
+      - '.github/workflows/build-dieline-uv.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Compile Rhino 7 and 8 plug-ins
+        run: dotnet build DielineUV/DielineUV.csproj -c Release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DielineUV-Rhino7
+          path: DielineUV/bin/Release/net48/DielineUV.rhp
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DielineUV-Rhino8
+          path: DielineUV/bin/Release/net8.0/DielineUV.rhp
+          if-no-files-found: error
