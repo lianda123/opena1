@@ -21,8 +21,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.2.1.0")]
-[assembly: AssemblyFileVersion("0.2.1.0")]
+[assembly: AssemblyVersion("0.3.0.0")]
+[assembly: AssemblyFileVersion("0.3.0.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -33,7 +33,7 @@ namespace DielineUV
     public sealed class DielineUVPlugin : PlugIn { }
 
     [Guid("62994f85-8a4c-462d-905e-49015effa0ba")]
-    public sealed class DielineUVCommand : Rhino.Commands.Command
+    public sealed partial class DielineUVCommand : Rhino.Commands.Command
     {
         private const string Title = "刀模贴图助手";
         private const int Channel = 1;
@@ -43,11 +43,29 @@ namespace DielineUV
         {
             try
             {
+                var actions = new[] { "导出当前项目模板", "导入／更新项目贴图", "打开 ces.3dm 样例工具" };
+                var action = Dialogs.ShowListBox(Title + " 0.3.0", "选择操作", actions) as string;
+                if (action == null) return Result.Cancel;
+                if (action == actions[0]) return ExportProject(doc);
+                if (action == actions[1]) return ImportProject(doc);
+                return RunSample(doc);
+            }
+            catch (Exception error)
+            {
+                RhinoApp.WriteLine("{0}：{1}", Title, error.Message);
+                return Result.Failure;
+            }
+        }
+
+        private static Result RunSample(RhinoDoc doc)
+        {
+            try
+            {
                 var actions = new[] { "导出绘图模板", "应用校准图", "导入／更新 PNG 贴图" };
-                var action = Dialogs.ShowListBox(Title + " 0.2.1", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.3.0 · 样例", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
 
-                string manifestPath = Path.Combine(Path.GetDirectoryName(GetType().Assembly.Location),
+                string manifestPath = Path.Combine(Path.GetDirectoryName(typeof(DielineUVCommand).Assembly.Location),
                     "ces-sample", "manifest.json");
                 if (!File.Exists(manifestPath))
                     manifestPath = PickFile("选择贴图样例的 manifest.json", ".json");
@@ -109,7 +127,7 @@ namespace DielineUV
             Bundle bundle;
             using (var stream = File.OpenRead(path))
                 bundle = (Bundle)new DataContractJsonSerializer(typeof(Bundle)).ReadObject(stream);
-            if (bundle == null || bundle.Schema != "DielineUV.sample.v1" || bundle.Canvas == null ||
+            if (bundle == null || (bundle.Schema != "DielineUV.sample.v1" && bundle.Schema != "DielineUV.project.v1") || bundle.Canvas == null ||
                 bundle.Parts == null || bundle.Parts.Length == 0 ||
                 bundle.Canvas.Width <= 0 || bundle.Canvas.Height <= 0)
                 throw new InvalidDataException("样例对应关系文件无效。");
