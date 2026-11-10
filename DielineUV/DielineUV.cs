@@ -19,8 +19,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.2.0.0")]
-[assembly: AssemblyFileVersion("0.2.0.0")]
+[assembly: AssemblyVersion("0.2.1.0")]
+[assembly: AssemblyFileVersion("0.2.1.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -42,7 +42,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出绘图模板", "应用校准图", "导入／更新 PNG 贴图" };
-                var action = Dialogs.ShowListBox(Title, "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.2.1", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
 
                 string manifestPath = Path.Combine(Path.GetDirectoryName(GetType().Assembly.Location),
@@ -179,29 +179,42 @@ namespace DielineUV
             Directory.CreateDirectory(cache);
             var texturePath = Path.Combine(cache, Guid.NewGuid().ToString("N") + ".png");
             File.Copy(image, texturePath);
-            using (var material = new Material { Name = "DielineUV " + Path.GetFileNameWithoutExtension(texturePath) })
+            using (var material = new Material { DiffuseColor = System.Drawing.Color.White })
+            using (var bitmap = new Texture { FileName = texturePath })
             {
-                if (!material.SetBitmapTexture(texturePath)) throw new InvalidOperationException("无法建立图片材质。");
-                using (var texture = material.GetBitmapTexture())
-                {
-                    if (texture == null || texture.MappingChannelId != Channel)
-                        throw new InvalidOperationException("图片材质的纹理通道与 UV 映射不匹配。");
-                }
+                var renderMaterial = RenderMaterial.CreateBasicMaterial(material, doc);
+                var texture = RenderTexture.NewBitmapTexture(new SimulatedTexture(doc, bitmap), doc);
+                if (renderMaterial == null || texture == null)
+                    throw new InvalidOperationException("无法建立图片材质。");
+
+                var context = RenderContent.ChangeContexts.Program;
+                texture.SetProjectionMode(TextureProjectionMode.MappingChannel, context);
+                texture.SetMappingChannel(Channel, context);
+                if (texture.GetProjectionMode() != TextureProjectionMode.MappingChannel ||
+                    texture.GetMappingChannel() != Channel)
+                    throw new InvalidOperationException("Rhino 无法将图片纹理设为 UV 通道 1。");
+
+                renderMaterial.Name = "DielineUV " + Path.GetFileNameWithoutExtension(texturePath).Substring(0, 8);
+                var slot = renderMaterial.TextureChildSlotName(RenderMaterial.StandardChildSlots.Diffuse);
+                if (!renderMaterial.SetChild(texture, slot))
+                    throw new InvalidOperationException("无法将图片添加到材质的颜色纹理。");
+                renderMaterial.SetChildSlotOn(slot, true, context);
+                renderMaterial.SetChildSlotAmount(slot, 100.0, context);
                 uint undo = doc.BeginUndoRecord("DielineUV");
                 var applied = new List<Change>();
                 try
                 {
-                    int materialIndex = doc.Materials.Add(material);
-                    if (materialIndex < 0) throw new InvalidOperationException("无法创建材质。");
+                    doc.RenderMaterials.Add(renderMaterial);
                     foreach (var change in changes)
                     {
                         applied.Add(change);
                         if (!doc.Objects.ModifyTextureMapping(change.Id, Channel, change.Mapping))
                             throw new InvalidOperationException("无法设置对象贴图坐标。");
-                        var attributes = doc.Objects.FindId(change.Id).Attributes.Duplicate();
-                        attributes.MaterialSource = ObjectMaterialSource.MaterialFromObject;
-                        attributes.MaterialIndex = materialIndex;
-                        if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
+                        var target = doc.Objects.FindId(change.Id);
+                        target.RenderMaterial = renderMaterial;
+                        target.CommitChanges();
+                        var assigned = doc.Objects.FindId(change.Id).RenderMaterial;
+                        if (assigned == null || assigned.Id != renderMaterial.Id)
                             throw new InvalidOperationException("无法更新对象材质。");
                     }
                 }
