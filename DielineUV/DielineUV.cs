@@ -72,8 +72,8 @@ namespace DielineUV
                     if (direction == null) return Result.Cancel;
                     flip = Array.IndexOf(directions, direction);
                 }
-                ValidatePng(path, bundle.Canvas);
-                Apply(doc, sample, bundle, path, flip);
+                Canvas imageCanvas = MatchPngCanvas(path, bundle);
+                Apply(doc, sample, bundle, imageCanvas, path, flip);
                 RhinoApp.WriteLine("已为 {0} 个零件更新贴图。切换到渲染显示模式查看。", bundle.Parts.Length);
                 return Result.Success;
             }
@@ -102,12 +102,15 @@ namespace DielineUV
                 Directory.CreateDirectory(output);
                 foreach (string name in new[] { "template.png", "template.svg", "calibration.png", "manifest.json", "mapping.3dm" })
                     File.Copy(Path.Combine(sample, name), Path.Combine(output, name));
+                foreach (string name in new[] { "template-A3.png", "template-A3.svg", "calibration-A3.png" })
+                    if (File.Exists(Path.Combine(sample, name)))
+                        File.Copy(Path.Combine(sample, name), Path.Combine(output, name));
                 RhinoApp.WriteLine("绘图模板已导出到 {0}", output);
                 return Result.Success;
             }
         }
 
-        private static void ValidatePng(string path, Canvas canvas)
+        private static Canvas MatchPngCanvas(string path, Bundle bundle)
         {
             using (var reader = new BinaryReader(File.OpenRead(path)))
             {
@@ -118,9 +121,24 @@ namespace DielineUV
                     throw new InvalidDataException("请选择 PNG 图片。");
                 uint width = ReadUInt32(header, 16);
                 uint height = ReadUInt32(header, 20);
-                if (width == 0 || height == 0 || Math.Abs(width - height * ((double)canvas.Width / canvas.Height)) > 2.0)
-                    throw new InvalidDataException("图片比例与模板不一致。请按完整画板导出 PNG。");
+                if (MatchesCanvas(width, height, bundle.Canvas)) return bundle.Canvas;
+                if (MatchesCanvas(width, height, bundle.A3Canvas)) return bundle.A3Canvas;
+                string expected = string.Format("裁切模板 {0} × {1}", bundle.Canvas.Width, bundle.Canvas.Height);
+                if (bundle.A3Canvas != null)
+                    expected += string.Format("，横向 A3 模板 {0} × {1}", bundle.A3Canvas.Width, bundle.A3Canvas.Height);
+                throw new InvalidDataException(string.Format(
+                    "PNG 为 {0} × {1} 像素。支持{2}的比例。请用对应模板的完整画板导出。",
+                    width, height, expected));
             }
+        }
+
+        private static bool MatchesCanvas(uint width, uint height, Canvas canvas)
+        {
+            if (canvas == null || canvas.Width <= 0 || canvas.Height <= 0 || width == 0 || height == 0)
+                return false;
+            double expectedWidth = height * ((double)canvas.Width / canvas.Height);
+            // Allow raster rounding and small differences between vector and pixel canvas sizes.
+            return Math.Abs(width - expectedWidth) <= Math.Max(2.0, expectedWidth * 0.0025);
         }
 
         private static uint ReadUInt32(byte[] buffer, int start)
@@ -129,10 +147,13 @@ namespace DielineUV
                 ((uint)buffer[start + 2] << 8) | buffer[start + 3];
         }
 
-        private static void Apply(RhinoDoc doc, string sample, Bundle bundle, string image, int flip)
+        private static void Apply(RhinoDoc doc, string sample, Bundle bundle, Canvas imageCanvas, string image, int flip)
         {
             if (doc.ModelUnitSystem != UnitSystem.Millimeters)
                 throw new InvalidOperationException("请打开对应的毫米单位模型。");
+            bool remapCanvas = imageCanvas != bundle.Canvas;
+            if (remapCanvas && (!bundle.Canvas.HasWorldBounds || !imageCanvas.HasWorldBounds))
+                throw new InvalidDataException("样例缺少 A3 画板的定位范围。");
             var changes = new List<Change>();
             using (var mapFile = File3dm.Read(Path.Combine(sample, "mapping.3dm")))
             {
@@ -157,12 +178,18 @@ namespace DielineUV
                         throw new InvalidDataException("零件 " + part.Label + " 的 UV 数据不完整。");
                     using (var mesh = originalMesh.DuplicateMesh())
                     {
-                        if (part.Label == "C" && flip > 0)
+                        bool flipPart = part.Label == "C" && flip > 0;
+                        if (flipPart || remapCanvas)
                             for (int index = 0; index < mesh.TextureCoordinates.Count; index++)
                             {
                                 var uv = mesh.TextureCoordinates[index];
-                                double u = (flip & 2) == 0 ? uv.X : part.UvMin[0] + part.UvMax[0] - uv.X;
-                                double v = (flip & 1) == 0 ? uv.Y : part.UvMin[1] + part.UvMax[1] - uv.Y;
+                                double u = flipPart && (flip & 2) != 0 ? part.UvMin[0] + part.UvMax[0] - uv.X : uv.X;
+                                double v = flipPart && (flip & 1) != 0 ? part.UvMin[1] + part.UvMax[1] - uv.Y : uv.Y;
+                                if (remapCanvas)
+                                {
+                                    u = TranslateCanvasCoordinate(u, 0, bundle.Canvas, imageCanvas);
+                                    v = TranslateCanvasCoordinate(v, 1, bundle.Canvas, imageCanvas);
+                                }
                                 mesh.TextureCoordinates.SetTextureCoordinate(index, u, v);
                             }
                         var mapping = TextureMapping.CreateCustomMeshMapping(mesh);
@@ -241,6 +268,12 @@ namespace DielineUV
             }
         }
 
+        private static double TranslateCanvasCoordinate(double uv, int axis, Canvas source, Canvas target)
+        {
+            double world = source.WorldMin[axis] + uv * (source.WorldMax[axis] - source.WorldMin[axis]);
+            return (world - target.WorldMin[axis]) / (target.WorldMax[axis] - target.WorldMin[axis]);
+        }
+
         private sealed class Change
         {
             public Guid Id;
@@ -255,6 +288,7 @@ namespace DielineUV
     {
         [DataMember(Name = "schema")] public string Schema;
         [DataMember(Name = "canvas")] public Canvas Canvas;
+        [DataMember(Name = "a3_canvas")] public Canvas A3Canvas;
         [DataMember(Name = "parts")] public Part[] Parts;
     }
 
@@ -263,6 +297,17 @@ namespace DielineUV
     {
         [DataMember(Name = "width_px")] public int Width;
         [DataMember(Name = "height_px")] public int Height;
+        [DataMember(Name = "world_min_xy")] public double[] WorldMin;
+        [DataMember(Name = "world_max_xy")] public double[] WorldMax;
+
+        public bool HasWorldBounds
+        {
+            get
+            {
+                return WorldMin != null && WorldMax != null && WorldMin.Length == 2 && WorldMax.Length == 2 &&
+                    WorldMax[0] > WorldMin[0] && WorldMax[1] > WorldMin[1];
+            }
+        }
     }
 
     [DataContract]
