@@ -175,7 +175,7 @@ namespace DielineUV
                 }
             }
 
-            var cache = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DielineUV", "textures");
+            var cache = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "DielineUV", "textures");
             Directory.CreateDirectory(cache);
             var texturePath = Path.Combine(cache, Guid.NewGuid().ToString("N") + ".png");
             File.Copy(image, texturePath);
