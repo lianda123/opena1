@@ -207,10 +207,13 @@ namespace DielineUV
             var texturePath = Path.Combine(cache, Guid.NewGuid().ToString("N") + ".png");
             File.Copy(image, texturePath);
             using (var material = new Material { DiffuseColor = System.Drawing.Color.White })
-            using (var bitmap = new Texture { FileName = texturePath })
             {
                 var renderMaterial = RenderMaterial.CreateBasicMaterial(material, doc);
-                var texture = RenderTexture.NewBitmapTexture(new SimulatedTexture(doc, bitmap), doc);
+                // The document-aware SimulatedTexture constructors require Rhino 7.6.
+#pragma warning disable 618
+                var bitmap = new SimulatedTexture { Filename = texturePath };
+#pragma warning restore 618
+                var texture = RenderTexture.NewBitmapTexture(bitmap, doc);
                 if (renderMaterial == null || texture == null)
                     throw new InvalidOperationException("无法建立图片材质。");
 
