@@ -29,6 +29,8 @@ namespace DielineUV
             public string Label;
             public Transform ToLayout;
             public Curve[] Guides;
+            public Mesh MappingMesh;
+            public Point3d[] LayoutPoints;
         }
 
         private static Result ExportProject(RhinoDoc doc)
@@ -43,15 +45,19 @@ namespace DielineUV
                 BindParts(doc, frame, tolerance);
             if (parts.Count == 0)
                 throw new InvalidOperationException("本外框内没有可用关联。请选排版件所在的外框，或使用“手动绑定平板”。");
-            using (var dialog = new SelectFolderDialog { Title = "选择项目贴图模板的保存位置" })
+            try
             {
-                if (dialog.ShowDialog(RhinoEtoApp.MainWindow) != DialogResult.Ok) return Result.Cancel;
-                string output = Path.Combine(dialog.Directory, "DielineUV_" + Guid.NewGuid().ToString("N").Substring(0, 8));
-                Directory.CreateDirectory(output);
-                WriteProject(parts, frame, output);
-                RhinoApp.WriteLine("已为当前项目的 {0} 个零件生成贴图模板：{1}", parts.Count, output);
-                return Result.Success;
+                using (var dialog = new SelectFolderDialog { Title = "选择项目贴图模板的保存位置" })
+                {
+                    if (dialog.ShowDialog(RhinoEtoApp.MainWindow) != DialogResult.Ok) return Result.Cancel;
+                    string output = Path.Combine(dialog.Directory, "DielineUV_" + Guid.NewGuid().ToString("N").Substring(0, 8));
+                    Directory.CreateDirectory(output);
+                    WriteProject(parts, frame, output);
+                    RhinoApp.WriteLine("已为当前项目的 {0} 个零件生成贴图模板：{1}", parts.Count, output);
+                    return Result.Success;
+                }
             }
+            finally { foreach (var part in parts) if (part.MappingMesh != null) part.MappingMesh.Dispose(); }
         }
 
         private static Result ImportProject(RhinoDoc doc)
@@ -90,9 +96,17 @@ namespace DielineUV
                 var source = group.First().Source;
                 var flat = group.Select(pair => pair.Item).ToArray();
                 string label = PartName(source, flat[0]);
+                var folded = flat.Where(o => o.Attributes.GetUserString("WoodSheetLayoutLinkMode") == FoldMode).ToArray();
+                if (folded.Length != 0)
+                {
+                    if (folded.Length != 1)
+                        throw new InvalidDataException("折弯件 " + label + " 在同一外框中有多个展开副本，请保留本次要贴图的一个。");
+                    results.Add(ReadFoldPart(source, folded[0], tolerance));
+                    continue;
+                }
                 if (flat.Any(o => o.Attributes.GetUserString("WoodSheetLayoutLinkMode") == "Developed"))
                 {
-                    RhinoApp.WriteLine("跳过 {0}：折弯展开需要保存逐面 UV 对应。", label);
+                    RhinoApp.WriteLine("跳过 {0}：旧展开未保存逐面 UV，请先运行“展开折弯件并记录对应关系”。", label);
                     continue;
                 }
                 var solids = flat.Where(o => IsPart(o)).ToArray();
@@ -344,14 +358,14 @@ namespace DielineUV
                     else if (source.Geometry is Brep) saved = file.Objects.AddBrep((Brep)source.Geometry, original);
                     else saved = file.Objects.AddSurface((Surface)source.Geometry, original);
                     if (saved != source.Id) throw new InvalidOperationException("无法保存原件编号：" + part.Label);
-                    using (var mesh = BuildProjectMesh(source.Geometry))
+                    using (var mesh = part.MappingMesh == null ? BuildProjectMesh(source.Geometry) : part.MappingMesh.DuplicateMesh())
                     {
                         var min = new[] { double.PositiveInfinity, double.PositiveInfinity };
                         var max = new[] { double.NegativeInfinity, double.NegativeInfinity };
                         for (int i = 0; i < mesh.Vertices.Count; i++)
                         {
                             var v = mesh.Vertices[i];
-                            var p = part.ToLayout * new Point3d(v.X, v.Y, v.Z);
+                            var p = part.LayoutPoints == null ? part.ToLayout * new Point3d(v.X, v.Y, v.Z) : part.LayoutPoints[i];
                             double u = (p.X - frame.WorldMin[0]) / (frame.WorldMax[0] - frame.WorldMin[0]);
                             double w = (p.Y - frame.WorldMin[1]) / (frame.WorldMax[1] - frame.WorldMin[1]);
                             if (!mesh.TextureCoordinates.SetTextureCoordinate(i, u, w))
@@ -372,6 +386,7 @@ namespace DielineUV
                 string guides = Path.Combine(output, "template-crop.svg");
                 WriteProjectGuides(parts, frame, guides);
                 WriteFrameTemplates(guides, output, frame, frame);
+                WriteProjectCalibration(frame, Path.Combine(output, "calibration.png"));
                 using (var json = File.Create(Path.Combine(output, "manifest.json")))
                     new DataContractJsonSerializer(typeof(Bundle)).WriteObject(json, bundle);
             }
@@ -387,6 +402,38 @@ namespace DielineUV
             var mesh = new Mesh();
             foreach (var fragment in fragments) mesh.Append(fragment);
             return mesh;
+        }
+
+        private static void WriteProjectCalibration(Canvas frame, string path)
+        {
+            int cell = Math.Max(32, (int)Math.Ceiling(Math.Max(frame.Width, frame.Height) / 20.0));
+            using (var bitmap = new Eto.Drawing.Bitmap(frame.Width, frame.Height, Eto.Drawing.PixelFormat.Format32bppRgb))
+            {
+                using (var graphics = new Eto.Drawing.Graphics(bitmap))
+                using (var font = Eto.Drawing.SystemFonts.Default(Math.Max(10, cell / 8f)))
+                {
+                    graphics.Clear(Eto.Drawing.Colors.White);
+                    int columns = (frame.Width + cell - 1) / cell;
+                    int rows = (frame.Height + cell - 1) / cell;
+                    for (int row = 0; row < rows; row++)
+                        for (int col = 0; col < columns; col++)
+                        {
+                            int red = 80 + 140 * col / Math.Max(1, columns - 1);
+                            int blue = 80 + 140 * row / Math.Max(1, rows - 1);
+                            var color = ((row + col) & 1) == 0 ? Eto.Drawing.Color.FromArgb(red, 210, blue, 255) : Eto.Drawing.Colors.WhiteSmoke;
+                            var rectangle = new Eto.Drawing.RectangleF(col * cell, row * cell, cell, cell);
+                            graphics.FillRectangle(color, rectangle);
+                            graphics.DrawRectangle(Eto.Drawing.Colors.DimGray, rectangle);
+                            graphics.DrawText(font, Eto.Drawing.Colors.Black,
+                                new Eto.Drawing.PointF(col * cell + 4, row * cell + 4), (col + 1) + "/" + (row + 1));
+                        }
+                }
+                using (var png = new MemoryStream())
+                {
+                    bitmap.Save(png, Eto.Drawing.ImageFormat.Png);
+                    SavePngWithPhysicalSize(png.ToArray(), path, frame);
+                }
+            }
         }
 
         private static void WriteProjectGuides(IEnumerable<ProjectPart> parts, Canvas frame, string path)
