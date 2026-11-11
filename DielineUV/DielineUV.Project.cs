@@ -67,15 +67,25 @@ namespace DielineUV
 
         private static Result ImportProject(RhinoDoc doc)
         {
-            string manifest = PickFile("选择本项目导出时生成的 manifest.json", ".json");
-            if (manifest == null) return Result.Cancel;
-            Bundle bundle = ReadBundle(manifest);
-            if (bundle.Schema != "DielineUV.project.v1")
-                throw new InvalidDataException("这是样例对应关系。请选当前项目导出生成的 manifest.json。");
-            string image = PickFile("选择与该项目画板对应的整张 PNG", ".png");
+            string image = PickFile("选择你做好的整张 PNG 贴图", ".png");
             if (image == null) return Result.Cancel;
-            Canvas canvas = MatchPngCanvas(image, bundle, bundle.Canvas);
-            Apply(doc, Path.GetDirectoryName(manifest), bundle, canvas, image, 0);
+            string imageFolder = Path.GetDirectoryName(image);
+            string nearbyManifest = Path.Combine(imageFolder, "manifest.json");
+            string manifest = null;
+            if (File.Exists(nearbyManifest) && File.Exists(Path.Combine(imageFolder, "mapping.3dm")))
+            {
+                var options = new[] { "使用 PNG 同目录的项目模板", "选择另一份 manifest.json" };
+                var choice = Dialogs.ShowListBox(Title, "这张 PNG 对应哪份项目模板？", options) as string;
+                if (choice == null) return Result.Cancel;
+                if (choice == options[0]) manifest = nearbyManifest;
+            }
+            if (manifest == null)
+                manifest = PickFile("选择这张 PNG 对应的项目 manifest.json", ".json");
+            if (manifest == null) return Result.Cancel;
+
+            Bundle bundle = ReadBundle(manifest);
+            ValidatePngCanvas(image, bundle.Canvas);
+            Apply(doc, Path.GetDirectoryName(manifest), bundle, image);
             RhinoApp.WriteLine("已为当前项目的 {0} 个原件更新贴图。切换到渲染显示模式查看。", bundle.Parts.Length);
             return Result.Success;
         }
@@ -302,7 +312,7 @@ namespace DielineUV
             while (true)
             {
                 RhinoObject source;
-                using (var picker = BindingObjectPicker("点选一个原三维平板，回车完成绑定", PartTypes))
+                using (var picker = CreateObjectPicker("点选一个三维原件（可在外框外），回车完成绑定", PartTypes | ObjectType.PolysrfFilter))
                 {
                     picker.AcceptNothing(true);
                     var result = picker.Get();
@@ -359,7 +369,7 @@ namespace DielineUV
                             }
                             if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
                             {
-                                RhinoApp.WriteLine("按这三对点定位后原件超出外框。请重新选择这一件的刀模和定位点。");
+                                RhinoApp.WriteLine("这三对点算出的贴图范围超出外框。请检查定位点是否对应，或重选这一件的刀模。");
                                 continue;
                             }
                             parts.Add(new ProjectPart { Source = source, Label = PartName(source, source),
@@ -375,11 +385,11 @@ namespace DielineUV
             }
         }
 
-        private static GetObject BindingObjectPicker(string prompt, ObjectType geometryFilter)
+        private static GetObject CreateObjectPicker(string prompt, ObjectType geometryFilter)
         {
             var picker = new GetObject
             {
-                GeometryFilter = geometryFilter | ObjectType.PolysrfFilter,
+                GeometryFilter = geometryFilter,
                 GroupSelect = false,
                 SubObjectSelect = false,
                 DeselectAllBeforePostSelect = true
@@ -393,7 +403,7 @@ namespace DielineUV
         {
             while (true)
             {
-                using (var picker = BindingObjectPicker("点选或框选这一个零件的刀模轮廓或铺平实体，回车确认", PartTypes | ObjectType.Curve))
+                using (var picker = CreateObjectPicker("点选或框选这一个零件的刀模轮廓或铺平实体，回车确认", PartTypes | ObjectType.PolysrfFilter | ObjectType.Curve))
                 {
                     picker.SetCustomGeometryFilter((obj, geometry, component) => obj.Id != sourceId && obj.Id != frame.FrameObjectId);
                     if (picker.GetMultiple(1, 0) != GetResult.Object) return null;
@@ -409,6 +419,11 @@ namespace DielineUV
                                 var geometry = reference.Geometry();
                                 if (geometry == null || !InsideFrame(geometry.GetBoundingBox(true), frame, tolerance))
                                 {
+                                    var obj = reference.Object();
+                                    string label = string.IsNullOrWhiteSpace(obj?.Name)
+                                        ? reference.ObjectId.ToString("N").Substring(0, 8)
+                                        : obj.Name;
+                                    RhinoApp.WriteLine("刀模选区里的对象「{0}」超出外框或无法读取。请重选框内的刀模轮廓。", label);
                                     inside = false;
                                     break;
                                 }
@@ -419,8 +434,7 @@ namespace DielineUV
                         }
                         if (!inside || guides.Count == 0)
                         {
-                            RhinoApp.WriteLine(inside ? "找不到可用的刀模轮廓，请重新选择。"
-                                : "刀模轮廓或铺平实体需要完整位于外框内，请重新选择。");
+                            if (inside) RhinoApp.WriteLine("找不到可用的刀模轮廓，请重新选择。");
                             continue;
                         }
                         keepGuides = true;
@@ -543,13 +557,13 @@ namespace DielineUV
                             MappingId = mapId.ToString(), UvMin = min, UvMax = max });
                     }
                 }
-                var bundle = new Bundle { Schema = "DielineUV.project.v1", Canvas = frame, Parts = entries.ToArray() };
-                ValidateFrameCoversParts(bundle, frame);
+                var bundle = new Bundle { Schema = ProjectSchema, Canvas = frame, Parts = entries.ToArray() };
+                ValidateFrameCoversParts(bundle);
                 if (!file.Write(Path.Combine(output, "mapping.3dm"), 7))
                     throw new IOException("无法写出项目贴图映射。");
-                string guides = Path.Combine(output, "template-crop.svg");
+                string guides = Path.Combine(output, "template.svg");
                 WriteProjectGuides(parts, frame, guides);
-                WriteFrameTemplates(guides, output, frame, frame);
+                WritePngTemplate(guides, output, frame);
                 WriteProjectCalibration(frame, Path.Combine(output, "calibration.png"));
                 using (var json = File.Create(Path.Combine(output, "manifest.json")))
                     new DataContractJsonSerializer(typeof(Bundle)).WriteObject(json, bundle);
@@ -607,6 +621,12 @@ namespace DielineUV
             using (var writer = XmlWriter.Create(path, settings))
             {
                 writer.WriteStartElement("svg", ns);
+                double width = frame.WorldMax[0] - frame.WorldMin[0];
+                double height = frame.WorldMax[1] - frame.WorldMin[1];
+                var culture = CultureInfo.InvariantCulture;
+                writer.WriteAttributeString("width", width.ToString("G17", culture) + "mm");
+                writer.WriteAttributeString("height", height.ToString("G17", culture) + "mm");
+                writer.WriteAttributeString("viewBox", string.Format(culture, "0 0 {0:G17} {1:G17}", width, height));
                 writer.WriteStartElement("g", ns);
                 writer.WriteAttributeString("id", "REFERENCE_OUTLINES");
                 writer.WriteAttributeString("fill", "none");
