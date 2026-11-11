@@ -12,6 +12,7 @@ using Rhino.DocObjects;
 using Rhino.FileIO;
 using Rhino.Geometry;
 using Rhino.Input;
+using Rhino.Input.Custom;
 using Rhino.UI;
 
 namespace DielineUV
@@ -37,14 +38,18 @@ namespace DielineUV
         {
             var frame = SelectFrame(doc);
             if (frame == null) return Result.Cancel;
-            var options = new[] { "识别排版关联", "手动绑定平板（每件三点）" };
+            var options = new[] { "识别排版关联", "手动绑定平板（三对定位点）" };
             var option = Dialogs.ShowListBox(Title, "选择当前外框内零件的匹配方式", options) as string;
             if (option == null) return Result.Cancel;
             double tolerance = Math.Max(doc.ModelAbsoluteTolerance * 4.0, 0.02);
             var parts = option == options[0] ? FindLayoutParts(doc, frame, tolerance) :
-                BindParts(doc, frame, tolerance);
+                BindParts(frame, tolerance);
+            if (parts == null) return Result.Cancel;
             if (parts.Count == 0)
+            {
+                if (option == options[1]) return Result.Cancel;
                 throw new InvalidOperationException("本外框内没有可用关联。请选排版件所在的外框，或使用“手动绑定平板”。");
+            }
             try
             {
                 using (var dialog = new SelectFolderDialog { Title = "选择项目贴图模板的保存位置" })
@@ -291,55 +296,214 @@ namespace DielineUV
             finally { foreach (var curve in projected) curve.Dispose(); }
         }
 
-        private static List<ProjectPart> BindParts(RhinoDoc doc, Canvas frame, double tolerance)
+        private static List<ProjectPart> BindParts(Canvas frame, double tolerance)
         {
             var parts = new List<ProjectPart>();
             while (true)
             {
-                ObjRef sourceRef;
-                if (RhinoGet.GetOneObject("选择要绑定的原三维平板，回车结束绑定", false, PartTypes, out sourceRef) != Result.Success)
-                    return parts;
-                using (sourceRef)
+                RhinoObject source;
+                using (var picker = BindingObjectPicker("点选一个原三维平板，回车完成绑定", PartTypes))
                 {
-                    var source = sourceRef.Object();
-                    if (source == null || parts.Any(part => part.Source.Id == source.Id))
-                        throw new InvalidOperationException("这个原件已绑定，或无法读取。");
-                    ObjRef[] layoutRefs;
-                    if (RhinoGet.GetMultipleObjects("选择这一个零件的排版轮廓或铺平实体，回车确认",
-                        false, PartTypes | ObjectType.Curve, out layoutRefs) != Result.Success) return parts;
+                    picker.AcceptNothing(true);
+                    var result = picker.Get();
+                    if (result == GetResult.Nothing) return parts;
+                    if (result != GetResult.Object) return null;
+                    using (var reference = picker.Object(0)) source = reference.Object();
+                }
+                if (source == null || !IsPart(source) || source.IsLocked || source.IsReference ||
+                    source.Attributes.GetUserString(LayoutRole) == "FlatCopy" ||
+                    parts.Any(part => part.Source.Id == source.Id))
+                {
+                    RhinoApp.WriteLine("请选择尚未绑定、可以编辑的三维原件。");
+                    continue;
+                }
+
+                var sourceSnaps = Vertices(source.Geometry);
+                var mesh = source.Geometry as Mesh;
+                var brep = source.Geometry as Brep;
+                var converted = mesh == null && brep == null ? Brep.TryConvertBrep(source.Geometry) : null;
+                try
+                {
+                    var sourceBrep = brep ?? converted;
+                    if (mesh == null && sourceBrep == null)
+                    {
+                        RhinoApp.WriteLine("无法读取该原件的表面，请选择其他原件。");
+                        continue;
+                    }
+                    while (true)
+                    {
+                        var guides = PickBindingGuides(source.Id, frame, tolerance);
+                        if (guides == null) return null;
+                        var keepGuides = false;
+                        try
+                        {
+                            var original = PickBindingPoints("原件", sourceSnaps, point =>
+                            {
+                                if (mesh != null) return mesh.ClosestMeshPoint(point, tolerance) != null;
+                                var closest = sourceBrep.ClosestPoint(point);
+                                return closest.IsValid && closest.DistanceTo(point) <= tolerance;
+                            }, tolerance);
+                            if (original == null) return null;
+                            var flat = PickBindingPoints("刀模", guides.SelectMany(BindingCurveCorners).Distinct().ToArray(),
+                                point => guides.Any(curve => {
+                                    double parameter;
+                                    return curve.ClosestPoint(point, out parameter, tolerance);
+                                }), tolerance);
+                            if (flat == null) return null;
+                            Transform registration;
+                            if (Math.Abs(flat[0].Z - flat[1].Z) > tolerance || Math.Abs(flat[0].Z - flat[2].Z) > tolerance ||
+                                !TryRegister(original[0], original[1], original[2], flat[0], flat[1], flat[2], tolerance, out registration))
+                            {
+                                RhinoApp.WriteLine("三对点的顺序或间距不一致，或者刀模点不在同一高度。请重新选择这一件的刀模和定位点。");
+                                continue;
+                            }
+                            if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
+                            {
+                                RhinoApp.WriteLine("按这三对点定位后原件超出外框。请重新选择这一件的刀模和定位点。");
+                                continue;
+                            }
+                            parts.Add(new ProjectPart { Source = source, Label = PartName(source, source),
+                                Guides = guides, ToLayout = registration });
+                            keepGuides = true;
+                            RhinoApp.WriteLine("已绑定 {0}。继续选择下一个原件，或按回车导出。", PartName(source, source));
+                            break;
+                        }
+                        finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
+                    }
+                }
+                finally { if (converted != null) converted.Dispose(); }
+            }
+        }
+
+        private static GetObject BindingObjectPicker(string prompt, ObjectType geometryFilter)
+        {
+            var picker = new GetObject
+            {
+                GeometryFilter = geometryFilter | ObjectType.PolysrfFilter,
+                GroupSelect = false,
+                SubObjectSelect = false,
+                DeselectAllBeforePostSelect = true
+            };
+            picker.EnablePreSelect(false, true);
+            picker.SetCommandPrompt(prompt);
+            return picker;
+        }
+
+        private static Curve[] PickBindingGuides(Guid sourceId, Canvas frame, double tolerance)
+        {
+            while (true)
+            {
+                using (var picker = BindingObjectPicker("点选或框选这一个零件的刀模轮廓或铺平实体，回车确认", PartTypes | ObjectType.Curve))
+                {
+                    picker.SetCustomGeometryFilter((obj, geometry, component) => obj.Id != sourceId && obj.Id != frame.FrameObjectId);
+                    if (picker.GetMultiple(1, 0) != GetResult.Object) return null;
                     var guides = new List<Curve>();
+                    bool keepGuides = false;
                     try
                     {
-                        foreach (var reference in layoutRefs)
+                        bool inside = true;
+                        for (int i = 0; i < picker.ObjectCount; i++)
                         {
-                            var geometry = reference.Geometry();
-                            if (geometry == null || reference.ObjectId == source.Id ||
-                                !InsideFrame(geometry.GetBoundingBox(true), frame, tolerance))
-                                throw new InvalidDataException("排版对象必须完整位于选定外框内。");
-                            guides.AddRange(OutlineCurves(geometry));
+                            using (var reference = picker.Object(i))
+                            {
+                                var geometry = reference.Geometry();
+                                if (geometry == null || !InsideFrame(geometry.GetBoundingBox(true), frame, tolerance))
+                                {
+                                    inside = false;
+                                    break;
+                                }
+                                var curve = geometry as Curve;
+                                if (curve != null) guides.Add(curve.DuplicateCurve());
+                                else guides.AddRange(OutlineCurves(geometry));
+                            }
                         }
+                        if (!inside || guides.Count == 0)
+                        {
+                            RhinoApp.WriteLine(inside ? "找不到可用的刀模轮廓，请重新选择。"
+                                : "刀模轮廓或铺平实体需要完整位于外框内，请重新选择。");
+                            continue;
+                        }
+                        keepGuides = true;
+                        return guides.ToArray();
                     }
-                    finally { foreach (var reference in layoutRefs) reference.Dispose(); }
-
-                    var a = new Point3d[3];
-                    var b = new Point3d[3];
-                    for (int i = 0; i < 3; i++)
-                    {
-                        if (RhinoGet.GetPoint("捕捉原件大面上的定位点 " + (i + 1), false, out a[i]) != Result.Success ||
-                            RhinoGet.GetPoint("捕捉排版轮廓上对应点 " + (i + 1), false, out b[i]) != Result.Success)
-                            return parts;
-                    }
-                    Transform registration;
-                    if (Math.Abs(b[0].Z - b[1].Z) > tolerance || Math.Abs(b[0].Z - b[2].Z) > tolerance ||
-                        !TryRegister(a[0], a[1], a[2], b[0], b[1], b[2], tolerance, out registration))
-                        throw new InvalidDataException("三对点需要不共线、等尺寸，排版点需要位于同一水平面。");
-                    if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
-                        throw new InvalidDataException("定位后原件超出外框，请检查三对点是否一一对应。");
-                    if (guides.Count == 0) throw new InvalidDataException("找不到可绘制的排版轮廓。");
-                    parts.Add(new ProjectPart { Source = source, Label = PartName(source, source),
-                        Guides = guides.ToArray(), ToLayout = registration });
+                    finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
                 }
             }
+        }
+
+        private static IEnumerable<Point3d> BindingCurveCorners(Curve curve)
+        {
+            Polyline polyline;
+            if (curve.TryGetPolyline(out polyline)) return polyline;
+            var segments = curve.DuplicateSegments();
+            if (segments == null || segments.Length == 0) return new[] { curve.PointAtStart, curve.PointAtEnd };
+            try { return segments.SelectMany(segment => new[] { segment.PointAtStart, segment.PointAtEnd }).ToArray(); }
+            finally { foreach (var segment in segments) segment.Dispose(); }
+        }
+
+        private static Point3d[] PickBindingPoints(string side, Point3d[] corners, Func<Point3d, bool> onGeometry, double tolerance)
+        {
+            var picked = new List<Point3d>(3);
+            var snaps = corners.Where(point => point.IsValid).Distinct().Take(4096).ToArray();
+            while (picked.Count < 3)
+            {
+                using (var picker = new GetPoint())
+                {
+                    picker.SetCommandPrompt(side == "原件"
+                        ? "原件 " + (picked.Count + 1) + "/3：点同一大面上的角点"
+                        : "刀模 " + (picked.Count + 1) + "/3：按原件顺序点对应角点");
+                    picker.PermitOrthoSnap(false);
+                    if (snaps.Length != 0) picker.AddSnapPoints(snaps);
+                    picker.DynamicDraw += (sender, args) =>
+                    {
+                        for (int i = 0; i < picked.Count; i++)
+                            args.Display.DrawDot(picked[i], (i + 1).ToString(CultureInfo.InvariantCulture));
+                    };
+                    if (picker.Get() != GetResult.Point) return null;
+                    var point = picker.Point();
+                    Point3d corner;
+                    if (point.IsValid && !snaps.Any(candidate => candidate.DistanceTo(point) <= tolerance) &&
+                        TrySnapBindingCorner(picker, snaps, tolerance, out corner))
+                        point = corner;
+                    if (!point.IsValid || !onGeometry(point))
+                    {
+                        RhinoApp.WriteLine("定位点需要落在已选的{0}上。请靠近角点点击，或打开端点捕捉。", side);
+                        continue;
+                    }
+                    if (picked.Any(previous => previous.DistanceTo(point) <= tolerance) ||
+                        (picked.Count == 2 && new Line(picked[0], picked[1]).DistanceTo(point, false) <= tolerance))
+                    {
+                        RhinoApp.WriteLine("请点一个不同且不共线的角点。");
+                        continue;
+                    }
+                    picked.Add(point);
+                }
+            }
+            return picked.ToArray();
+        }
+
+        private static bool TrySnapBindingCorner(GetPoint picker, Point3d[] corners, double tolerance, out Point3d point)
+        {
+            point = Point3d.Unset;
+            var view = picker.View();
+            var click = picker.Point2d();
+            if (view == null || (click.X == 0 && click.Y == 0)) return false;
+            var viewport = view.ActiveViewport;
+            var nearby = new List<KeyValuePair<double, Point3d>>();
+            foreach (var corner in corners)
+            {
+                var screen = viewport.WorldToClient(corner);
+                var dx = screen.X - click.X;
+                var dy = screen.Y - click.Y;
+                var distance = Math.Sqrt(dx * dx + dy * dy);
+                if (distance <= 12) nearby.Add(new KeyValuePair<double, Point3d>(distance, corner));
+            }
+            if (nearby.Count == 0) return false;
+            var closest = nearby.OrderBy(candidate => candidate.Key).First();
+            if (nearby.Any(candidate => candidate.Key <= closest.Key + 1 &&
+                candidate.Value.DistanceTo(closest.Value) > tolerance)) return false;
+            point = closest.Value;
+            return true;
         }
 
         private static void WriteProject(List<ProjectPart> parts, Canvas frame, string output)

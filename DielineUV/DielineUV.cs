@@ -21,8 +21,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.0.0")]
-[assembly: AssemblyFileVersion("0.4.0.0")]
+[assembly: AssemblyVersion("0.4.1.0")]
+[assembly: AssemblyFileVersion("0.4.1.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -44,7 +44,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出当前项目模板", "导入／更新项目贴图", "展开折弯件并记录对应关系", "打开 ces.3dm 样例工具" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.0", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.1", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -63,7 +63,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出绘图模板", "应用校准图", "导入／更新 PNG 贴图" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.0 · 样例", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.1 · 样例", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
 
                 string manifestPath = Path.Combine(Path.GetDirectoryName(typeof(DielineUVCommand).Assembly.Location),
@@ -172,7 +172,8 @@ namespace DielineUV
                     Width = Math.Max(1, (int)Math.Round(width * pxPerMm)),
                     Height = Math.Max(1, (int)Math.Round(height * pxPerMm)),
                     WorldMin = new[] { bounds.Min.X, bounds.Min.Y },
-                    WorldMax = new[] { bounds.Max.X, bounds.Max.Y }
+                    WorldMax = new[] { bounds.Max.X, bounds.Max.Y },
+                    FrameObjectId = reference.ObjectId
                 };
             }
         }
@@ -503,6 +504,7 @@ namespace DielineUV
         [DataMember(Name = "height_px")] public int Height;
         [DataMember(Name = "world_min_xy")] public double[] WorldMin;
         [DataMember(Name = "world_max_xy")] public double[] WorldMax;
+        internal Guid FrameObjectId;
 
         public bool HasWorldBounds
         {
