@@ -389,8 +389,10 @@ namespace DielineUV
                     !objects.TryGetValue("OriginalMesh", out originalMesh) || !objects.TryGetValue("FlatMesh", out flatMesh) ||
                     !(reference is Brep) || !(originalMesh is Mesh) || !(flatMesh is Mesh))
                     throw new InvalidDataException("折弯件对应记录不完整，请重新展开。");
-                if (!GeometryBase.GeometryEquals(source.Geometry, original))
-                    throw new InvalidDataException("折弯原件 " + PartName(source, layout) + " 已移动或改变，请重新生成展开关系。");
+                var difference = SavedGeometryDifference(source.Geometry, original);
+                if (difference != null)
+                    throw new InvalidDataException("折弯原件 " + PartName(source, layout) + difference +
+                        "。若编辑过原件，请重新生成展开关系。");
                 Transform registration;
                 if (!TryMatchVertices(reference, layout.Geometry, tolerance, out registration) ||
                     !FoldEdgesMatch((Brep)reference, layout.Geometry as Brep, registration, tolerance))

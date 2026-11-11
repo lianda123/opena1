@@ -1,4 +1,4 @@
-刀模贴图助手 DielineUV 0.4.3
+刀模贴图助手 DielineUV 0.4.4
 
 Windows 安装
 1. 完整解压到固定目录。在 Rhino 输入 PlugInManager，点击“安装”。
@@ -6,7 +6,7 @@ Windows 安装
    Rhino8/DielineUV.rhp（针对 Rhino 8.21 或更新版本编译）；若 Rhino 8 使用
    .NET Framework 模式，选择 Rhino7 目录中的 .rhp。
 3. 升级旧版时重新选择新版 .rhp，然后完全退出并重启 Rhino。
-   输入 DielineUV，确认标题显示 0.4.3。
+   输入 DielineUV，确认标题显示 0.4.4。
 
 macOS 安装
 1. 双击 Mac 目录下与 Rhino 主版本相同的 .macrhi，或拖到该版本的 Dock 图标。
@@ -34,6 +34,8 @@ macOS 安装
    分开存放时，选对应的 manifest.json。切换到“渲染”模式查看。
 6. 同一张刀模可含多个零件。改图时直接重复第 5 步；如果改了外框、排版位置，
    或三维原件移动、重建，重新导出模板。保存模型时可勾选“保存纹理”。
+   新旧项目模板使用相同的几何校验。曾遇到未移动却提示移动时，可用原 PNG、
+   manifest.json 和 mapping.3dm 重新导入。项目导入和折弯展开关系使用相同的校验。
 
 折弯件使用步骤
 1. 运行 DielineUV，选择“展开折弯件并记录对应关系”，点选三维原件。

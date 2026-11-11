@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.3.0")]
-[assembly: AssemblyFileVersion("0.4.3.0")]
+[assembly: AssemblyVersion("0.4.4.0")]
+[assembly: AssemblyFileVersion("0.4.4.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -46,7 +46,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.3", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.4", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -266,8 +266,10 @@ namespace DielineUV
                     if (!mapObjects.TryGetValue(id, out source) ||
                         !mapObjects.TryGetValue(Guid.Parse(part.MappingId), out meshObject))
                         throw new InvalidDataException("缺少零件 " + part.Label + " 的映射数据。");
-                    if (!GeometryBase.GeometryEquals(obj.Geometry, source.Geometry))
-                        throw new InvalidOperationException("零件 " + part.Label + " 的形状或位置已改变，需要重新校准。");
+                    var difference = SavedGeometryDifference(obj.Geometry, source.Geometry);
+                    if (difference != null)
+                        throw new InvalidOperationException("零件 " + part.Label + difference +
+                            "。请确认使用本次导出的项目模板。若编辑过零件，请重新导出。");
                     var originalMesh = meshObject.Geometry as Mesh;
                     if (originalMesh == null || originalMesh.TextureCoordinates.Count != originalMesh.Vertices.Count)
                         throw new InvalidDataException("零件 " + part.Label + " 的 UV 数据不完整。");
