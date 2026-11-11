@@ -38,17 +38,17 @@ namespace DielineUV
         {
             var frame = SelectFrame(doc);
             if (frame == null) return Result.Cancel;
-            var options = new[] { "识别排版关联", "手动绑定平板（三对定位点）" };
+            var options = new[] { "识别排版关联", "选择原件和刀模（自动对齐）", "手动绑定平板（三对定位点）" };
             var option = Dialogs.ShowListBox(Title, "选择当前外框内零件的匹配方式", options) as string;
             if (option == null) return Result.Cancel;
             double tolerance = Math.Max(doc.ModelAbsoluteTolerance * 4.0, 0.02);
             var parts = option == options[0] ? FindLayoutParts(doc, frame, tolerance) :
-                BindParts(frame, tolerance);
+                BindParts(doc, frame, tolerance, option == options[1]);
             if (parts == null) return Result.Cancel;
             if (parts.Count == 0)
             {
-                if (option == options[1]) return Result.Cancel;
-                throw new InvalidOperationException("本外框内没有可用关联。请选排版件所在的外框，或使用“手动绑定平板”。");
+                if (option != options[0]) return Result.Cancel;
+                throw new InvalidOperationException("本外框内没有可用关联。请选排版件所在的外框，或使用“选择原件和刀模（自动对齐）”。");
             }
             try
             {
@@ -306,7 +306,7 @@ namespace DielineUV
             finally { foreach (var curve in projected) curve.Dispose(); }
         }
 
-        private static List<ProjectPart> BindParts(Canvas frame, double tolerance)
+        private static List<ProjectPart> BindParts(RhinoDoc doc, Canvas frame, double tolerance, bool automatic)
         {
             var parts = new List<ProjectPart>();
             while (true)
@@ -328,61 +328,80 @@ namespace DielineUV
                     continue;
                 }
 
-                var sourceSnaps = Vertices(source.Geometry);
-                var mesh = source.Geometry as Mesh;
-                var brep = source.Geometry as Brep;
-                var converted = mesh == null && brep == null ? Brep.TryConvertBrep(source.Geometry) : null;
-                try
+                while (true)
                 {
-                    var sourceBrep = brep ?? converted;
-                    if (mesh == null && sourceBrep == null)
+                    var guides = PickBindingGuides(source.Id, frame, tolerance, automatic);
+                    if (guides == null) return null;
+                    var keepGuides = false;
+                    try
                     {
-                        RhinoApp.WriteLine("无法读取该原件的表面，请选择其他原件。");
-                        continue;
-                    }
-                    while (true)
-                    {
-                        var guides = PickBindingGuides(source.Id, frame, tolerance);
-                        if (guides == null) return null;
-                        var keepGuides = false;
-                        try
+                        Transform registration;
+                        if (automatic)
                         {
-                            var original = PickBindingPoints("原件", sourceSnaps, point =>
+                            Point3d[] markers;
+                            var alignments = FindBoardAlignments(source.Geometry, guides, tolerance, out markers);
+                            alignments.RemoveAll(transform => !InsideFrame(source.Geometry.GetBoundingBox(transform), frame, tolerance));
+                            if (alignments.Count == 0)
                             {
-                                if (mesh != null) return mesh.ClosestMeshPoint(point, tolerance) != null;
-                                var closest = sourceBrep.ClosestPoint(point);
-                                return closest.IsValid && closest.DistanceTo(point) <= tolerance;
-                            }, tolerance);
-                            if (original == null) return null;
-                            var flat = PickBindingPoints("刀模", guides.SelectMany(BindingCurveCorners).Distinct().ToArray(),
-                                point => guides.Any(curve => {
-                                    double parameter;
-                                    return curve.ClosestPoint(point, out parameter, tolerance);
-                                }), tolerance);
-                            if (flat == null) return null;
-                            Transform registration;
-                            if (Math.Abs(flat[0].Z - flat[1].Z) > tolerance || Math.Abs(flat[0].Z - flat[2].Z) > tolerance ||
-                                !TryRegister(original[0], original[1], original[2], flat[0], flat[1], flat[2], tolerance, out registration))
-                            {
-                                RhinoApp.WriteLine("三对点的顺序或间距不一致，或者刀模点不在同一高度。请重新选择这一件的刀模和定位点。");
-                                continue;
+                                RhinoApp.WriteLine("无法自动对齐。请确认刀模轮廓闭合且与原件大面等尺寸，或改用手动绑定。");
+                                break;
                             }
-                            if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
-                            {
-                                RhinoApp.WriteLine("这三对点算出的贴图范围超出外框。请检查定位点是否对应，或重选这一件的刀模。");
-                                continue;
-                            }
-                            parts.Add(new ProjectPart { Source = source, Label = PartName(source, source),
-                                Guides = guides, ToLayout = registration });
-                            keepGuides = true;
-                            RhinoApp.WriteLine("已绑定 {0}。继续选择下一个原件，或按回车导出。", PartName(source, source));
-                            break;
+                            if (!ChooseBoardAlignment(doc, alignments, markers, guides[0].GetBoundingBox(true).Center.Z, out registration))
+                                return null;
                         }
-                        finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
+                        else
+                        {
+                            var result = PickManualRegistration(source.Geometry, guides, tolerance, out registration);
+                            if (result == Result.Cancel) return null;
+                            if (result != Result.Success) continue;
+                        }
+                        if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
+                        {
+                            RhinoApp.WriteLine("计算出的贴图范围超出外框。请重新选择刀模和定位点。");
+                            continue;
+                        }
+                        parts.Add(new ProjectPart { Source = source, Label = PartName(source, source),
+                            Guides = guides, ToLayout = registration });
+                        keepGuides = true;
+                        RhinoApp.WriteLine("已绑定 {0}。继续选择下一个原件，或按回车导出。", PartName(source, source));
+                        break;
                     }
+                    finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
                 }
-                finally { if (converted != null) converted.Dispose(); }
             }
+        }
+
+        private static Result PickManualRegistration(GeometryBase geometry, Curve[] guides, double tolerance, out Transform registration)
+        {
+            registration = Transform.Unset;
+            var sourceSnaps = Vertices(geometry);
+            var mesh = geometry as Mesh;
+            var brep = geometry as Brep;
+            var converted = mesh == null && brep == null ? Brep.TryConvertBrep(geometry) : null;
+            try
+            {
+                brep = brep ?? converted;
+                if (mesh == null && brep == null) throw new InvalidDataException("无法读取原件的表面。");
+                var original = PickBindingPoints("原件", sourceSnaps, point =>
+                {
+                    if (mesh != null) return mesh.ClosestMeshPoint(point, tolerance) != null;
+                    var closest = brep.ClosestPoint(point);
+                    return closest.IsValid && closest.DistanceTo(point) <= tolerance;
+                }, tolerance);
+                if (original == null) return Result.Cancel;
+                var flat = PickBindingPoints("刀模", guides.SelectMany(BindingCurveCorners).Distinct().ToArray(),
+                    point => guides.Any(curve => {
+                        double parameter;
+                        return curve.ClosestPoint(point, out parameter, tolerance);
+                    }), tolerance);
+                if (flat == null) return Result.Cancel;
+                if (Math.Abs(flat[0].Z - flat[1].Z) <= tolerance && Math.Abs(flat[0].Z - flat[2].Z) <= tolerance &&
+                    TryRegister(original[0], original[1], original[2], flat[0], flat[1], flat[2], tolerance, out registration))
+                    return Result.Success;
+                RhinoApp.WriteLine("三对点的顺序或间距不一致，或者刀模点不在同一高度。请重新选择刀模和定位点。");
+                return Result.Failure;
+            }
+            finally { converted?.Dispose(); }
         }
 
         private static GetObject CreateObjectPicker(string prompt, ObjectType geometryFilter)
@@ -399,7 +418,7 @@ namespace DielineUV
             return picker;
         }
 
-        private static Curve[] PickBindingGuides(Guid sourceId, Canvas frame, double tolerance)
+        private static Curve[] PickBindingGuides(Guid sourceId, Canvas frame, double tolerance, bool automatic)
         {
             while (true)
             {
@@ -429,6 +448,15 @@ namespace DielineUV
                                 }
                                 var curve = geometry as Curve;
                                 if (curve != null) guides.Add(curve.DuplicateCurve());
+                                else if (automatic)
+                                {
+                                    using (var board = ReadBoardOutline(geometry, tolerance))
+                                    {
+                                        if (board == null) continue;
+                                        guides.Add(board.Outer.DuplicateCurve());
+                                        guides.AddRange(board.Holes.Select(hole => hole.DuplicateCurve()));
+                                    }
+                                }
                                 else guides.AddRange(OutlineCurves(geometry));
                             }
                         }
