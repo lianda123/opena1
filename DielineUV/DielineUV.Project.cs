@@ -32,6 +32,7 @@ namespace DielineUV
             public Curve[] Guides;
             public Mesh MappingMesh;
             public Point3d[] LayoutPoints;
+            public int[] PrintFaces;
         }
 
         private static Result ExportProject(RhinoDoc doc)
@@ -85,7 +86,9 @@ namespace DielineUV
 
             Bundle bundle = ReadBundle(manifest);
             ValidatePngCanvas(image, bundle.Canvas);
-            Apply(doc, Path.GetDirectoryName(manifest), bundle, image);
+            var finish = ChooseSideFinish();
+            if (finish == null || !Apply(doc, Path.GetDirectoryName(manifest), bundle, image, finish))
+                return Result.Cancel;
             RhinoApp.WriteLine("已为当前项目的 {0} 个原件更新贴图。切换到渲染显示模式查看。", bundle.Parts.Length);
             return Result.Success;
         }
@@ -582,7 +585,8 @@ namespace DielineUV
                         Guid mapId = file.Objects.AddMesh(mesh, new ObjectAttributes { Name = "UV " + part.Label });
                         if (mapId == Guid.Empty) throw new InvalidOperationException("无法保存贴图网格：" + part.Label);
                         entries.Add(new Part { Label = part.Label, SourceId = source.Id.ToString(),
-                            MappingId = mapId.ToString(), UvMin = min, UvMax = max });
+                            MappingId = mapId.ToString(), UvMin = min, UvMax = max,
+                            PrintFaces = part.MappingMesh == null ? FlatPrintFaces(source.Geometry, part.ToLayout) : part.PrintFaces });
                     }
                 }
                 var bundle = new Bundle { Schema = ProjectSchema, Canvas = frame, Parts = entries.ToArray() };

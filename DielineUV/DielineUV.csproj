@@ -12,6 +12,7 @@
     <Compile Include="DielineUV.Fold.cs" />
     <Compile Include="DielineUV.Alignment.cs" />
     <Compile Include="DielineUV.GeometryCheck.cs" />
+    <Compile Include="DielineUV.SideMaterials.cs" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <PackageReference Include="RhinoCommon" Version="7.38.24338.17001" ExcludeAssets="runtime" />

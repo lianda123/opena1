@@ -81,6 +81,7 @@ namespace DielineUV
                         attributes.SetUserString(LayoutSource, source.Id.ToString());
                         attributes.SetUserString("WoodSheetLayoutLinkMode", FoldMode);
                         attributes.SetUserString(FoldArchiveKey, EncodeFold(source.Geometry, fold));
+                        attributes.SetUserString(PrintFacesKey, WriteFaceIndices(indices));
                         Guid id = doc.Objects.AddBrep(fold.Flat, attributes);
                         if (id == Guid.Empty) throw new IOException("无法把展开件添加到模型。");
                         doc.Objects.UnselectAll();
@@ -405,6 +406,7 @@ namespace DielineUV
                     throw new InvalidDataException("折弯展开件必须保持在世界 XY 平面，请只在平面内排版。");
                 return new ProjectPart { Source = source, Label = PartName(source, layout),
                     MappingMesh = mapping.DuplicateMesh(), LayoutPoints = positions,
+                    PrintFaces = ReadFaceIndices(layout.Attributes.GetUserString(PrintFacesKey)),
                     Guides = OutlineCurves(layout.Geometry).ToArray() };
             }
         }

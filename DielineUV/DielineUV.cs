@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.4.0")]
-[assembly: AssemblyFileVersion("0.4.4.0")]
+[assembly: AssemblyVersion("0.4.5.0")]
+[assembly: AssemblyFileVersion("0.4.5.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -38,7 +38,6 @@ namespace DielineUV
     {
         private const string Title = "刀模贴图助手";
         private const string ProjectSchema = "DielineUV.project.v1";
-        private const int Channel = 1;
         public override string EnglishName { get { return "DielineUV"; } }
 
         protected override Result RunCommand(RhinoDoc doc, RunMode mode)
@@ -46,7 +45,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.4", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.5", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -242,14 +241,36 @@ namespace DielineUV
                 ((uint)buffer[start + 2] << 8) | buffer[start + 3];
         }
 
-        private static void Apply(RhinoDoc doc, string templateDirectory, Bundle bundle, string image)
+        private static bool Apply(RhinoDoc doc, string templateDirectory, Bundle bundle, string image, SideFinish finish)
         {
             if (doc.ModelUnitSystem != UnitSystem.Millimeters)
                 throw new InvalidOperationException("请打开对应的毫米单位模型。");
             string mappingPath = Path.Combine(templateDirectory, "mapping.3dm");
             if (!File.Exists(mappingPath))
                 throw new InvalidDataException("找不到 mapping.3dm。请把它和同一次导出的 manifest.json 放在同一文件夹。");
+            int artworkChannel = ChooseArtworkChannel(doc, bundle);
             var changes = new List<Change>();
+            try
+            {
+                if (!PrepareChanges(doc, mappingPath, bundle, artworkChannel, finish, changes)) return false;
+                ApplyPrepared(doc, changes, image, artworkChannel, finish);
+                return true;
+            }
+            finally
+            {
+                foreach (var change in changes)
+                {
+                    change.FinishBrep?.Dispose();
+                    change.OriginalGeometry?.Dispose();
+                    change.Mapping?.Dispose();
+                    change.OldMapping?.Dispose();
+                }
+            }
+        }
+
+        private static bool PrepareChanges(RhinoDoc doc, string mappingPath, Bundle bundle, int artworkChannel,
+            SideFinish finish, List<Change> changes)
+        {
             using (var mapFile = File3dm.Read(mappingPath))
             {
                 if (mapFile == null) throw new InvalidDataException("无法读取 mapping.3dm。");
@@ -271,20 +292,27 @@ namespace DielineUV
                         throw new InvalidOperationException("零件 " + part.Label + difference +
                             "。请确认使用本次导出的项目模板。若编辑过零件，请重新导出。");
                     var originalMesh = meshObject.Geometry as Mesh;
-                    if (originalMesh == null || originalMesh.TextureCoordinates.Count != originalMesh.Vertices.Count)
+                    if (originalMesh == null || originalMesh.Vertices.Count == 0 ||
+                        originalMesh.TextureCoordinates.Count != originalMesh.Vertices.Count)
                         throw new InvalidDataException("零件 " + part.Label + " 的 UV 数据不完整。");
                     using (var mesh = originalMesh.DuplicateMesh())
                     {
                         var mapping = TextureMapping.CreateCustomMeshMapping(mesh);
                         if (mapping == null) throw new InvalidOperationException("无法建立 UV 映射。");
                         Transform oldTransform;
-                        var oldMapping = obj.GetTextureMapping(Channel, out oldTransform);
-                        changes.Add(new Change { Id = id, Mapping = mapping, OldMapping = oldMapping,
-                            OldTransform = oldTransform, Attributes = obj.Attributes.Duplicate() });
+                        var oldMapping = obj.GetTextureMapping(artworkChannel, out oldTransform);
+                        var change = new Change { Id = id, Mapping = mapping, OldMapping = oldMapping,
+                            OldTransform = oldTransform, Attributes = obj.Attributes.Duplicate() };
+                        changes.Add(change);
+                        if (!PrepareSideMaterials(change, obj, part, originalMesh, bundle.Canvas, finish)) return false;
                     }
                 }
             }
+            return true;
+        }
 
+        private static void ApplyPrepared(RhinoDoc doc, List<Change> changes, string image, int artworkChannel, SideFinish finish)
+        {
             var cache = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "DielineUV", "textures");
             Directory.CreateDirectory(cache);
             var texturePath = Path.Combine(cache, Guid.NewGuid().ToString("N") + ".png");
@@ -302,10 +330,10 @@ namespace DielineUV
 
                 var context = RenderContent.ChangeContexts.Program;
                 texture.SetProjectionMode(TextureProjectionMode.MappingChannel, context);
-                texture.SetMappingChannel(Channel, context);
+                texture.SetMappingChannel(artworkChannel, context);
                 if (texture.GetProjectionMode() != TextureProjectionMode.MappingChannel ||
-                    texture.GetMappingChannel() != Channel)
-                    throw new InvalidOperationException("Rhino 无法将图片纹理设为 UV 通道 1。");
+                    texture.GetMappingChannel() != artworkChannel)
+                    throw new InvalidOperationException("Rhino 无法设置图片的 UV 映射通道。");
 
                 renderMaterial.Name = "DielineUV " + Path.GetFileNameWithoutExtension(texturePath).Substring(0, 8);
                 var slot = renderMaterial.TextureChildSlotName(RenderMaterial.StandardChildSlots.Diffuse);
@@ -317,18 +345,26 @@ namespace DielineUV
                 var applied = new List<Change>();
                 try
                 {
-                    doc.RenderMaterials.Add(renderMaterial);
+                    if (!doc.RenderMaterials.Add(renderMaterial))
+                        throw new InvalidOperationException("无法保存图片材质。");
+                    Guid artworkId = changes.Any(change => change.FinishBrep != null)
+                        ? AddArtworkMaterial(doc, renderMaterial, artworkChannel) : Guid.Empty;
                     foreach (var change in changes)
                     {
                         applied.Add(change);
-                        if (!doc.Objects.ModifyTextureMapping(change.Id, Channel, change.Mapping))
+                        if (change.FinishBrep != null)
+                            ApplyFaceMaterials(doc, change, artworkId, finish);
+                        else if (!doc.Objects.ModifyRenderMaterial(change.Id, renderMaterial))
+                            throw new InvalidOperationException("无法更新对象材质。");
+                        if (!doc.Objects.ModifyTextureMapping(change.Id, artworkChannel, change.Mapping))
                             throw new InvalidOperationException("无法设置对象贴图坐标。");
                         var target = doc.Objects.FindId(change.Id);
-                        target.RenderMaterial = renderMaterial;
-                        target.CommitChanges();
-                        var assigned = doc.Objects.FindId(change.Id).RenderMaterial;
-                        if (assigned == null || assigned.Id != renderMaterial.Id)
-                            throw new InvalidOperationException("无法更新对象材质。");
+                        var attributes = target.Attributes.Duplicate();
+                        attributes.SetUserString(ArtworkChannelKey, artworkChannel.ToString(CultureInfo.InvariantCulture));
+                        if (change.PrintFacesKey != null)
+                            attributes.SetUserString(change.PrintFacesKey, WriteFaceIndices(change.PrintFaces));
+                        if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
+                            throw new InvalidOperationException("无法保存零件的贴图设置。");
                     }
                 }
                 catch
@@ -337,10 +373,12 @@ namespace DielineUV
                     {
                         try
                         {
-                            var obj = doc.Objects.FindId(change.Id);
-                            obj.SetTextureMapping(Channel, change.OldMapping, change.OldTransform);
+                            if (change.Replaced && !doc.Objects.Replace(change.Id, change.OriginalGeometry, false))
+                                RhinoApp.WriteLine("恢复原件失败，请用 Undo 撤销本次操作。");
                             if (!doc.Objects.ModifyAttributes(change.Id, change.Attributes, true))
                                 RhinoApp.WriteLine("恢复对象失败，请用 Undo 撤销本次操作。");
+                            var obj = doc.Objects.FindId(change.Id);
+                            obj.SetTextureMapping(artworkChannel, change.OldMapping, change.OldTransform);
                         }
                         catch { RhinoApp.WriteLine("恢复对象失败，请用 Undo 撤销本次操作。"); }
                     }
@@ -368,6 +406,11 @@ namespace DielineUV
             public TextureMapping Mapping, OldMapping;
             public Transform OldTransform;
             public ObjectAttributes Attributes;
+            public Brep FinishBrep;
+            public GeometryBase OriginalGeometry;
+            public int[] PrintFaces;
+            public string PrintFacesKey;
+            public bool Replaced;
         }
     }
 
@@ -406,5 +449,6 @@ namespace DielineUV
         [DataMember(Name = "mapping_id")] public string MappingId;
         [DataMember(Name = "uv_min")] public double[] UvMin;
         [DataMember(Name = "uv_max")] public double[] UvMax;
+        [DataMember(Name = "print_faces", EmitDefaultValue = false)] public int[] PrintFaces;
     }
 }
