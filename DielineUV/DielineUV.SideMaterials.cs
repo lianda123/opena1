@@ -179,19 +179,21 @@ namespace DielineUV
             }
         }
 
-        private static Guid AddArtworkMaterial(RhinoDoc doc, RenderMaterial renderMaterial, int artworkChannel)
+        private static Guid AddArtworkMaterial(RhinoDoc doc, string name, string texturePath, int artworkChannel)
         {
-            using (var material = renderMaterial.SimulatedMaterial(RenderTexture.TextureGeneration.Allow))
+#pragma warning disable 612, 618
+            using (var simulated = new SimulatedTexture())
+#pragma warning restore 612, 618
+            using (var material = new Material { Name = name, DiffuseColor = Color.White })
             {
-                if (material == null) throw new InvalidOperationException("无法建立印图面的材质。");
-                using (var bitmap = material.GetBitmapTexture())
+                simulated.Filename = texturePath;
+                simulated.SetMappingChannelAndProjectionMode(SimulatedTexture.ProjectionModes.MappingChannel,
+                    artworkChannel, SimulatedTexture.EnvironmentMappingModes.Automatic);
+                using (var bitmap = simulated.Texture())
                 {
-                    if (bitmap == null) throw new InvalidOperationException("印图材质缺少 PNG 纹理。");
-                    bitmap.MappingChannelId = artworkChannel;
-                    if (!material.SetBitmapTexture(bitmap))
+                    if (bitmap == null || bitmap.MappingChannelId != artworkChannel || !material.SetBitmapTexture(bitmap))
                         throw new InvalidOperationException("无法保存印图材质的 UV 通道。");
                 }
-                material.Name = renderMaterial.Name;
                 int index = doc.Materials.Add(material);
                 if (index < 0) throw new InvalidOperationException("无法保存印图面的材质。");
                 return doc.Materials[index].Id;

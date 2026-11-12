@@ -348,7 +348,7 @@ namespace DielineUV
                     if (!doc.RenderMaterials.Add(renderMaterial))
                         throw new InvalidOperationException("无法保存图片材质。");
                     Guid artworkId = changes.Any(change => change.FinishBrep != null)
-                        ? AddArtworkMaterial(doc, renderMaterial, artworkChannel) : Guid.Empty;
+                        ? AddArtworkMaterial(doc, renderMaterial.Name, texturePath, artworkChannel) : Guid.Empty;
                     foreach (var change in changes)
                     {
                         applied.Add(change);
