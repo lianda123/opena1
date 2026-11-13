@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.6.0")]
-[assembly: AssemblyFileVersion("0.4.6.0")]
+[assembly: AssemblyVersion("0.4.7.0")]
+[assembly: AssemblyFileVersion("0.4.7.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -45,7 +45,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.6", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.7", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -301,7 +301,7 @@ namespace DielineUV
                         if (mapping == null) throw new InvalidOperationException("无法建立 UV 映射。");
                         Transform oldTransform;
                         var oldMapping = obj.GetTextureMapping(artworkChannel, out oldTransform);
-                        var change = new Change { Id = id, Mapping = mapping, OldMapping = oldMapping,
+                        var change = new Change { Id = id, Label = part.Label, Mapping = mapping, OldMapping = oldMapping,
                             OldTransform = oldTransform, Attributes = obj.Attributes.Duplicate() };
                         changes.Add(change);
                         if (!PrepareSideMaterials(change, obj, part, originalMesh, bundle.Canvas, finish)) return false;
@@ -345,26 +345,39 @@ namespace DielineUV
                 var applied = new List<Change>();
                 try
                 {
-                    if (!doc.RenderMaterials.Add(renderMaterial))
+                    string artworkName = renderMaterial.Name;
+                    if (changes.Any(change => change.FinishBrep == null) && !doc.RenderMaterials.Add(renderMaterial))
                         throw new InvalidOperationException("无法保存图片材质。");
                     Guid artworkId = changes.Any(change => change.FinishBrep != null)
-                        ? AddArtworkMaterial(doc, renderMaterial.Name, texturePath, artworkChannel) : Guid.Empty;
+                        ? AddArtworkMaterial(doc, artworkName + " 逐面", texturePath, artworkChannel) : Guid.Empty;
+                    int? solidSideMaterialIndex = null;
                     foreach (var change in changes)
                     {
                         applied.Add(change);
                         if (change.FinishBrep != null)
-                            ApplyFaceMaterials(doc, change, artworkId, finish);
+                            ApplyFaceMaterials(doc, change, artworkId, artworkName, finish, ref solidSideMaterialIndex);
                         else if (!doc.Objects.ModifyRenderMaterial(change.Id, renderMaterial))
                             throw new InvalidOperationException("无法更新对象材质。");
                         if (!doc.Objects.ModifyTextureMapping(change.Id, artworkChannel, change.Mapping))
                             throw new InvalidOperationException("无法设置对象贴图坐标。");
                         var target = doc.Objects.FindId(change.Id);
-                        var attributes = target.Attributes.Duplicate();
-                        attributes.SetUserString(ArtworkChannelKey, artworkChannel.ToString(CultureInfo.InvariantCulture));
-                        if (change.PrintFacesKey != null)
-                            attributes.SetUserString(change.PrintFacesKey, WriteFaceIndices(change.PrintFaces));
-                        if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
-                            throw new InvalidOperationException("无法保存零件的贴图设置。");
+                        using (var attributes = target.Attributes.Duplicate())
+                        {
+                            if (change.FinishBrep != null)
+                            {
+                                // Renderer-specific assignments can override the new object material.
+                                attributes.MaterialRefs.Clear();
+                                attributes.MaterialSource = ObjectMaterialSource.MaterialFromObject;
+                                attributes.MaterialIndex = change.SideMaterialIndex;
+                            }
+                            attributes.SetUserString(ArtworkChannelKey, artworkChannel.ToString(CultureInfo.InvariantCulture));
+                            if (change.PrintFacesKey != null)
+                                attributes.SetUserString(change.PrintFacesKey, WriteFaceIndices(change.PrintFaces));
+                            if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
+                                throw new InvalidOperationException("无法保存零件 " + change.Label + " 的贴图和材质设置。");
+                        }
+                        if (change.FinishBrep != null)
+                            VerifyFaceMaterials(doc, change, artworkId);
                     }
                 }
                 catch
@@ -403,6 +416,7 @@ namespace DielineUV
         private sealed class Change
         {
             public Guid Id;
+            public string Label;
             public TextureMapping Mapping, OldMapping;
             public Transform OldTransform;
             public ObjectAttributes Attributes;
@@ -410,6 +424,7 @@ namespace DielineUV
             public GeometryBase OriginalGeometry;
             public int[] PrintFaces;
             public string PrintFacesKey;
+            public int SideMaterialIndex;
             public bool Replaced;
         }
     }

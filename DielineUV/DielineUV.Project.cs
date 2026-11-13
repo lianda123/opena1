@@ -63,7 +63,15 @@ namespace DielineUV
                     return Result.Success;
                 }
             }
-            finally { foreach (var part in parts) if (part.MappingMesh != null) part.MappingMesh.Dispose(); }
+            finally
+            {
+                foreach (var part in parts)
+                {
+                    part.MappingMesh?.Dispose();
+                    if (option != options[0])
+                        foreach (var guide in part.Guides) guide.Dispose();
+                }
+            }
         }
 
         private static Result ImportProject(RhinoDoc doc)
@@ -312,66 +320,112 @@ namespace DielineUV
         private static List<ProjectPart> BindParts(RhinoDoc doc, Canvas frame, double tolerance, bool automatic)
         {
             var parts = new List<ProjectPart>();
-            while (true)
+            bool finished = false;
+            try
             {
-                RhinoObject source;
-                using (var picker = CreateObjectPicker("点选一个三维原件（可在外框外），回车完成绑定", PartTypes | ObjectType.PolysrfFilter))
-                {
-                    picker.AcceptNothing(true);
-                    var result = picker.Get();
-                    if (result == GetResult.Nothing) return parts;
-                    if (result != GetResult.Object) return null;
-                    using (var reference = picker.Object(0)) source = reference.Object();
-                }
-                if (source == null || !IsPart(source) || source.IsLocked || source.IsReference ||
-                    source.Attributes.GetUserString(LayoutRole) == "FlatCopy" ||
-                    parts.Any(part => part.Source.Id == source.Id))
-                {
-                    RhinoApp.WriteLine("请选择尚未绑定、可以编辑的三维原件。");
-                    continue;
-                }
-
                 while (true)
                 {
-                    var guides = PickBindingGuides(source.Id, frame, tolerance, automatic);
-                    if (guides == null) return null;
-                    var keepGuides = false;
-                    try
+                    RhinoObject source;
+                    string mode = automatic ? "自动对齐" : "手动绑定";
+                    using (var picker = CreateObjectPicker(
+                        string.Format("{0}｜已绑定 {1} 件。点选三维原件（可在外框外），或回车导出", mode, parts.Count),
+                        PartTypes | ObjectType.PolysrfFilter))
                     {
-                        Transform registration;
-                        if (automatic)
+                        int auto = picker.AddOption(new LocalizeStringPair("Automatic", "自动对齐"));
+                        picker.AddOption(new LocalizeStringPair("Manual", "手动绑定"));
+                        picker.AcceptNothing(true);
+                        var result = picker.Get();
+                        if (result == GetResult.Nothing)
                         {
-                            Point3d[] markers;
-                            var alignments = FindBoardAlignments(source.Geometry, guides, tolerance, out markers);
-                            alignments.RemoveAll(transform => !InsideFrame(source.Geometry.GetBoundingBox(transform), frame, tolerance));
-                            if (alignments.Count == 0)
-                            {
-                                RhinoApp.WriteLine("无法自动对齐。请确认刀模轮廓闭合且与原件大面等尺寸，或改用手动绑定。");
-                                break;
-                            }
-                            if (!ChooseBoardAlignment(doc, alignments, markers, guides[0].GetBoundingBox(true).Center.Z, out registration))
-                                return null;
+                            finished = true;
+                            return parts;
                         }
-                        else
+                        if (result == GetResult.Option)
                         {
-                            var result = PickManualRegistration(source.Geometry, guides, tolerance, out registration);
-                            if (result == Result.Cancel) return null;
-                            if (result != Result.Success) continue;
-                        }
-                        if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
-                        {
-                            RhinoApp.WriteLine("计算出的贴图范围超出外框。请重新选择刀模和定位点。");
+                            automatic = picker.Option().Index == auto;
                             continue;
                         }
-                        parts.Add(new ProjectPart { Source = source, Label = PartName(source, source),
-                            Guides = guides, ToLayout = registration });
-                        keepGuides = true;
-                        RhinoApp.WriteLine("已绑定 {0}。继续选择下一个原件，或按回车导出。", PartName(source, source));
-                        break;
+                        if (result != GetResult.Object) return null;
+                        using (var reference = picker.Object(0)) source = reference.Object();
                     }
-                    finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
+                    if (source == null || !IsPart(source) || source.IsLocked || source.IsReference ||
+                        source.Attributes.GetUserString(LayoutRole) == "FlatCopy" ||
+                        parts.Any(part => part.Source.Id == source.Id))
+                    {
+                        RhinoApp.WriteLine("请选择尚未绑定、可以编辑的三维原件。");
+                        continue;
+                    }
+
+                    var partToAdd = BindPart(doc, source, frame, tolerance, automatic);
+                    if (partToAdd == null) continue;
+                    parts.Add(partToAdd);
+                    RhinoApp.WriteLine("已绑定 {0}。下一件可选择自动对齐或手动绑定。", partToAdd.Label);
                 }
             }
+            finally
+            {
+                if (!finished)
+                    foreach (var part in parts)
+                        foreach (var guide in part.Guides) guide.Dispose();
+            }
+        }
+
+        private static ProjectPart BindPart(RhinoDoc doc, RhinoObject source, Canvas frame, double tolerance, bool automatic)
+        {
+            var layout = PickBindingLayout(source.Id, frame, tolerance);
+            if (layout == null) return null;
+            string label = PartName(source, source);
+            if (automatic)
+            {
+                var guides = BindingGuides(layout, tolerance, true);
+                bool keepGuides = false;
+                try
+                {
+                    Point3d[] markers;
+                    var alignments = FindBoardAlignments(source.Geometry, guides, tolerance, out markers);
+                    alignments.RemoveAll(transform => !InsideFrame(source.Geometry.GetBoundingBox(transform), frame, tolerance));
+                    if (alignments.Count != 0)
+                    {
+                        Transform registration;
+                        if (!ChooseBoardAlignment(doc, alignments, markers, guides[0].GetBoundingBox(true).Center.Z, out registration))
+                            return null;
+                        keepGuides = true;
+                        return new ProjectPart { Source = source, Label = label, Guides = guides, ToLayout = registration };
+                    }
+                }
+                finally { if (!keepGuides) foreach (var guide in guides) guide.Dispose(); }
+                RhinoApp.WriteLine("零件 {0} 无法自动对齐，已转为手动绑定。请在已选原件和刀模上各点三个对应点。", label);
+            }
+
+            var manualGuides = BindingGuides(layout, tolerance, false);
+            if (manualGuides.Length == 0)
+            {
+                RhinoApp.WriteLine("找不到可用于定位的刀模边线。请重选这个零件的轮廓。");
+                return null;
+            }
+            bool keepManualGuides = false;
+            try
+            {
+                while (true)
+                {
+                    Transform registration;
+                    var result = PickManualRegistration(source.Geometry, manualGuides, tolerance, out registration);
+                    if (result == Result.Cancel)
+                    {
+                        RhinoApp.WriteLine("已跳过 {0}。可以重新选择这个零件，或继续绑定其他零件。", label);
+                        return null;
+                    }
+                    if (result != Result.Success) continue;
+                    if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
+                    {
+                        RhinoApp.WriteLine("贴图范围超出外框。请重新点对应位置，或按 Esc 返回原件选择。");
+                        continue;
+                    }
+                    keepManualGuides = true;
+                    return new ProjectPart { Source = source, Label = label, Guides = manualGuides, ToLayout = registration };
+                }
+            }
+            finally { if (!keepManualGuides) foreach (var guide in manualGuides) guide.Dispose(); }
         }
 
         private static Result PickManualRegistration(GeometryBase geometry, Curve[] guides, double tolerance, out Transform registration)
@@ -401,7 +455,7 @@ namespace DielineUV
                 if (Math.Abs(flat[0].Z - flat[1].Z) <= tolerance && Math.Abs(flat[0].Z - flat[2].Z) <= tolerance &&
                     TryRegister(original[0], original[1], original[2], flat[0], flat[1], flat[2], tolerance, out registration))
                     return Result.Success;
-                RhinoApp.WriteLine("三对点的顺序或间距不一致，或者刀模点不在同一高度。请重新选择刀模和定位点。");
+                RhinoApp.WriteLine("三对点的顺序或间距不一致，或者刀模点不在同一高度。请重新点对应位置。");
                 return Result.Failure;
             }
             finally { converted?.Dispose(); }
@@ -421,7 +475,7 @@ namespace DielineUV
             return picker;
         }
 
-        private static Curve[] PickBindingGuides(Guid sourceId, Canvas frame, double tolerance, bool automatic)
+        private static GeometryBase[] PickBindingLayout(Guid sourceId, Canvas frame, double tolerance)
         {
             while (true)
             {
@@ -429,51 +483,47 @@ namespace DielineUV
                 {
                     picker.SetCustomGeometryFilter((obj, geometry, component) => obj.Id != sourceId && obj.Id != frame.FrameObjectId);
                     if (picker.GetMultiple(1, 0) != GetResult.Object) return null;
-                    var guides = new List<Curve>();
-                    bool keepGuides = false;
-                    try
+                    var layout = new List<GeometryBase>();
+                    for (int i = 0; i < picker.ObjectCount; i++)
                     {
-                        bool inside = true;
-                        for (int i = 0; i < picker.ObjectCount; i++)
+                        using (var reference = picker.Object(i))
                         {
-                            using (var reference = picker.Object(i))
+                            var obj = reference.Object();
+                            var geometry = obj?.Geometry;
+                            if (geometry == null || !InsideFrame(geometry.GetBoundingBox(true), frame, tolerance))
                             {
-                                var geometry = reference.Geometry();
-                                if (geometry == null || !InsideFrame(geometry.GetBoundingBox(true), frame, tolerance))
-                                {
-                                    var obj = reference.Object();
-                                    string label = string.IsNullOrWhiteSpace(obj?.Name)
-                                        ? reference.ObjectId.ToString("N").Substring(0, 8)
-                                        : obj.Name;
-                                    RhinoApp.WriteLine("刀模选区里的对象「{0}」超出外框或无法读取。请重选框内的刀模轮廓。", label);
-                                    inside = false;
-                                    break;
-                                }
-                                var curve = geometry as Curve;
-                                if (curve != null) guides.Add(curve.DuplicateCurve());
-                                else if (automatic)
-                                {
-                                    using (var board = ReadBoardOutline(geometry, tolerance))
-                                    {
-                                        if (board == null) continue;
-                                        guides.Add(board.Outer.DuplicateCurve());
-                                        guides.AddRange(board.Holes.Select(hole => hole.DuplicateCurve()));
-                                    }
-                                }
-                                else guides.AddRange(OutlineCurves(geometry));
+                                string label = string.IsNullOrWhiteSpace(obj?.Name)
+                                    ? reference.ObjectId.ToString("N").Substring(0, 8)
+                                    : obj.Name;
+                                RhinoApp.WriteLine("刀模选区里的对象「{0}」超出外框或无法读取。请重选框内的刀模轮廓。", label);
+                                break;
                             }
+                            layout.Add(geometry);
                         }
-                        if (!inside || guides.Count == 0)
-                        {
-                            if (inside) RhinoApp.WriteLine("找不到可用的刀模轮廓，请重新选择。");
-                            continue;
-                        }
-                        keepGuides = true;
-                        return guides.ToArray();
                     }
-                    finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
+                    if (layout.Count == picker.ObjectCount) return layout.ToArray();
                 }
             }
+        }
+
+        private static Curve[] BindingGuides(IEnumerable<GeometryBase> layout, double tolerance, bool automatic)
+        {
+            var guides = new List<Curve>();
+            foreach (var geometry in layout)
+            {
+                if (geometry is Curve curve) guides.Add(curve.DuplicateCurve());
+                else if (!automatic) guides.AddRange(OutlineCurves(geometry));
+                else
+                {
+                    using (var board = ReadBoardOutline(geometry, tolerance))
+                    {
+                        if (board == null) continue;
+                        guides.Add(board.Outer.DuplicateCurve());
+                        guides.AddRange(board.Holes.Select(hole => hole.DuplicateCurve()));
+                    }
+                }
+            }
+            return guides.ToArray();
         }
 
         private static IEnumerable<Point3d> BindingCurveCorners(Curve curve)
