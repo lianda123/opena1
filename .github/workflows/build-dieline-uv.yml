@@ -24,6 +24,16 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Compile Rhino 7 and 8 plug-ins
         run: dotnet build DielineUV/DielineUV.csproj -c Release
+      - name: Verify Rhino 7 plug-in references the Rhino 7.0 SDK
+        shell: powershell
+        run: |
+          $path = (Resolve-Path 'DielineUV/bin/Release/net48/DielineUV.rhp').Path
+          $references = [Reflection.Assembly]::ReflectionOnlyLoadFrom($path).GetReferencedAssemblies()
+          $rhino = $references | Where-Object Name -eq 'RhinoCommon'
+          if ($null -eq $rhino -or $rhino.Version.Major -ne 7 -or $rhino.Version.Minor -ne 0) {
+            throw "Expected the Rhino 7.0 SDK reference, got $rhino"
+          }
+          Write-Output $rhino.FullName
       - uses: actions/upload-artifact@v4
         with:
           name: DielineUV-Rhino7

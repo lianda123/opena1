@@ -191,13 +191,22 @@ namespace DielineUV
                     artworkChannel, SimulatedTexture.EnvironmentMappingModes.Automatic);
                 using (var bitmap = simulated.Texture())
                 {
-                    if (bitmap == null || bitmap.MappingChannelId != artworkChannel || !material.SetBitmapTexture(bitmap))
+                    if (bitmap == null || bitmap.MappingChannelId != artworkChannel || !material.SetTexture(bitmap, TextureType.Bitmap))
                         throw new InvalidOperationException("无法保存印图材质的 UV 通道。");
                 }
                 int index = doc.Materials.Add(material);
                 if (index < 0) throw new InvalidOperationException("无法保存印图面的材质。");
                 return doc.Materials[index].Id;
             }
+        }
+
+        private static bool RestoreOriginalGeometry(RhinoDoc doc, Change change)
+        {
+            // The generic GeometryBase overload is absent in early Rhino 7.
+            if (change.OriginalGeometry is Brep brep) return doc.Objects.Replace(change.Id, brep);
+            if (change.OriginalGeometry is Extrusion extrusion) return doc.Objects.Replace(change.Id, extrusion);
+            if (change.OriginalGeometry is Surface surface) return doc.Objects.Replace(change.Id, surface);
+            return false;
         }
 
         private static void ApplyFaceMaterials(RhinoDoc doc, Change change, Guid artworkId, SideFinish finish)

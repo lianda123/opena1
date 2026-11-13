@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.5.0")]
-[assembly: AssemblyFileVersion("0.4.5.0")]
+[assembly: AssemblyVersion("0.4.6.0")]
+[assembly: AssemblyFileVersion("0.4.6.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -45,7 +45,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.5", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.6", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -373,7 +373,7 @@ namespace DielineUV
                     {
                         try
                         {
-                            if (change.Replaced && !doc.Objects.Replace(change.Id, change.OriginalGeometry, false))
+                            if (change.Replaced && !RestoreOriginalGeometry(doc, change))
                                 RhinoApp.WriteLine("恢复原件失败，请用 Undo 撤销本次操作。");
                             if (!doc.Objects.ModifyAttributes(change.Id, change.Attributes, true))
                                 RhinoApp.WriteLine("恢复对象失败，请用 Undo 撤销本次操作。");
