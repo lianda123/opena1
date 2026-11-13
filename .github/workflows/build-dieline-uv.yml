@@ -44,3 +44,10 @@ jobs:
           name: DielineUV-Rhino8
           path: DielineUV/bin/Release/net8.0/DielineUV.rhp
           if-no-files-found: error
+      - name: Package Windows and Mac installers
+        run: python DielineUV/package.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: DielineUV-Windows-Mac
+          path: DielineUV/dist/*.zip
+          if-no-files-found: error
