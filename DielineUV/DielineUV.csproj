@@ -11,6 +11,7 @@
     <Compile Include="DielineUV.Project.cs" />
     <Compile Include="DielineUV.Fold.cs" />
     <Compile Include="DielineUV.Alignment.cs" />
+    <Compile Include="DielineUV.BindingDisplay.cs" />
     <Compile Include="DielineUV.GeometryCheck.cs" />
     <Compile Include="DielineUV.SideMaterials.cs" />
   </ItemGroup>
