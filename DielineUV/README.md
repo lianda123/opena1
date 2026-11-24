@@ -1,4 +1,4 @@
-刀模贴图助手 DielineUV 0.4.8
+刀模贴图助手 DielineUV 0.4.9
 
 Windows 安装
 1. 完整解压到固定目录。在 Rhino 输入 PlugInManager，点击“安装”。
@@ -6,7 +6,7 @@ Windows 安装
    Rhino8/DielineUV.rhp（针对 Rhino 8.21 或更新版本编译）；若 Rhino 8 使用
    .NET Framework 模式，选择 Rhino7 目录中的 .rhp。
 3. 升级旧版时重新选择新版 .rhp，然后完全退出并重启 Rhino。
-   输入 DielineUV，确认标题显示 0.4.8。以前导出的项目模板可以继续使用。
+   输入 DielineUV，确认标题显示 0.4.9。以前导出的项目模板可以继续使用。
 
 macOS 安装
 1. 双击 Mac 目录下与 Rhino 主版本相同的 .macrhi，或拖到该版本的 Dock 图标。
@@ -69,6 +69,8 @@ macOS 安装
 
 构建记录
 GitHub 分支 codex/dieline-uv-rhp
-https://github.com/lianda123/opena1/actions/runs/43132386576
+0.4.9 按面检查实际 PNG、UV 通道及侧面颜色，允许 Rhino 重新分配内部材质编号。
+重新导入时清除旧的整件材质分配，再提交侧面材质和对象属性。
+发生错误时检查原属性和 UV 是否已恢复，具体恢复错误会注明零件。
 本版只进行编译和安装包完整性检查，按用户要求由用户进行 Rhino 实机验证。
 建议重点检查折弯处图案连续性、方向、孔洞边缘，以及保存再打开后的对应关系。

@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.8.0")]
-[assembly: AssemblyFileVersion("0.4.8.0")]
+[assembly: AssemblyVersion("0.4.9.0")]
+[assembly: AssemblyFileVersion("0.4.9.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -45,7 +45,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.8", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.9", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -264,6 +264,7 @@ namespace DielineUV
                     change.OriginalGeometry?.Dispose();
                     change.Mapping?.Dispose();
                     change.OldMapping?.Dispose();
+                    change.Attributes?.Dispose();
                 }
             }
         }
@@ -373,28 +374,26 @@ namespace DielineUV
                             attributes.SetUserString(ArtworkChannelKey, artworkChannel.ToString(CultureInfo.InvariantCulture));
                             if (change.PrintFacesKey != null)
                                 attributes.SetUserString(change.PrintFacesKey, WriteFaceIndices(change.PrintFaces));
-                            if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
+                            if (!CommitObjectAttributes(doc, change.Id, attributes))
                                 throw new InvalidOperationException("无法保存零件 " + change.Label + " 的贴图和材质设置。");
                         }
                         if (change.FinishBrep != null)
-                            VerifyFaceMaterials(doc, change, artworkId);
+                            VerifyFaceMaterials(doc, change, texturePath, artworkChannel);
                     }
                 }
                 catch
                 {
+                    var failed = new List<string>();
                     foreach (var change in Enumerable.Reverse(applied))
                     {
                         try
                         {
-                            if (change.Replaced && !RestoreOriginalGeometry(doc, change))
-                                RhinoApp.WriteLine("恢复原件失败，请用 Undo 撤销本次操作。");
-                            if (!doc.Objects.ModifyAttributes(change.Id, change.Attributes, true))
-                                RhinoApp.WriteLine("恢复对象失败，请用 Undo 撤销本次操作。");
-                            var obj = doc.Objects.FindId(change.Id);
-                            obj.SetTextureMapping(artworkChannel, change.OldMapping, change.OldTransform);
+                            RestoreChange(doc, change, artworkChannel);
                         }
-                        catch { RhinoApp.WriteLine("恢复对象失败，请用 Undo 撤销本次操作。"); }
+                        catch (Exception error) { failed.Add(change.Label + "（" + error.Message + "）"); }
                     }
+                    if (failed.Count != 0)
+                        RhinoApp.WriteLine("以下零件恢复失败，请用 Undo 撤销本次操作：{0}", string.Join("、", failed));
                     throw;
                 }
                 finally
@@ -425,6 +424,7 @@ namespace DielineUV
             public int[] PrintFaces;
             public string PrintFacesKey;
             public int SideMaterialIndex;
+            public System.Drawing.Color? SideColor;
             public bool Replaced;
         }
     }

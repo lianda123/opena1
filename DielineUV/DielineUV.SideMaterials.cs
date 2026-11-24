@@ -259,6 +259,13 @@ namespace DielineUV
                 throw new InvalidOperationException("无法更新零件 " + change.Label + " 的逐面材质。");
             change.Replaced = true;
             change.SideMaterialIndex = materialIndex;
+            change.SideColor = preserve ? (Color?)null : finish.Color ?? BrownEdge;
+
+            // Clear a previous object-level RDK assignment through the RDK API.
+            // Clearing MaterialRefs alone does not clear that assignment.
+            var updated = doc.Objects.FindId(change.Id);
+            if (updated.RenderMaterial != null)
+                doc.Objects.ModifyRenderMaterial(change.Id, null);
         }
 
         private static bool IsArtworkMaterialName(string name)
@@ -275,21 +282,85 @@ namespace DielineUV
             return index;
         }
 
-        private static void VerifyFaceMaterials(RhinoDoc doc, Change change, Guid artworkId)
+        private static void VerifyFaceMaterials(RhinoDoc doc, Change change, string texturePath, int artworkChannel)
         {
             var obj = doc.Objects.FindId(change.Id);
             var brep = obj?.Geometry as Brep;
-            var material = obj?.GetMaterial(ComponentIndex.Unset);
-            if (brep == null || material == null || obj.Attributes.MaterialIndex != change.SideMaterialIndex ||
-                obj.Attributes.MaterialSource != ObjectMaterialSource.MaterialFromObject)
-                throw new InvalidOperationException("Rhino 未保留零件 " + change.Label + " 的侧面材质。");
-            foreach (int index in change.PrintFaces)
+            var material = obj?.GetMaterial(true);
+            if (brep == null || material == null)
+                throw new InvalidOperationException("无法读取零件 " + change.Label + " 写入后的逐面材质。");
+            var printFaces = new HashSet<int>(change.PrintFaces);
+            foreach (var face in brep.Faces)
             {
-                if (index >= brep.Faces.Count)
-                    throw new InvalidOperationException("Rhino 未保留零件 " + change.Label + " 的印图面。");
-                int channel = brep.Faces[index].MaterialChannelIndex;
-                if (channel <= 0 || material.MaterialChannelIdFromIndex(channel) != artworkId)
-                    throw new InvalidOperationException("Rhino 未保留零件 " + change.Label + " 的印图面材质通道（面 " + (index + 1) + "）。");
+                // Rhino can remap material table indices. Check the material actually
+                // resolved for the face instead of requiring the original table index.
+                var resolved = obj.GetMaterial(new ComponentIndex(ComponentIndexType.BrepFace, face.FaceIndex));
+                if (resolved == null)
+                    throw new InvalidOperationException("无法读取零件 " + change.Label + " 的面材质。");
+                using (var bitmap = resolved.GetTexture(TextureType.Bitmap))
+                {
+                    if (printFaces.Contains(face.FaceIndex))
+                    {
+                        if (bitmap == null || bitmap.MappingChannelId != artworkChannel ||
+                            !SameTextureFile(bitmap.FileName, texturePath))
+                            throw new InvalidOperationException("零件 " + change.Label + " 的印图面未取得 PNG 和 UV 通道（面 " +
+                                (face.FaceIndex + 1) + "，物体材质编号 " + obj.Attributes.MaterialIndex + "）。");
+                    }
+                    else if (change.SideColor.HasValue &&
+                        (resolved.DiffuseColor.ToArgb() != change.SideColor.Value.ToArgb() || bitmap != null))
+                        throw new InvalidOperationException("零件 " + change.Label + " 的侧面颜色未正确写入（面 " +
+                            (face.FaceIndex + 1) + "，物体材质编号 " + obj.Attributes.MaterialIndex + "）。");
+                }
+            }
+        }
+
+        private static bool SameTextureFile(string actual, string expected)
+        {
+            if (string.IsNullOrWhiteSpace(actual)) return false;
+            return string.Equals(Path.GetFullPath(actual), Path.GetFullPath(expected),
+                Rhino.Runtime.HostUtils.RunningOnWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+        }
+
+        private static bool CommitObjectAttributes(RhinoDoc doc, Guid id, ObjectAttributes attributes)
+        {
+            var obj = doc.Objects.FindId(id);
+            if (obj == null) return false;
+            if (SameAttributes(obj.Attributes, attributes)) return true;
+            // Commit via a fresh RhinoObject so geometry replacements cannot leave
+            // a previously cached attributes wrapper in charge of the new object.
+            obj.Attributes = attributes;
+            if (obj.CommitChanges()) return true;
+            var saved = doc.Objects.FindId(id);
+            return saved != null && SameAttributes(saved.Attributes, attributes);
+        }
+
+        private static bool SameAttributes(ObjectAttributes a, ObjectAttributes b)
+        {
+            var options = new Rhino.FileIO.SerializationOptions { RhinoVersion = 7, WriteUserData = true };
+            return a.ToJSON(options) == b.ToJSON(options);
+        }
+
+        private static void RestoreChange(RhinoDoc doc, Change change, int artworkChannel)
+        {
+            if (change.Replaced && !RestoreOriginalGeometry(doc, change))
+                throw new InvalidOperationException("恢复原几何失败");
+            var obj = doc.Objects.FindId(change.Id);
+            if (obj == null) throw new InvalidOperationException("找不到原件");
+            // Restore only the modified mapping channel, including its original transform.
+            using (var current = obj.GetTextureMapping(artworkChannel))
+            {
+                if (current != null || change.OldMapping != null)
+                    obj.SetTextureMapping(artworkChannel, change.OldMapping, change.OldTransform);
+            }
+            if (!CommitObjectAttributes(doc, change.Id, change.Attributes))
+                throw new InvalidOperationException("恢复原属性失败");
+            obj = doc.Objects.FindId(change.Id);
+            Transform transform;
+            using (var restored = obj.GetTextureMapping(artworkChannel, out transform))
+            {
+                if (change.OldMapping == null ? restored != null :
+                    restored == null || restored.Id != change.OldMapping.Id || transform != change.OldTransform)
+                    throw new InvalidOperationException("恢复原 UV 通道失败");
             }
         }
     }
