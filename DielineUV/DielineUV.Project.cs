@@ -100,7 +100,16 @@ namespace DielineUV
             var finish = ChooseSideFinish();
             if (finish == null || !Apply(doc, Path.GetDirectoryName(manifest), bundle, image, finish))
                 return Result.Cancel;
-            RhinoApp.WriteLine("已为当前项目的 {0} 个原件更新贴图。切换到渲染显示模式查看。", bundle.Parts.Length);
+            var view = doc.Views.ActiveView;
+            var rendered = Rhino.Display.DisplayModeDescription.GetDisplayMode(Rhino.Display.DisplayModeDescription.RenderedId);
+            bool showingRendered = view != null && rendered != null;
+            if (showingRendered)
+            {
+                view.ActiveViewport.DisplayMode = rendered;
+                view.Redraw();
+            }
+            RhinoApp.WriteLine("已为当前项目的 {0} 个原件更新贴图。{1}", bundle.Parts.Length,
+                showingRendered ? "当前视图已切换为渲染显示。" : "请切换到渲染显示模式查看。");
             return Result.Success;
         }
 

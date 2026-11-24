@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.9.0")]
-[assembly: AssemblyFileVersion("0.4.9.0")]
+[assembly: AssemblyVersion("0.4.10.0")]
+[assembly: AssemblyFileVersion("0.4.10.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -45,7 +45,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.9", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.10", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -347,20 +347,20 @@ namespace DielineUV
                 try
                 {
                     string artworkName = renderMaterial.Name;
-                    if (changes.Any(change => change.FinishBrep == null) && !doc.RenderMaterials.Add(renderMaterial))
+                    // Face materials also need a registered RDK material, just as
+                    // the working whole-object texture assignment does.
+                    if (!doc.RenderMaterials.Add(renderMaterial))
                         throw new InvalidOperationException("无法保存图片材质。");
                     Guid artworkId = changes.Any(change => change.FinishBrep != null)
-                        ? AddArtworkMaterial(doc, artworkName + " 逐面", texturePath, artworkChannel) : Guid.Empty;
+                        ? AddArtworkMaterial(doc, renderMaterial, texturePath, artworkChannel) : Guid.Empty;
                     int? solidSideMaterialIndex = null;
                     foreach (var change in changes)
                     {
                         applied.Add(change);
                         if (change.FinishBrep != null)
-                            ApplyFaceMaterials(doc, change, artworkId, artworkName, finish, ref solidSideMaterialIndex);
+                            PrepareFaceMaterials(doc, change, artworkId, artworkName, finish, ref solidSideMaterialIndex);
                         else if (!doc.Objects.ModifyRenderMaterial(change.Id, renderMaterial))
                             throw new InvalidOperationException("无法更新对象材质。");
-                        if (!doc.Objects.ModifyTextureMapping(change.Id, artworkChannel, change.Mapping))
-                            throw new InvalidOperationException("无法设置对象贴图坐标。");
                         var target = doc.Objects.FindId(change.Id);
                         using (var attributes = target.Attributes.Duplicate())
                         {
@@ -378,7 +378,19 @@ namespace DielineUV
                                 throw new InvalidOperationException("无法保存零件 " + change.Label + " 的贴图和材质设置。");
                         }
                         if (change.FinishBrep != null)
-                            VerifyFaceMaterials(doc, change, texturePath, artworkChannel);
+                        {
+                            // Changing the parent material can reset per-face overrides.
+                            // Commit face channels after all parent attribute changes.
+                            if (!doc.Objects.Replace(change.Id, change.FinishBrep))
+                                throw new InvalidOperationException("无法更新零件 " + change.Label + " 的逐面材质。");
+                            change.Replaced = true;
+                        }
+                        // Apply UVs after face assignment, which can reset the mapping
+                        // in older Rhino versions.
+                        if (!doc.Objects.ModifyTextureMapping(change.Id, artworkChannel, change.Mapping))
+                            throw new InvalidOperationException("无法设置零件 " + change.Label + " 的贴图坐标。");
+                        if (change.FinishBrep != null)
+                            VerifyFaceMaterials(doc, change, renderMaterial.Id, texturePath, artworkChannel);
                     }
                 }
                 catch

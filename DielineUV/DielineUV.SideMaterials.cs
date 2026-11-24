@@ -181,20 +181,32 @@ namespace DielineUV
             }
         }
 
-        private static Guid AddArtworkMaterial(RhinoDoc doc, string name, string texturePath, int artworkChannel)
+        private static Guid AddArtworkMaterial(RhinoDoc doc, RenderMaterial renderMaterial,
+            string texturePath, int artworkChannel)
         {
-#pragma warning disable 612, 618
-            using (var simulated = new SimulatedTexture())
-#pragma warning restore 612, 618
-            using (var material = new Material { Name = name, DiffuseColor = Color.White })
+            // Use the same registered RDK texture as whole-object mode. The
+            // material channel holds an ON_Material id, whose RDK id must also
+            // be retained for Rendered view and Rhino Render.
+            var simulated = renderMaterial.SimulatedMaterial(RenderTexture.TextureGeneration.Allow);
+            if (simulated == null) throw new InvalidOperationException("无法生成印图面的图片材质。");
+            using (var material = new Material(simulated))
             {
-                simulated.Filename = texturePath;
-                simulated.SetMappingChannelAndProjectionMode(SimulatedTexture.ProjectionModes.MappingChannel,
-                    artworkChannel, SimulatedTexture.EnvironmentMappingModes.Automatic);
-                using (var bitmap = simulated.Texture())
+                material.Name = renderMaterial.Name + " 印图面";
+                material.RenderMaterialInstanceId = renderMaterial.Id;
+#pragma warning disable 612, 618
+                using (var source = new SimulatedTexture { Filename = texturePath })
+#pragma warning restore 612, 618
                 {
-                    if (bitmap == null || bitmap.MappingChannelId != artworkChannel || !material.SetTexture(bitmap, TextureType.Bitmap))
-                        throw new InvalidOperationException("无法保存印图材质的 UV 通道。");
+                    // Keep the ON_Material preview in sync with the RDK texture,
+                    // avoiding a baked simulation that uses another mapping channel.
+                    source.SetMappingChannelAndProjectionMode(SimulatedTexture.ProjectionModes.MappingChannel,
+                        artworkChannel, SimulatedTexture.EnvironmentMappingModes.Automatic);
+                    using (var bitmap = source.Texture())
+                    {
+                        if (bitmap == null || bitmap.MappingChannelId != artworkChannel ||
+                            !material.SetTexture(bitmap, TextureType.Bitmap))
+                            throw new InvalidOperationException("图片材质未保留原 PNG 和 UV 通道。");
+                    }
                 }
                 int index = doc.Materials.Add(material);
                 if (index < 0) throw new InvalidOperationException("无法保存印图面的材质。");
@@ -211,7 +223,7 @@ namespace DielineUV
             return false;
         }
 
-        private static void ApplyFaceMaterials(RhinoDoc doc, Change change, Guid artworkId, string artworkName,
+        private static void PrepareFaceMaterials(RhinoDoc doc, Change change, Guid artworkId, string artworkName,
             SideFinish finish, ref int? solidSideMaterialIndex)
         {
             var obj = doc.Objects.FindId(change.Id);
@@ -255,9 +267,6 @@ namespace DielineUV
                     face.ClearMaterialChannelIndex();
             }
 
-            if (!doc.Objects.Replace(change.Id, change.FinishBrep))
-                throw new InvalidOperationException("无法更新零件 " + change.Label + " 的逐面材质。");
-            change.Replaced = true;
             change.SideMaterialIndex = materialIndex;
             change.SideColor = preserve ? (Color?)null : finish.Color ?? BrownEdge;
 
@@ -282,7 +291,8 @@ namespace DielineUV
             return index;
         }
 
-        private static void VerifyFaceMaterials(RhinoDoc doc, Change change, string texturePath, int artworkChannel)
+        private static void VerifyFaceMaterials(RhinoDoc doc, Change change, Guid renderMaterialId,
+            string texturePath, int artworkChannel)
         {
             var obj = doc.Objects.FindId(change.Id);
             var brep = obj?.Geometry as Brep;
@@ -301,7 +311,8 @@ namespace DielineUV
                 {
                     if (printFaces.Contains(face.FaceIndex))
                     {
-                        if (bitmap == null || bitmap.MappingChannelId != artworkChannel ||
+                        if (resolved.RenderMaterialInstanceId != renderMaterialId ||
+                            bitmap == null || bitmap.MappingChannelId != artworkChannel ||
                             !SameTextureFile(bitmap.FileName, texturePath))
                             throw new InvalidOperationException("零件 " + change.Label + " 的印图面未取得 PNG 和 UV 通道（面 " +
                                 (face.FaceIndex + 1) + "，物体材质编号 " + obj.Attributes.MaterialIndex + "）。");
