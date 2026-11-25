@@ -10,6 +10,10 @@ version = re.search(r'AssemblyVersion\("(\d+\.\d+\.\d+)\.0"\)',
 dist = root / "dist"
 dist.mkdir(exist_ok=True)
 archive = dist / f"DielineUV-{version}-rhino7-rhino8.zip"
+textures = [(name, (root / "Textures" / name).read_bytes()) for name in ("MDF.png", "Wood.png")]
+for name, data in textures:
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError(f"Invalid supplied board texture: {name}")
 
 with ZipFile(archive, "w", ZIP_DEFLATED) as package:
     package.write(root / "README.md", "安装说明.txt")
@@ -17,6 +21,9 @@ with ZipFile(archive, "w", ZIP_DEFLATED) as package:
         assembly = (root / "bin" / "Release" / target / "DielineUV.rhp").read_bytes()
         if not assembly.startswith(b"MZ"):
             raise ValueError(f"Missing .NET assembly for {rhino}")
+        for name, data in textures:
+            if data not in assembly:
+                raise ValueError(f"Missing embedded board texture {name} for {rhino}")
         package.writestr(f"{rhino}/DielineUV.rhp", assembly)
         mac_bytes = BytesIO()
         with ZipFile(mac_bytes, "w", ZIP_DEFLATED) as mac:

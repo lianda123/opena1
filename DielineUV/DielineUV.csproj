@@ -14,6 +14,11 @@
     <Compile Include="DielineUV.Alignment.cs" />
     <Compile Include="DielineUV.GeometryCheck.cs" />
     <Compile Include="DielineUV.SideMaterials.cs" />
+    <Compile Include="DielineUV.Finishes.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Textures/MDF.png" LogicalName="DielineUV.Textures.MDF.png" />
+    <EmbeddedResource Include="Textures/Wood.png" LogicalName="DielineUV.Textures.Wood.png" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
     <!-- Build against the first Rhino 7 SDK so new features cannot silently raise the minimum version. -->

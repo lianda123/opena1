@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.12.0")]
-[assembly: AssemblyFileVersion("0.4.12.0")]
+[assembly: AssemblyVersion("0.4.13.0")]
+[assembly: AssemblyFileVersion("0.4.13.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -44,16 +44,17 @@ namespace DielineUV
         {
             try
             {
-                var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.12", "选择操作", actions) as string;
+                var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "调整现有贴图的单双面／背面／侧边材质", "展开折弯件并记录对应关系" };
+                var action = Dialogs.ShowListBox(Title + " 0.4.13", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
+                if (action == actions[2]) return EditProjectFinish(doc);
                 return PrepareFold(doc);
             }
             catch (Exception error)
             {
-                RhinoApp.WriteLine("{0} 0.4.12：{1}", Title, error.Message);
+                RhinoApp.WriteLine("{0} 0.4.13：{1}", Title, error.Message);
                 return Result.Failure;
             }
         }
@@ -252,18 +253,23 @@ namespace DielineUV
             var changes = new List<Change>();
             try
             {
+                PrepareProjectFinish(doc, bundle, finish);
                 if (!PrepareChanges(doc, mappingPath, bundle, artworkChannel, finish, changes)) return false;
                 ApplyPrepared(doc, changes, image, artworkChannel, finish);
                 return true;
             }
             finally
             {
+                finish.SideReference?.Dispose();
+                finish.BackReference?.Dispose();
                 foreach (var change in changes)
                 {
                     change.FinishBrep?.Dispose();
                     change.OriginalGeometry?.Dispose();
                     change.Mapping?.Dispose();
                     change.OldMapping?.Dispose();
+                    change.FinishMapping?.Dispose();
+                    change.OldFinishMapping?.Dispose();
                 }
             }
         }
@@ -304,7 +310,7 @@ namespace DielineUV
                         var change = new Change { Id = id, Mapping = mapping, OldMapping = oldMapping,
                             OldTransform = oldTransform, Attributes = obj.Attributes.Duplicate() };
                         changes.Add(change);
-                        if (!PrepareSideMaterials(change, obj, part, originalMesh, bundle.Canvas, finish)) return false;
+                        if (!PrepareSideMaterials(doc, change, obj, part, originalMesh, bundle.Canvas, finish)) return false;
                     }
                 }
             }
@@ -313,10 +319,7 @@ namespace DielineUV
 
         private static void ApplyPrepared(RhinoDoc doc, List<Change> changes, string image, int artworkChannel, SideFinish finish)
         {
-            var cache = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "DielineUV", "textures");
-            Directory.CreateDirectory(cache);
-            var texturePath = Path.Combine(cache, Guid.NewGuid().ToString("N") + ".png");
-            File.Copy(image, texturePath);
+            var texturePath = CacheTexture(image);
             using (var material = new Material { DiffuseColor = System.Drawing.Color.White })
             {
                 var renderMaterial = RenderMaterial.CreateBasicMaterial(material, doc);
@@ -347,24 +350,42 @@ namespace DielineUV
                 {
                     if (!doc.RenderMaterials.Add(renderMaterial))
                         throw new InvalidOperationException("无法保存图片材质。");
-                    Guid artworkId = changes.Any(change => change.FinishBrep != null)
-                        ? AddArtworkMaterial(doc, renderMaterial.Name, texturePath, artworkChannel) : Guid.Empty;
+                    Guid artworkId = !finish.WholeObject && changes.Any(change => change.FinishBrep != null)
+                        ? AddArtworkMaterial(doc, renderMaterial.Name, texturePath, artworkChannel, renderMaterial.Id) : Guid.Empty;
                     foreach (var change in changes)
                     {
                         applied.Add(change);
-                        if (change.FinishBrep != null)
+                        if (change.FinishBrep != null && !finish.WholeObject)
                             ApplyFaceMaterials(doc, change, artworkId, finish);
-                        else if (!doc.Objects.ModifyRenderMaterial(change.Id, renderMaterial))
-                            throw new InvalidOperationException("无法更新对象材质。");
+                        else
+                        {
+                            if (change.FinishBrep != null)
+                            {
+                                if (!doc.Objects.Replace(change.Id, change.FinishBrep))
+                                    throw new InvalidOperationException("无法清理旧的逐面材质。");
+                                change.Replaced = true;
+                            }
+                            if (!doc.Objects.ModifyRenderMaterial(change.Id, renderMaterial))
+                                throw new InvalidOperationException("无法更新对象材质。");
+                        }
                         if (!doc.Objects.ModifyTextureMapping(change.Id, artworkChannel, change.Mapping))
                             throw new InvalidOperationException("无法设置对象贴图坐标。");
                         var target = doc.Objects.FindId(change.Id);
                         var attributes = target.Attributes.Duplicate();
                         attributes.SetUserString(ArtworkChannelKey, artworkChannel.ToString(CultureInfo.InvariantCulture));
+                        attributes.SetUserString(ArtworkImageKey, texturePath);
+                        attributes.SetUserString(PrintingModeKey, finish.WholeObject ? "whole" : change.SingleSided ? "single" : "double");
                         if (change.PrintFacesKey != null)
-                            attributes.SetUserString(change.PrintFacesKey, WriteFaceIndices(change.PrintFaces));
+                            attributes.SetUserString(change.PrintFacesKey, WriteFaceIndices(change.AllPrintFaces));
+                        if (change.SingleFacesStorageKey != null)
+                            attributes.SetUserString(change.SingleFacesStorageKey, WriteFaceIndices(change.PrintFaces));
+                        if (change.SingleSided)
+                            attributes.SetUserString(BackMaterialKey, change.BackMaterialId.ToString());
+                        if (change.FinishMappingApplied)
+                            attributes.SetUserString(FinishChannelKey, change.FinishChannel.ToString(CultureInfo.InvariantCulture));
                         if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
                             throw new InvalidOperationException("无法保存零件的贴图设置。");
+                        if (change.FinishBrep != null && !finish.WholeObject) ValidateFaceMaterials(doc, change, artworkId);
                     }
                 }
                 catch
@@ -378,7 +399,10 @@ namespace DielineUV
                             if (!doc.Objects.ModifyAttributes(change.Id, change.Attributes, true))
                                 RhinoApp.WriteLine("恢复对象失败，请用 Undo 撤销本次操作。");
                             var obj = doc.Objects.FindId(change.Id);
-                            obj.SetTextureMapping(artworkChannel, change.OldMapping, change.OldTransform);
+                            if (obj == null || obj.SetTextureMapping(artworkChannel, change.OldMapping, change.OldTransform) < 0)
+                                RhinoApp.WriteLine("恢复贴图坐标失败，请用 Undo 撤销本次操作。");
+                            if (change.FinishMappingApplied && obj != null)
+                                obj.SetTextureMapping(change.FinishChannel, change.OldFinishMapping, change.OldFinishTransform);
                         }
                         catch { RhinoApp.WriteLine("恢复对象失败，请用 Undo 撤销本次操作。"); }
                     }
@@ -409,7 +433,18 @@ namespace DielineUV
             public Brep FinishBrep;
             public GeometryBase OriginalGeometry;
             public int[] PrintFaces;
+            public int[] AllPrintFaces;
+            public int[] BackFaces;
             public string PrintFacesKey;
+            public string SingleFacesStorageKey;
+            public bool SingleSided;
+            public int SideMaterialIndex = -1;
+            public Guid BackMaterialId;
+            public int FinishChannel;
+            public TextureMapping FinishMapping, OldFinishMapping;
+            public Transform OldFinishTransform;
+            public bool FinishMappingApplied;
+            public System.Drawing.Color? ExpectedSideColor, ExpectedBackColor;
             public bool Replaced;
         }
     }
