@@ -253,7 +253,9 @@ namespace DielineUV
                 if (!preserve)
                 {
                     material.Name = "刀模侧面";
-                    material.DiffuseColor = finish.Color ?? BrownEdge;
+                    // Use the known working brown assignment first. Custom colors
+                    // are committed to this material after its face channels exist.
+                    material.DiffuseColor = BrownEdge;
                     if (hasOldArtwork && !finish.Color.HasValue)
                         RhinoApp.WriteLine("零件 {0} 原来是整件贴图，侧面改用棕色。", change.Id.ToString("N").Substring(0, 8));
                 }
@@ -283,7 +285,30 @@ namespace DielineUV
                 var applied = doc.Objects.FindId(change.Id).GetMaterial(true);
                 if (applied == null || applied.MaterialChannelIdFromIndex(channel) != artworkId)
                     throw new InvalidOperationException("Rhino 未保留印图面的材质通道。");
+                if (finish.Color.HasValue && finish.Color.Value.ToArgb() != BrownEdge.ToArgb())
+                    ApplyCustomSideColor(doc, change, applied, channel, artworkId, finish.Color.Value);
             }
+        }
+
+        private static void ApplyCustomSideColor(RhinoDoc doc, Change change, Material applied,
+            int channel, Guid artworkId, Color selected)
+        {
+            var color = Color.FromArgb(selected.R, selected.G, selected.B);
+            // Update the material we just assigned in place. Adding another parent
+            // material here can discard the table of per-face material channels.
+            using (var recolored = new Material(applied))
+            {
+                recolored.DiffuseColor = color;
+                // This is the new side material, never the source object's material.
+                // Let Rhino regenerate its display material with the new color.
+                recolored.RenderMaterialInstanceId = Guid.Empty;
+                if (applied.Index < 0 || !doc.Materials.Modify(recolored, applied.Index, true))
+                    throw new InvalidOperationException("无法修改零件 " + change.Label + " 的侧面颜色。");
+            }
+            var updated = doc.Objects.FindId(change.Id).GetMaterial(true);
+            if (updated == null || updated.DiffuseColor.ToArgb() != color.ToArgb() ||
+                updated.MaterialChannelIdFromIndex(channel) != artworkId)
+                throw new InvalidOperationException("零件 " + change.Label + " 的自定义侧面颜色或印图通道未保留。");
         }
     }
 }
