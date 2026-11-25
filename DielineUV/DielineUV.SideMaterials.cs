@@ -33,9 +33,7 @@ namespace DielineUV
             if (choice == options[1]) return new SideFinish { Color = BrownEdge };
             if (choice == options[3]) return new SideFinish { WholeObject = true };
             var color = BrownEdge;
-            return Dialogs.ShowColorDialog(ref color)
-                ? new SideFinish { Color = Color.FromArgb(color.R, color.G, color.B) }
-                : null;
+            return Dialogs.ShowColorDialog(ref color) ? new SideFinish { Color = color } : null;
         }
 
         private static int ChooseArtworkChannel(RhinoDoc doc, Bundle bundle)
@@ -181,32 +179,20 @@ namespace DielineUV
             }
         }
 
-        private static Guid AddArtworkMaterial(RhinoDoc doc, RenderMaterial renderMaterial,
-            string texturePath, int artworkChannel)
+        private static Guid AddArtworkMaterial(RhinoDoc doc, string name, string texturePath, int artworkChannel)
         {
-            // Use the same registered RDK texture as whole-object mode. The
-            // material channel holds an ON_Material id, whose RDK id must also
-            // be retained for Rendered view and Rhino Render.
-            var simulated = renderMaterial.SimulatedMaterial(RenderTexture.TextureGeneration.Allow);
-            if (simulated == null) throw new InvalidOperationException("无法生成印图面的图片材质。");
-            using (var material = new Material(simulated))
-            {
-                material.Name = renderMaterial.Name + " 印图面";
-                material.RenderMaterialInstanceId = renderMaterial.Id;
 #pragma warning disable 612, 618
-                using (var source = new SimulatedTexture { Filename = texturePath })
+            using (var simulated = new SimulatedTexture())
 #pragma warning restore 612, 618
+            using (var material = new Material { Name = name, DiffuseColor = Color.White })
+            {
+                simulated.Filename = texturePath;
+                simulated.SetMappingChannelAndProjectionMode(SimulatedTexture.ProjectionModes.MappingChannel,
+                    artworkChannel, SimulatedTexture.EnvironmentMappingModes.Automatic);
+                using (var bitmap = simulated.Texture())
                 {
-                    // Keep the ON_Material preview in sync with the RDK texture,
-                    // avoiding a baked simulation that uses another mapping channel.
-                    source.SetMappingChannelAndProjectionMode(SimulatedTexture.ProjectionModes.MappingChannel,
-                        artworkChannel, SimulatedTexture.EnvironmentMappingModes.Automatic);
-                    using (var bitmap = source.Texture())
-                    {
-                        if (bitmap == null || bitmap.MappingChannelId != artworkChannel ||
-                            !material.SetTexture(bitmap, TextureType.Bitmap))
-                            throw new InvalidOperationException("图片材质未保留原 PNG 和 UV 通道。");
-                    }
+                    if (bitmap == null || bitmap.MappingChannelId != artworkChannel || !material.SetTexture(bitmap, TextureType.Bitmap))
+                        throw new InvalidOperationException("无法保存印图材质的 UV 通道。");
                 }
                 int index = doc.Materials.Add(material);
                 if (index < 0) throw new InvalidOperationException("无法保存印图面的材质。");
@@ -223,148 +209,28 @@ namespace DielineUV
             return false;
         }
 
-        private static void PrepareFaceMaterials(RhinoDoc doc, Change change, Guid artworkId, string artworkName,
-            SideFinish finish, ref int? solidSideMaterialIndex)
-        {
-            var obj = doc.Objects.FindId(change.Id);
-            var current = finish.Color.HasValue ? null : obj.GetMaterial(true);
-            bool hasOldArtwork = current != null &&
-                (IsArtworkMaterialName(current.Name) || IsArtworkMaterialName(obj.RenderMaterial?.Name));
-            bool preserve = current != null && !hasOldArtwork;
-            int materialIndex;
-            if (preserve)
-            {
-                using (var copy = new Material(current))
-                    materialIndex = RegisterSideMaterial(doc, copy, artworkId);
-            }
-            else
-            {
-                if (!solidSideMaterialIndex.HasValue)
-                {
-                    var color = finish.Color ?? BrownEdge;
-                    using (var solid = new Material
-                    {
-                        Name = string.Format("刀模侧面 #{0:X2}{1:X2}{2:X2} ({3})", color.R, color.G, color.B, artworkName),
-                        DiffuseColor = color
-                    })
-                        solidSideMaterialIndex = RegisterSideMaterial(doc, solid, artworkId);
-                }
-                materialIndex = solidSideMaterialIndex.Value;
-                if (hasOldArtwork)
-                    RhinoApp.WriteLine("零件 {0} 原来是整件贴图，侧面改用棕色。", change.Label);
-            }
-
-            var material = doc.Materials[materialIndex];
-            int channel = material.MaterialChannelIndexFromId(artworkId, false);
-            if (channel <= 0) throw new InvalidOperationException("材质表未保留零件 " + change.Label + " 的印图通道。");
-            var printFaces = new HashSet<int>(change.PrintFaces);
-            var previousArtwork = preserve ? new HashSet<Guid>(doc.Materials
-                .Where(entry => IsArtworkMaterialName(entry.Name)).Select(entry => entry.Id)) : null;
-            foreach (var face in change.FinishBrep.Faces)
-            {
-                if (printFaces.Contains(face.FaceIndex)) face.MaterialChannelIndex = channel;
-                else if (!preserve || previousArtwork.Contains(material.MaterialChannelIdFromIndex(face.MaterialChannelIndex)))
-                    face.ClearMaterialChannelIndex();
-            }
-
-            change.SideMaterialIndex = materialIndex;
-            change.SideColor = preserve ? (Color?)null : finish.Color ?? BrownEdge;
-
-            // Clear a previous object-level RDK assignment through the RDK API.
-            // Clearing MaterialRefs alone does not clear that assignment.
-            var updated = doc.Objects.FindId(change.Id);
-            if (updated.RenderMaterial != null)
-                doc.Objects.ModifyRenderMaterial(change.Id, null);
-        }
-
-        private static bool IsArtworkMaterialName(string name)
-        {
-            return name?.StartsWith("DielineUV ", StringComparison.Ordinal) == true;
-        }
-
-        private static int RegisterSideMaterial(RhinoDoc doc, Material material, Guid artworkId)
-        {
-            if (material.MaterialChannelIndexFromId(artworkId, true) <= 0)
-                throw new InvalidOperationException("无法建立逐面材质。");
-            int index = doc.Materials.Add(material);
-            if (index < 0) throw new InvalidOperationException("无法保存侧面材质。");
-            return index;
-        }
-
-        private static void VerifyFaceMaterials(RhinoDoc doc, Change change, Guid renderMaterialId,
-            string texturePath, int artworkChannel)
-        {
-            var obj = doc.Objects.FindId(change.Id);
-            var brep = obj?.Geometry as Brep;
-            var material = obj?.GetMaterial(true);
-            if (brep == null || material == null)
-                throw new InvalidOperationException("无法读取零件 " + change.Label + " 写入后的逐面材质。");
-            var printFaces = new HashSet<int>(change.PrintFaces);
-            foreach (var face in brep.Faces)
-            {
-                // Rhino can remap material table indices. Check the material actually
-                // resolved for the face instead of requiring the original table index.
-                var resolved = obj.GetMaterial(new ComponentIndex(ComponentIndexType.BrepFace, face.FaceIndex));
-                if (resolved == null)
-                    throw new InvalidOperationException("无法读取零件 " + change.Label + " 的面材质。");
-                using (var bitmap = resolved.GetTexture(TextureType.Bitmap))
-                {
-                    if (printFaces.Contains(face.FaceIndex))
-                    {
-                        if (resolved.RenderMaterialInstanceId != renderMaterialId ||
-                            bitmap == null || bitmap.MappingChannelId != artworkChannel ||
-                            !SameTextureFile(bitmap.FileName, texturePath))
-                            throw new InvalidOperationException("零件 " + change.Label + " 的印图面未取得 PNG 和 UV 通道（面 " +
-                                (face.FaceIndex + 1) + "，物体材质编号 " + obj.Attributes.MaterialIndex + "）。");
-                    }
-                    else if (change.SideColor.HasValue &&
-                        (resolved.DiffuseColor.ToArgb() != change.SideColor.Value.ToArgb() || bitmap != null))
-                        throw new InvalidOperationException("零件 " + change.Label + " 的侧面颜色未正确写入（面 " +
-                            (face.FaceIndex + 1) + "，物体材质编号 " + obj.Attributes.MaterialIndex + "）。");
-                }
-            }
-        }
-
-        private static bool SameTextureFile(string actual, string expected)
-        {
-            if (string.IsNullOrWhiteSpace(actual)) return false;
-            return string.Equals(Path.GetFullPath(actual), Path.GetFullPath(expected),
-                Rhino.Runtime.HostUtils.RunningOnWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
-        }
-
-        private static bool CommitObjectAttributes(RhinoDoc doc, Guid id, ObjectAttributes attributes)
-        {
-            var obj = doc.Objects.FindId(id);
-            if (obj == null) return false;
-            if (SameAttributes(obj.Attributes, attributes)) return true;
-            // Commit via a fresh RhinoObject so geometry replacements cannot leave
-            // a previously cached attributes wrapper in charge of the new object.
-            obj.Attributes = attributes;
-            if (obj.CommitChanges()) return true;
-            var saved = doc.Objects.FindId(id);
-            return saved != null && SameAttributes(saved.Attributes, attributes);
-        }
-
-        private static bool SameAttributes(ObjectAttributes a, ObjectAttributes b)
-        {
-            var options = new Rhino.FileIO.SerializationOptions { RhinoVersion = 7, WriteUserData = true };
-            return a.ToJSON(options) == b.ToJSON(options);
-        }
-
         private static void RestoreChange(RhinoDoc doc, Change change, int artworkChannel)
         {
             if (change.Replaced && !RestoreOriginalGeometry(doc, change))
                 throw new InvalidOperationException("恢复原几何失败");
             var obj = doc.Objects.FindId(change.Id);
             if (obj == null) throw new InvalidOperationException("找不到原件");
-            // Restore only the modified mapping channel, including its original transform.
             using (var current = obj.GetTextureMapping(artworkChannel))
             {
                 if (current != null || change.OldMapping != null)
                     obj.SetTextureMapping(artworkChannel, change.OldMapping, change.OldTransform);
             }
-            if (!CommitObjectAttributes(doc, change.Id, change.Attributes))
-                throw new InvalidOperationException("恢复原属性失败");
+            var options = new Rhino.FileIO.SerializationOptions { RhinoVersion = 7, WriteUserData = true };
+            if (obj.Attributes.ToJSON(options) != change.Attributes.ToJSON(options))
+            {
+                obj.Attributes = change.Attributes;
+                if (!obj.CommitChanges())
+                {
+                    obj = doc.Objects.FindId(change.Id);
+                    if (obj == null || obj.Attributes.ToJSON(options) != change.Attributes.ToJSON(options))
+                        throw new InvalidOperationException("恢复原属性失败");
+                }
+            }
             obj = doc.Objects.FindId(change.Id);
             Transform transform;
             using (var restored = obj.GetTextureMapping(artworkChannel, out transform))
@@ -372,6 +238,51 @@ namespace DielineUV
                 if (change.OldMapping == null ? restored != null :
                     restored == null || restored.Id != change.OldMapping.Id || transform != change.OldTransform)
                     throw new InvalidOperationException("恢复原 UV 通道失败");
+            }
+        }
+
+        private static void ApplyFaceMaterials(RhinoDoc doc, Change change, Guid artworkId, SideFinish finish)
+        {
+            var obj = doc.Objects.FindId(change.Id);
+            var current = obj.GetMaterial(true);
+            bool hasOldArtwork = obj.RenderMaterial?.Name?.StartsWith("DielineUV ", StringComparison.Ordinal) == true ||
+                current?.Name?.StartsWith("DielineUV ", StringComparison.Ordinal) == true;
+            bool preserve = !finish.Color.HasValue && current != null && !hasOldArtwork;
+            using (var material = preserve ? new Material(current) : new Material())
+            {
+                if (!preserve)
+                {
+                    material.Name = "刀模侧面";
+                    material.DiffuseColor = finish.Color ?? BrownEdge;
+                    if (hasOldArtwork && !finish.Color.HasValue)
+                        RhinoApp.WriteLine("零件 {0} 原来是整件贴图，侧面改用棕色。", change.Id.ToString("N").Substring(0, 8));
+                }
+                int channel = material.MaterialChannelIndexFromId(artworkId, true);
+                if (channel <= 0) throw new InvalidOperationException("无法建立逐面材质。");
+                int materialIndex = doc.Materials.Add(material);
+                if (materialIndex < 0) throw new InvalidOperationException("无法保存侧面材质。");
+                var printFaces = new HashSet<int>(change.PrintFaces);
+                var previousArtwork = new HashSet<Guid>(doc.Materials
+                    .Where(entry => entry.Name?.StartsWith("DielineUV ", StringComparison.Ordinal) == true)
+                    .Select(entry => entry.Id));
+                foreach (var face in change.FinishBrep.Faces)
+                {
+                    if (printFaces.Contains(face.FaceIndex)) face.MaterialChannelIndex = channel;
+                    else if (!preserve || previousArtwork.Contains(material.MaterialChannelIdFromIndex(face.MaterialChannelIndex)))
+                        face.ClearMaterialChannelIndex();
+                }
+                if (!doc.Objects.Replace(change.Id, change.FinishBrep))
+                    throw new InvalidOperationException("无法更新零件的逐面材质。");
+                change.Replaced = true;
+                var updated = doc.Objects.FindId(change.Id);
+                var attributes = updated.Attributes.Duplicate();
+                attributes.MaterialIndex = materialIndex;
+                attributes.MaterialSource = ObjectMaterialSource.MaterialFromObject;
+                if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
+                    throw new InvalidOperationException("无法分配侧面材质。");
+                var applied = doc.Objects.FindId(change.Id).GetMaterial(true);
+                if (applied == null || applied.MaterialChannelIdFromIndex(channel) != artworkId)
+                    throw new InvalidOperationException("Rhino 未保留印图面的材质通道。");
             }
         }
     }
