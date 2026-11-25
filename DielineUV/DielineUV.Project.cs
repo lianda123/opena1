@@ -26,7 +26,7 @@ namespace DielineUV
 
         private sealed class ProjectPart
         {
-            public Guid SourceId;
+            public RhinoObject Source;
             public string Label;
             public Transform ToLayout;
             public Curve[] Guides;
@@ -34,8 +34,7 @@ namespace DielineUV
             public Point3d[] LayoutPoints;
             public int[] PrintFaces;
             public Guid[] LayoutIds;
-            public Point3d SourceMarker;
-            public Point3d LayoutMarker;
+            public Guid BoundSourceId;
         }
 
         private static Result ExportProject(RhinoDoc doc)
@@ -61,7 +60,7 @@ namespace DielineUV
                     if (dialog.ShowDialog(RhinoEtoApp.MainWindow) != DialogResult.Ok) return Result.Cancel;
                     string output = Path.Combine(dialog.Directory, "DielineUV_" + Guid.NewGuid().ToString("N").Substring(0, 8));
                     Directory.CreateDirectory(output);
-                    WriteProject(doc, parts, frame, output);
+                    WriteProject(parts, frame, output);
                     RhinoApp.WriteLine("已为当前项目的 {0} 个零件生成贴图模板：{1}", parts.Count, output);
                     return Result.Success;
                 }
@@ -100,16 +99,7 @@ namespace DielineUV
             var finish = ChooseSideFinish();
             if (finish == null || !Apply(doc, Path.GetDirectoryName(manifest), bundle, image, finish))
                 return Result.Cancel;
-            var view = doc.Views.ActiveView;
-            var rendered = Rhino.Display.DisplayModeDescription.GetDisplayMode(Rhino.Display.DisplayModeDescription.RenderedId);
-            bool showingRendered = view != null && rendered != null;
-            if (showingRendered)
-            {
-                view.ActiveViewport.DisplayMode = rendered;
-                view.Redraw();
-            }
-            RhinoApp.WriteLine("已为当前项目的 {0} 个原件更新贴图。{1}", bundle.Parts.Length,
-                showingRendered ? "当前视图已切换为渲染显示。" : "请切换到渲染显示模式查看。");
+            RhinoApp.WriteLine("已为当前项目的 {0} 个原件更新贴图。切换到渲染显示模式查看。", bundle.Parts.Length);
             return Result.Success;
         }
 
@@ -169,7 +159,7 @@ namespace DielineUV
                 }
                 var guides = flat.SelectMany(o => OutlineCurves(o.Geometry)).ToArray();
                 if (guides.Length != 0)
-                    results.Add(new ProjectPart { SourceId = source.Id, Label = label, ToLayout = toLayout, Guides = guides });
+                    results.Add(new ProjectPart { Source = source, Label = label, ToLayout = toLayout, Guides = guides });
             }
             return results;
         }
@@ -332,33 +322,23 @@ namespace DielineUV
         private static List<ProjectPart> BindParts(RhinoDoc doc, Canvas frame, double tolerance, bool automatic)
         {
             var parts = new List<ProjectPart>();
-            var display = new BindingDisplay(doc, parts);
+            var progress = new BindingProgress(doc, parts);
             bool finished = false;
             try
             {
                 while (true)
                 {
                     RhinoObject source;
-                    string mode = automatic ? "自动对齐" : "手动绑定";
                     using (var picker = CreateObjectPicker(
-                        string.Format("{0}｜已绑定 {1} 件｜{2}。选原件或回车导出", mode, parts.Count, display.Description),
+                        string.Format("{0}｜已绑 {1} 件。选三维原件或回车导出", automatic ? "自动对齐" : "手动绑定", parts.Count),
                         PartTypes | ObjectType.PolysrfFilter))
                     {
-                        picker.SetCustomGeometryFilter((obj, geometry, component) =>
-                            obj.Id != frame.FrameObjectId && !display.IsBound(obj.Id));
+                        picker.SetCustomGeometryFilter((obj, geometry, component) => !progress.IsBound(obj.Id));
                         int auto = picker.AddOption(new LocalizeStringPair("Automatic", "自动对齐"));
                         int manual = picker.AddOption(new LocalizeStringPair("Manual", "手动绑定"));
-                        int layoutMode = picker.AddOption(display.HideLayout
-                            ? new LocalizeStringPair("MarkLayout", "刀模标绿")
+                        int display = picker.AddOption(progress.HideLayout
+                            ? new LocalizeStringPair("GreenLayout", "刀模标绿")
                             : new LocalizeStringPair("HideLayout", "隐藏刀模"));
-                        int review = 0, undo = 0;
-                        if (parts.Count != 0)
-                        {
-                            review = picker.AddOption(display.Reviewing
-                                ? new LocalizeStringPair("Resume", "退出查看")
-                                : new LocalizeStringPair("Review", "查看已绑"));
-                            undo = picker.AddOption(new LocalizeStringPair("UndoLast", "撤销上一件"));
-                        }
                         picker.AcceptNothing(true);
                         var result = picker.Get();
                         if (result == GetResult.Nothing)
@@ -368,34 +348,72 @@ namespace DielineUV
                         }
                         if (result == GetResult.Option)
                         {
-                            int index = picker.Option().Index;
-                            if (index == auto || index == manual) automatic = index == auto;
-                            else if (index == layoutMode) display.ToggleLayout();
-                            else if (index == review) display.ToggleReview();
-                            else if (index == undo) display.UndoLast();
+                            int option = picker.Option().Index;
+                            if (option == auto || option == manual) automatic = option == auto;
+                            else if (option == display) progress.ToggleLayout();
                             continue;
                         }
                         if (result != GetResult.Object) return null;
                         using (var reference = picker.Object(0)) source = reference.Object();
                     }
                     if (source == null || !IsPart(source) || source.IsLocked || source.IsReference ||
-                        source.Attributes.GetUserString(LayoutRole) == "FlatCopy" ||
-                        display.IsBound(source.Id))
+                        source.Attributes.GetUserString(LayoutRole) == "FlatCopy" || progress.IsBound(source.Id))
                     {
                         RhinoApp.WriteLine("请选择尚未绑定、可以编辑的三维原件。");
                         continue;
                     }
 
-                    if (display.Reviewing) display.ToggleReview();
-                    var partToAdd = BindPart(doc, source, frame, tolerance, automatic, display);
-                    if (partToAdd == null) continue;
-                    display.Add(partToAdd);
-                    RhinoApp.WriteLine("已绑定第 {0} 件「{1}」。", parts.Count, partToAdd.Label);
+                    Guid[] layoutIds;
+                    var guides = PickBindingGuides(source.Id, frame, tolerance, automatic, progress, out layoutIds);
+                    if (guides == null) continue;
+                    var keepGuides = false;
+                    try
+                    {
+                        Transform registration = Transform.Unset;
+                        bool manualThisPart = !automatic;
+                        if (automatic)
+                        {
+                            Point3d[] markers;
+                            var alignments = FindBoardAlignments(source.Geometry, guides, tolerance, out markers);
+                            alignments.RemoveAll(transform => !InsideFrame(source.Geometry.GetBoundingBox(transform), frame, tolerance));
+                            if (alignments.Count == 0)
+                            {
+                                RhinoApp.WriteLine("无法自动对齐，已用当前原件和刀模转入手动绑定。");
+                                manualThisPart = true;
+                            }
+                            else if (!ChooseBoardAlignment(doc, alignments, markers, guides[0].GetBoundingBox(true).Center.Z, out registration))
+                                continue;
+                        }
+                        if (manualThisPart)
+                        {
+                            while (true)
+                            {
+                                var result = PickManualRegistration(source.Geometry, guides, tolerance, out registration);
+                                if (result == Result.Cancel) break;
+                                if (result == Result.Success && InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
+                                    break;
+                                RhinoApp.WriteLine("请重新点对应位置，或按 Esc 跳过当前零件。");
+                            }
+                            if (!registration.IsValid) continue;
+                        }
+                        if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
+                        {
+                            RhinoApp.WriteLine("计算出的贴图范围超出外框。请重新选择刀模和定位点。");
+                            continue;
+                        }
+                        var part = new ProjectPart { Source = source, Label = PartName(source, source),
+                            BoundSourceId = source.Id, LayoutIds = layoutIds, Guides = guides, ToLayout = registration };
+                        parts.Add(part);
+                        keepGuides = true;
+                        progress.Mark(part);
+                        RhinoApp.WriteLine("已绑定第 {0} 件「{1}」。下一件可选自动或手动，回车导出。", parts.Count, part.Label);
+                    }
+                    finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
                 }
             }
             finally
             {
-                try { display.Dispose(); }
+                try { progress.Dispose(); }
                 finally
                 {
                     if (!finished)
@@ -403,79 +421,6 @@ namespace DielineUV
                             foreach (var guide in part.Guides) guide.Dispose();
                 }
             }
-        }
-
-        private static ProjectPart BindPart(RhinoDoc doc, RhinoObject source, Canvas frame, double tolerance,
-            bool automatic, BindingDisplay display)
-        {
-            var layout = PickBindingLayout(source.Id, frame, tolerance, display);
-            if (layout == null) return null;
-            string label = PartName(source, source);
-            var layoutBounds = BoundingBox.Empty;
-            foreach (var item in layout) layoutBounds.Union(item.Geometry.GetBoundingBox(true));
-            var part = new ProjectPart
-            {
-                SourceId = source.Id,
-                Label = label,
-                LayoutIds = layout.Select(item => item.Id).ToArray(),
-                SourceMarker = source.Geometry.GetBoundingBox(true).Center,
-                LayoutMarker = layoutBounds.Center
-            };
-            if (automatic)
-            {
-                var guides = BindingGuides(layout, tolerance, true);
-                bool keepGuides = false;
-                try
-                {
-                    Point3d[] markers;
-                    var alignments = FindBoardAlignments(source.Geometry, guides, tolerance, out markers);
-                    alignments.RemoveAll(transform => !InsideFrame(source.Geometry.GetBoundingBox(transform), frame, tolerance));
-                    if (alignments.Count != 0)
-                    {
-                        Transform registration;
-                        if (!ChooseBoardAlignment(doc, alignments, markers, guides[0].GetBoundingBox(true).Center.Z, out registration))
-                            return null;
-                        keepGuides = true;
-                        part.Guides = guides;
-                        part.ToLayout = registration;
-                        return part;
-                    }
-                }
-                finally { if (!keepGuides) foreach (var guide in guides) guide.Dispose(); }
-                RhinoApp.WriteLine("零件 {0} 无法自动对齐，已转为手动绑定。请在已选原件和刀模上各点三个对应点。", label);
-            }
-
-            var manualGuides = BindingGuides(layout, tolerance, false);
-            if (manualGuides.Length == 0)
-            {
-                RhinoApp.WriteLine("找不到可用于定位的刀模边线。请重选这个零件的轮廓。");
-                return null;
-            }
-            bool keepManualGuides = false;
-            try
-            {
-                while (true)
-                {
-                    Transform registration;
-                    var result = PickManualRegistration(source.Geometry, manualGuides, tolerance, out registration);
-                    if (result == Result.Cancel)
-                    {
-                        RhinoApp.WriteLine("已跳过 {0}。可以重新选择这个零件，或继续绑定其他零件。", label);
-                        return null;
-                    }
-                    if (result != Result.Success) continue;
-                    if (!InsideFrame(source.Geometry.GetBoundingBox(registration), frame, tolerance))
-                    {
-                        RhinoApp.WriteLine("贴图范围超出外框。请重新点对应位置，或按 Esc 返回原件选择。");
-                        continue;
-                    }
-                    keepManualGuides = true;
-                    part.Guides = manualGuides;
-                    part.ToLayout = registration;
-                    return part;
-                }
-            }
-            finally { if (!keepManualGuides) foreach (var guide in manualGuides) guide.Dispose(); }
         }
 
         private static Result PickManualRegistration(GeometryBase geometry, Curve[] guides, double tolerance, out Transform registration)
@@ -505,7 +450,7 @@ namespace DielineUV
                 if (Math.Abs(flat[0].Z - flat[1].Z) <= tolerance && Math.Abs(flat[0].Z - flat[2].Z) <= tolerance &&
                     TryRegister(original[0], original[1], original[2], flat[0], flat[1], flat[2], tolerance, out registration))
                     return Result.Success;
-                RhinoApp.WriteLine("三对点的顺序或间距不一致，或者刀模点不在同一高度。请重新点对应位置。");
+                RhinoApp.WriteLine("三对点的顺序或间距不一致，或者刀模点不在同一高度。请重新选择刀模和定位点。");
                 return Result.Failure;
             }
             finally { converted?.Dispose(); }
@@ -525,57 +470,69 @@ namespace DielineUV
             return picker;
         }
 
-        private static RhinoObject[] PickBindingLayout(Guid sourceId, Canvas frame, double tolerance, BindingDisplay display)
+        private static Curve[] PickBindingGuides(Guid sourceId, Canvas frame, double tolerance, bool automatic,
+            BindingProgress progress, out Guid[] layoutIds)
         {
+            layoutIds = null;
             while (true)
             {
                 using (var picker = CreateObjectPicker("点选或框选这一个零件的刀模轮廓或铺平实体，回车确认", PartTypes | ObjectType.PolysrfFilter | ObjectType.Curve))
                 {
                     picker.SetCustomGeometryFilter((obj, geometry, component) =>
-                        obj.Id != sourceId && obj.Id != frame.FrameObjectId && !display.IsBound(obj.Id));
+                        obj.Id != sourceId && obj.Id != frame.FrameObjectId && !progress.IsBound(obj.Id));
                     if (picker.GetMultiple(1, 0) != GetResult.Object) return null;
-                    var layout = new List<RhinoObject>();
-                    for (int i = 0; i < picker.ObjectCount; i++)
+                    var guides = new List<Curve>();
+                    bool keepGuides = false;
+                    try
                     {
-                        using (var reference = picker.Object(i))
+                        bool inside = true;
+                        for (int i = 0; i < picker.ObjectCount; i++)
                         {
-                            var obj = reference.Object();
-                            var geometry = obj?.Geometry;
-                            if (geometry == null || !InsideFrame(geometry.GetBoundingBox(true), frame, tolerance))
+                            using (var reference = picker.Object(i))
                             {
-                                string label = string.IsNullOrWhiteSpace(obj?.Name)
-                                    ? reference.ObjectId.ToString("N").Substring(0, 8)
-                                    : obj.Name;
-                                RhinoApp.WriteLine("刀模选区里的对象「{0}」超出外框或无法读取。请重选框内的刀模轮廓。", label);
-                                break;
+                                var geometry = reference.Geometry();
+                                if (geometry == null || !InsideFrame(geometry.GetBoundingBox(true), frame, tolerance))
+                                {
+                                    var obj = reference.Object();
+                                    string label = string.IsNullOrWhiteSpace(obj?.Name)
+                                        ? reference.ObjectId.ToString("N").Substring(0, 8)
+                                        : obj.Name;
+                                    RhinoApp.WriteLine("刀模选区里的对象「{0}」超出外框或无法读取。请重选框内的刀模轮廓。", label);
+                                    inside = false;
+                                    break;
+                                }
+                                var curve = geometry as Curve;
+                                if (curve != null) guides.Add(curve.DuplicateCurve());
+                                else if (automatic)
+                                {
+                                    using (var board = ReadBoardOutline(geometry, tolerance))
+                                    {
+                                        if (board == null) guides.AddRange(OutlineCurves(geometry));
+                                        else
+                                        {
+                                            guides.Add(board.Outer.DuplicateCurve());
+                                            guides.AddRange(board.Holes.Select(hole => hole.DuplicateCurve()));
+                                        }
+                                    }
+                                }
+                                else guides.AddRange(OutlineCurves(geometry));
                             }
-                            layout.Add(obj);
                         }
+                        if (!inside || guides.Count == 0)
+                        {
+                            if (inside) RhinoApp.WriteLine("找不到可用的刀模轮廓，请重新选择。");
+                            continue;
+                        }
+                        keepGuides = true;
+                        layoutIds = Enumerable.Range(0, picker.ObjectCount).Select(index =>
+                        {
+                            using (var selected = picker.Object(index)) return selected.ObjectId;
+                        }).Distinct().ToArray();
+                        return guides.ToArray();
                     }
-                    if (layout.Count == picker.ObjectCount) return layout.ToArray();
+                    finally { if (!keepGuides) foreach (var curve in guides) curve.Dispose(); }
                 }
             }
-        }
-
-        private static Curve[] BindingGuides(IEnumerable<RhinoObject> layout, double tolerance, bool automatic)
-        {
-            var guides = new List<Curve>();
-            foreach (var item in layout)
-            {
-                var geometry = item.Geometry;
-                if (geometry is Curve curve) guides.Add(curve.DuplicateCurve());
-                else if (!automatic) guides.AddRange(OutlineCurves(geometry));
-                else
-                {
-                    using (var board = ReadBoardOutline(geometry, tolerance))
-                    {
-                        if (board == null) continue;
-                        guides.Add(board.Outer.DuplicateCurve());
-                        guides.AddRange(board.Holes.Select(hole => hole.DuplicateCurve()));
-                    }
-                }
-            }
-            return guides.ToArray();
         }
 
         private static IEnumerable<Point3d> BindingCurveCorners(Curve curve)
@@ -653,7 +610,7 @@ namespace DielineUV
             return true;
         }
 
-        private static void WriteProject(RhinoDoc doc, List<ProjectPart> parts, Canvas frame, string output)
+        private static void WriteProject(List<ProjectPart> parts, Canvas frame, string output)
         {
             var entries = new List<Part>();
             using (var file = new File3dm())
@@ -661,8 +618,7 @@ namespace DielineUV
                 file.Settings.ModelUnitSystem = UnitSystem.Millimeters;
                 foreach (var part in parts)
                 {
-                    var source = doc.Objects.FindId(part.SourceId);
-                    if (source == null) throw new InvalidOperationException("找不到原件：" + part.Label);
+                    var source = part.Source;
                     var original = new ObjectAttributes { ObjectId = source.Id, Name = part.Label };
                     Guid saved;
                     if (source.Geometry is Extrusion) saved = file.Objects.AddExtrusion((Extrusion)source.Geometry, original);

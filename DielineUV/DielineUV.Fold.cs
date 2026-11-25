@@ -404,7 +404,7 @@ namespace DielineUV
                 var positions = flat.Vertices.Select(p => registration * new Point3d(p.X, p.Y, p.Z)).ToArray();
                 if (positions.Any(p => !p.IsValid) || positions.Max(p => p.Z) - positions.Min(p => p.Z) > tolerance)
                     throw new InvalidDataException("折弯展开件必须保持在世界 XY 平面，请只在平面内排版。");
-                return new ProjectPart { SourceId = source.Id, Label = PartName(source, layout),
+                return new ProjectPart { Source = source, Label = PartName(source, layout),
                     MappingMesh = mapping.DuplicateMesh(), LayoutPoints = positions,
                     PrintFaces = ReadFaceIndices(layout.Attributes.GetUserString(PrintFacesKey)),
                     Guides = OutlineCurves(layout.Geometry).ToArray() };

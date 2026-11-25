@@ -33,7 +33,9 @@ namespace DielineUV
             if (choice == options[1]) return new SideFinish { Color = BrownEdge };
             if (choice == options[3]) return new SideFinish { WholeObject = true };
             var color = BrownEdge;
-            return Dialogs.ShowColorDialog(ref color) ? new SideFinish { Color = color } : null;
+            return Dialogs.ShowColorDialog(ref color)
+                ? new SideFinish { Color = Color.FromArgb(color.R, color.G, color.B) }
+                : null;
         }
 
         private static int ChooseArtworkChannel(RhinoDoc doc, Bundle bundle)
@@ -209,38 +211,6 @@ namespace DielineUV
             return false;
         }
 
-        private static void RestoreChange(RhinoDoc doc, Change change, int artworkChannel)
-        {
-            if (change.Replaced && !RestoreOriginalGeometry(doc, change))
-                throw new InvalidOperationException("恢复原几何失败");
-            var obj = doc.Objects.FindId(change.Id);
-            if (obj == null) throw new InvalidOperationException("找不到原件");
-            using (var current = obj.GetTextureMapping(artworkChannel))
-            {
-                if (current != null || change.OldMapping != null)
-                    obj.SetTextureMapping(artworkChannel, change.OldMapping, change.OldTransform);
-            }
-            var options = new Rhino.FileIO.SerializationOptions { RhinoVersion = 7, WriteUserData = true };
-            if (obj.Attributes.ToJSON(options) != change.Attributes.ToJSON(options))
-            {
-                obj.Attributes = change.Attributes;
-                if (!obj.CommitChanges())
-                {
-                    obj = doc.Objects.FindId(change.Id);
-                    if (obj == null || obj.Attributes.ToJSON(options) != change.Attributes.ToJSON(options))
-                        throw new InvalidOperationException("恢复原属性失败");
-                }
-            }
-            obj = doc.Objects.FindId(change.Id);
-            Transform transform;
-            using (var restored = obj.GetTextureMapping(artworkChannel, out transform))
-            {
-                if (change.OldMapping == null ? restored != null :
-                    restored == null || restored.Id != change.OldMapping.Id || transform != change.OldTransform)
-                    throw new InvalidOperationException("恢复原 UV 通道失败");
-            }
-        }
-
         private static void ApplyFaceMaterials(RhinoDoc doc, Change change, Guid artworkId, SideFinish finish)
         {
             var obj = doc.Objects.FindId(change.Id);
@@ -253,8 +223,6 @@ namespace DielineUV
                 if (!preserve)
                 {
                     material.Name = "刀模侧面";
-                    // Use the known working brown assignment first. Custom colors
-                    // are committed to this material after its face channels exist.
                     material.DiffuseColor = BrownEdge;
                     if (hasOldArtwork && !finish.Color.HasValue)
                         RhinoApp.WriteLine("零件 {0} 原来是整件贴图，侧面改用棕色。", change.Id.ToString("N").Substring(0, 8));
@@ -282,33 +250,53 @@ namespace DielineUV
                 attributes.MaterialSource = ObjectMaterialSource.MaterialFromObject;
                 if (!doc.Objects.ModifyAttributes(change.Id, attributes, true))
                     throw new InvalidOperationException("无法分配侧面材质。");
-                var applied = doc.Objects.FindId(change.Id).GetMaterial(true);
-                if (applied == null || applied.MaterialChannelIdFromIndex(channel) != artworkId)
-                    throw new InvalidOperationException("Rhino 未保留印图面的材质通道。");
+                var applied = AssignedSideMaterial(doc, change.Id);
+                ValidateArtworkChannel(applied, channel, artworkId);
                 if (finish.Color.HasValue && finish.Color.Value.ToArgb() != BrownEdge.ToArgb())
-                    ApplyCustomSideColor(doc, change, applied, channel, artworkId, finish.Color.Value);
+                    SetCustomSideColor(doc, change.Id, applied, finish.Color.Value, channel, artworkId);
             }
         }
 
-        private static void ApplyCustomSideColor(RhinoDoc doc, Change change, Material applied,
-            int channel, Guid artworkId, Color selected)
+        private static Material AssignedSideMaterial(RhinoDoc doc, Guid id)
         {
-            var color = Color.FromArgb(selected.R, selected.G, selected.B);
-            // Update the material we just assigned in place. Adding another parent
-            // material here can discard the table of per-face material channels.
-            using (var recolored = new Material(applied))
+            var obj = doc.Objects.FindId(id);
+            if (obj == null) throw new InvalidOperationException("找不到当前贴图零件。");
+            var attributes = obj.Attributes;
+            int index = attributes.MaterialIndex;
+            if (attributes.MaterialSource != ObjectMaterialSource.MaterialFromObject ||
+                index < 0 || index >= doc.Materials.Count)
+                throw new InvalidOperationException("零件没有引用已分配的侧面材质，编号 " + index + "。");
+            var material = doc.Materials[index];
+            if (material == null || material.Index != index || material.IsDeleted)
+                throw new InvalidOperationException("找不到侧面材质表记录，编号 " + index + "。");
+            return material;
+        }
+
+        private static void ValidateArtworkChannel(Material material, int channel, Guid artworkId)
+        {
+            // Per-face channels belong to the ON_Material in the object's material
+            // table entry. GetMaterial(true) can instead return a renderer simulation.
+            var actualId = material.MaterialChannelIdFromIndex(channel);
+            if (actualId != artworkId)
+                throw new InvalidOperationException(string.Format(
+                    "侧面材质表 {0} 的印图通道 {1} 不一致。实际 {2}，应为 {3}。",
+                    material.Index, channel, actualId, artworkId));
+        }
+
+        private static void SetCustomSideColor(RhinoDoc doc, Guid id, Material assigned, Color selected,
+            int channel, Guid artworkId)
+        {
+            using (var recolored = new Material(assigned))
             {
-                recolored.DiffuseColor = color;
-                // This is the new side material, never the source object's material.
-                // Let Rhino regenerate its display material with the new color.
+                recolored.DiffuseColor = Color.FromArgb(selected.R, selected.G, selected.B);
                 recolored.RenderMaterialInstanceId = Guid.Empty;
-                if (applied.Index < 0 || !doc.Materials.Modify(recolored, applied.Index, true))
-                    throw new InvalidOperationException("无法修改零件 " + change.Label + " 的侧面颜色。");
+                if (!doc.Materials.Modify(recolored, assigned.Index, true))
+                    throw new InvalidOperationException("无法更新自定义侧面颜色。");
             }
-            var updated = doc.Objects.FindId(change.Id).GetMaterial(true);
-            if (updated == null || updated.DiffuseColor.ToArgb() != color.ToArgb() ||
-                updated.MaterialChannelIdFromIndex(channel) != artworkId)
-                throw new InvalidOperationException("零件 " + change.Label + " 的自定义侧面颜色或印图通道未保留。");
+            var updated = AssignedSideMaterial(doc, id);
+            ValidateArtworkChannel(updated, channel, artworkId);
+            if (updated.DiffuseColor.ToArgb() != selected.ToArgb())
+                throw new InvalidOperationException("自定义侧面颜色未写入材质表。");
         }
     }
 }
