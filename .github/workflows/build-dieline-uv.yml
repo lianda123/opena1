@@ -22,6 +22,8 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
+      - name: Check panel-side regressions
+        run: dotnet run --project DielineUV/Tests/PanelSideTests.csproj -c Release
       - name: Compile Rhino 7 and 8 plug-ins
         run: dotnet build DielineUV/DielineUV.csproj -c Release
       - name: Verify Rhino 7 plug-in references the Rhino 7.0 SDK

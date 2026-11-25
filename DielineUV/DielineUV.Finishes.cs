@@ -42,14 +42,53 @@ namespace DielineUV
                 finish.Printing = finish.WholeObject ? "whole" : previous == "single" ? "single" : "double";
             }
             if (finish.WholeObject) return;
-            var side = CurrentBaseMaterial(doc, first);
-            var back = PreviousBackMaterial(doc, first);
-            finish.SideReference = side == null ? null : new Material(side);
-            finish.BackReference = back == null ? null : new Material(back);
-            using (var previousTexture = back?.GetTexture(TextureType.Bitmap))
-                finish.UseBoardMapping = finish.Sides.Kind == "texture" || finish.Back.Kind == "texture" ||
-                    finish.Sides.Kind == "current" && first.Attributes.GetUserString(FinishChannelKey) != null ||
-                    finish.Back.Kind == "current" && previousTexture != null;
+            finish.Sides = ResolveFinish(finish.Sides, first.Attributes.GetUserString(SideSpecKey), CurrentBaseMaterial(doc, first));
+            var previousBack = PreviousBackMaterial(doc, first);
+            if (finish.Back.Kind == "same" || finish.Back.Kind == "current" &&
+                first.Attributes.GetUserString(BackSpecKey) == null && previousBack == null)
+                finish.Back = finish.Sides;
+            else finish.Back = ResolveFinish(finish.Back, first.Attributes.GetUserString(BackSpecKey), previousBack);
+        }
+
+        private static FinishSpec ResolveFinish(FinishSpec spec, string saved, Material current)
+        {
+            if (spec.Kind != "current") return spec;
+            var decoded = DecodeFinishSpec(saved);
+            if (decoded != null) return decoded;
+            using (var bitmap = current?.GetTexture(TextureType.Bitmap))
+            {
+                if (bitmap != null && File.Exists(bitmap.FileName))
+                {
+                    if (bitmap.MappingChannelId >= 32 && current.Name?.StartsWith("DielineUV ", StringComparison.Ordinal) == true)
+                        return new FinishSpec { Kind = "color", Color = BrownEdge };
+                    return new FinishSpec { Kind = "texture", Texture = CacheTexture(bitmap.FileName) };
+                }
+            }
+            return new FinishSpec { Kind = "color", Color = current?.DiffuseColor ?? BrownEdge };
+        }
+
+        private static string EncodeFinishSpec(FinishSpec spec)
+        {
+            return spec.Kind == "texture" ? "t:" + Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(spec.Texture)) :
+                "c:" + spec.Color.R.ToString("X2") + spec.Color.G.ToString("X2") + spec.Color.B.ToString("X2");
+        }
+
+        private static FinishSpec DecodeFinishSpec(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            if (text.StartsWith("c:", StringComparison.Ordinal))
+            {
+                int value;
+                if (int.TryParse(text.Substring(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out value))
+                    return new FinishSpec { Kind = "color", Color = Color.FromArgb((value >> 16) & 255, (value >> 8) & 255, value & 255) };
+            }
+            if (text.StartsWith("t:", StringComparison.Ordinal))
+            {
+                var path = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(text.Substring(2)));
+                if (!File.Exists(path)) throw new FileNotFoundException("找不到上次选择的板材图片，请重新选择板材材质。", path);
+                return new FinishSpec { Kind = "texture", Texture = path };
+            }
+            return null;
         }
 
         private static FinishSpec ChooseFinishSpec(string prompt, bool back)
@@ -98,7 +137,7 @@ namespace DielineUV
         private static string BuiltInTexture(string name)
         {
             // Embed the supplied images so a single RHP is sufficient on both platforms.
-            var path = Path.Combine(TextureCache(), "DielineUV-0413-" + name + ".png");
+            var path = Path.Combine(TextureCache(), "DielineUV-0414-" + name + ".png");
             if (!File.Exists(path))
             {
                 using (var resource = typeof(DielineUVCommand).Assembly.GetManifestResourceStream("DielineUV.Textures." + name + ".png"))
@@ -110,60 +149,47 @@ namespace DielineUV
             return path;
         }
 
-        private static int ChooseFinishChannel(RhinoObject obj)
-        {
-            for (int channel = 1; channel < 32; channel++)
-                if (obj.Attributes.GetUserString(FinishChannelKey) == channel.ToString(CultureInfo.InvariantCulture) ||
-                    obj.GetTextureMapping(channel) == null) return channel;
-            throw new InvalidOperationException("零件没有空闲的板材贴图通道。");
-        }
+
 
         private static bool PreparePrintingFaces(RhinoDoc doc, Change change, RhinoObject obj, Part part,
             Brep brep, int[] candidates, Mesh mappingMesh, Canvas canvas, SideFinish finish)
         {
-            string mode = finish.Printing;
             Vector3d layoutFront;
             bool flat = TryReadLayoutFrontNormal(mappingMesh, canvas, out layoutFront);
             if (flat) candidates = FlatPrintFaces(brep, layoutFront) ?? candidates;
             change.AllPrintFaces = candidates;
-            change.SingleSided = mode == "single" || mode == "reselect";
+            change.SingleSided = finish.Printing == "single" || finish.Printing == "reselect";
             change.PrintFaces = candidates;
             if (!change.SingleSided) return true;
-            int[] selected;
-            if (flat && finish.SingleSideSign.HasValue)
+            if (!flat)
             {
-                selected = candidates.Where(index => OrientedNormal(brep.Faces[index]) * layoutFront * finish.SingleSideSign.Value > 0.99).ToArray();
-                if (selected.Length == 0)
-                    throw new InvalidDataException("零件「" + part.Label + "」无法按第一件的刀模方向识别印刷侧，请检查绑定方向。");
+                // Existing folded templates retain the skin they recorded.
+                change.BackFaces = new int[0];
+                return true;
             }
-            else if (!flat)
+            var positions = candidates.Select(index => {
+                var face = brep.Faces[index];
+                var point = face.PointAt(face.Domain(0).Mid, face.Domain(1).Mid);
+                return point.X * layoutFront.X + point.Y * layoutFront.Y + point.Z * layoutFront.Z;
+            }).ToArray();
+            int[] front, back;
+            if (!PanelSidePolicy.Split(positions, finish.SingleSideSign ?? 1, StoredGeometryTolerance, out front, out back))
+                throw new InvalidDataException("零件「" + part.Label + "」没有可分离的板厚，请使用带厚度的平板实体。");
+            if (!finish.SingleSideSign.HasValue)
             {
-                // Fold templates already record their selected skin. This does not
-                // introduce neutral-surface binding or infer a second folded skin.
-                selected = candidates;
+                var saved = finish.Printing == "reselect" ? null :
+                    ReadFaceIndices(obj.Attributes.GetUserString(SingleFacesKey + part.MappingId));
+                var selected = saved != null && saved.Length > 0 && saved.All(candidates.Contains) ? saved :
+                    PickPrintingFaces(doc, obj, brep, candidates, part.Label);
+                if (selected == null) return false;
+                double firstPosition = positions[Array.IndexOf(candidates, selected[0])];
+                finish.SingleSideSign = firstPosition > positions.Min() + (positions.Max() - positions.Min()) / 2 ? 1 : -1;
+                PanelSidePolicy.Split(positions, finish.SingleSideSign.Value, StoredGeometryTolerance, out front, out back);
+                RhinoApp.WriteLine("已确认首件印刷侧，其余零件按各自刀模方向及板厚位置自动沿用。");
             }
-            else selected = mode == "reselect" ? null : ReadFaceIndices(obj.Attributes.GetUserString(SingleFacesKey + part.MappingId));
-            if (selected == null || selected.Length == 0 || selected.Any(index => !candidates.Contains(index)))
-            {
-                RhinoApp.WriteLine("只需为第一个平板确认印刷侧，后面的零件按各自已绑定的刀模方向自动沿用。");
-                selected = PickPrintingFaces(doc, obj, brep, candidates, part.Label);
-            }
-            if (selected == null) return false;
-            if (flat && !finish.SingleSideSign.HasValue)
-            {
-                double dot = OrientedNormal(brep.Faces[selected[0]]) * layoutFront;
-                if (Math.Abs(dot) < 0.99) throw new InvalidDataException("首件印刷侧与刀模平面不平行，请重新绑定。");
-                finish.SingleSideSign = dot >= 0 ? 1.0 : -1.0;
-            }
-            change.PrintFaces = selected;
+            change.PrintFaces = front.Select(index => candidates[index]).ToArray();
+            change.BackFaces = back.Select(index => candidates[index]).ToArray();
             change.SingleFacesStorageKey = SingleFacesKey + part.MappingId;
-            change.BackFaces = candidates.Except(selected).ToArray();
-            if (change.BackFaces.Length == 0)
-            {
-                // Recorded folded skins contain only their printable side. The remaining
-                // faces stay on the non-print finish; neutral-surface binding is separate.
-                RhinoApp.WriteLine("零件「{0}」没有可独立识别的平板背面；其余表面使用侧面及非印刷面材质。", part.Label);
-            }
             return true;
         }
 
@@ -193,61 +219,35 @@ namespace DielineUV
             {
                 using (var picker = new GetObject())
                 {
-                    picker.SetCommandPrompt("零件「" + label + "」：选择有图案的正面（Ctrl+Shift 点面；Mac 用 Command+Shift），回车确认");
+                    picker.SetCommandPrompt("首件「" + label + "」：点选要印刷的一侧大面（Ctrl+Shift；Mac 用 Command+Shift）");
                     picker.GeometryFilter = ObjectType.Surface;
                     picker.SubObjectSelect = true;
                     picker.GroupSelect = false;
                     picker.EnablePreSelect(false, true);
                     picker.SetCustomGeometryFilter((obj, geometry, component) => obj.Id == source.Id);
-                    if (picker.GetMultiple(1, 0) != GetResult.Object) return null;
-                    var chosen = new HashSet<int>();
-                    for (int i = 0; i < picker.ObjectCount; i++)
+                    if (picker.Get() != GetResult.Object) return null;
+                    using (var reference = picker.Object(0))
                     {
-                        using (var reference = picker.Object(i))
+                        var face = reference.Face();
+                        if (face == null) continue;
+                        if (source.Geometry is Brep && candidates.Contains(face.FaceIndex))
+                            return new[] { face.FaceIndex };
+                        // Match converted extrusion caps geometrically without using their orientation flags.
+                        using (var selected = face.DuplicateFace(false))
                         {
-                            var face = reference.Face();
-                            if (reference.ObjectId != source.Id || face == null) continue;
-                            var bounds = face.GetBoundingBox(true);
-                            // Extrusion cap component indices can differ from converted Brep indices.
+                            var bounds = selected.GetBoundingBox(true);
                             foreach (int index in candidates)
-                            {
-                                var target = brep.Faces[index].GetBoundingBox(true);
-                                if (bounds.Min.DistanceTo(target.Min) <= StoredGeometryTolerance &&
-                                    bounds.Max.DistanceTo(target.Max) <= StoredGeometryTolerance) chosen.Add(index);
-                            }
+                                using (var test = brep.Faces[index].DuplicateFace(false))
+                                {
+                                    var target = test.GetBoundingBox(true);
+                                    if (bounds.Min.DistanceTo(target.Min) <= StoredGeometryTolerance &&
+                                        bounds.Max.DistanceTo(target.Max) <= StoredGeometryTolerance) return new[] { index };
+                                }
                         }
                     }
-                    if (chosen.Count == 0 || chosen.Count == candidates.Length && candidates.Length > 1)
-                    {
-                        RhinoApp.WriteLine("请选择一侧的印刷大面，不选厚度侧面或两侧全部大面。");
-                        continue;
-                    }
-                    // Opposite planar normals are different sides of a solid. Disallow
-                    // accidentally selecting both sides while allowing split coplanar faces.
-                    var normals = chosen.Select(index => OrientedNormal(brep.Faces[index])).ToArray();
-                    bool planar = chosen.All(index => brep.Faces[index].IsPlanar(StoredGeometryTolerance));
-                    if (planar && normals.Any(normal => normal * normals[0] < 0.99))
-                    {
-                        RhinoApp.WriteLine("选到了不同朝向的大面，请只选同一印刷侧。");
-                        continue;
-                    }
-                    if (planar)
-                        foreach (int index in candidates)
-                            if (brep.Faces[index].IsPlanar(StoredGeometryTolerance) &&
-                                OrientedNormal(brep.Faces[index]) * normals[0] > 0.99) chosen.Add(index);
-                    doc.Objects.UnselectAll();
-                    doc.Views.Redraw();
-                    return chosen.OrderBy(index => index).ToArray();
+                    RhinoApp.WriteLine("请选择该原件的一侧大面，不选厚度侧边。");
                 }
             }
-        }
-
-        private static Vector3d OrientedNormal(BrepFace face)
-        {
-            var normal = face.NormalAt(face.Domain(0).Mid, face.Domain(1).Mid);
-            if (face.OrientationIsReversed) normal.Reverse();
-            normal.Unitize();
-            return normal;
         }
 
         private static Material CurrentBaseMaterial(RhinoDoc doc, RhinoObject obj)
@@ -257,50 +257,7 @@ namespace DielineUV
                 ? doc.Materials[index] : obj.GetMaterial(true);
         }
 
-        private static Material CreateFinishMaterial(FinishSpec spec, Material current, int channel, string role)
-        {
-            // A copied material must not share the old renderer instance. That instance
-            // can regenerate the old simulation and discard newly added face channels.
-            var material = spec.Kind == "current" && current != null ? new Material(current) : new Material();
-            material.Id = Guid.NewGuid();
-            material.Name = "DielineUV " + role + " " + Guid.NewGuid().ToString("N").Substring(0, 8);
-            material.RenderMaterialInstanceId = Guid.Empty;
-            material.ClearMaterialChannels();
-            if (spec.Kind == "color") material.DiffuseColor = spec.Color;
-            else if (spec.Kind == "texture")
-            {
-                material.DiffuseColor = Color.White;
-#pragma warning disable 612, 618
-                using (var simulated = new Rhino.Render.SimulatedTexture { Filename = spec.Texture })
-#pragma warning restore 612, 618
-                {
-                    simulated.SetMappingChannelAndProjectionMode(Rhino.Render.SimulatedTexture.ProjectionModes.MappingChannel,
-                        channel, Rhino.Render.SimulatedTexture.EnvironmentMappingModes.Automatic);
-                    using (var texture = simulated.Texture())
-                        if (texture == null || !material.SetTexture(texture, TextureType.Bitmap))
-                            throw new InvalidOperationException("无法建立板材图片材质。");
-                }
-            }
-            else if (current == null) material.DiffuseColor = BrownEdge;
-            if (spec.Kind == "current" && current?.Name?.StartsWith("DielineUV ", StringComparison.Ordinal) == true)
-            {
-                using (var old = current.GetTexture(TextureType.Bitmap))
-                    if (old != null && old.MappingChannelId > 0 && old.MappingChannelId < 32)
-                    {
-#pragma warning disable 612, 618
-                        using (var simulated = new SimulatedTexture { Filename = old.FileName })
-#pragma warning restore 612, 618
-                        {
-                            simulated.SetMappingChannelAndProjectionMode(SimulatedTexture.ProjectionModes.MappingChannel,
-                                channel, SimulatedTexture.EnvironmentMappingModes.Automatic);
-                            using (var texture = simulated.Texture())
-                                if (texture == null || !material.SetTexture(texture, TextureType.Bitmap))
-                                    throw new InvalidOperationException("无法沿用整个刀模框的板材图片。");
-                        }
-                    }
-            }
-            return material;
-        }
+
 
         private static Material PreviousBackMaterial(RhinoDoc doc, RhinoObject obj)
         {
@@ -310,18 +267,7 @@ namespace DielineUV
             return index < 0 ? null : doc.Materials[index];
         }
 
-        private static TextureMapping BoardTextureMapping(GeometryBase geometry)
-        {
-            var box = geometry.GetBoundingBox(true);
-            return TextureMapping.CreateBoxMapping(Plane.WorldXY,
-                ExpandedInterval(box.Min.X, box.Max.X), ExpandedInterval(box.Min.Y, box.Max.Y),
-                ExpandedInterval(box.Min.Z, box.Max.Z), true);
-        }
 
-        private static Interval ExpandedInterval(double min, double max)
-        {
-            return max - min > StoredGeometryTolerance ? new Interval(min, max) : new Interval(min - 0.5, max + 0.5);
-        }
 
         private static string ExistingArtworkImage(RhinoDoc doc, Bundle bundle)
         {
@@ -331,6 +277,7 @@ namespace DielineUV
                 if (obj == null) continue;
                 string saved = obj.Attributes.GetUserString(ArtworkImageKey);
                 if (File.Exists(saved)) return saved;
+                if (obj.Attributes.GetUserString(AtlasImageKey) != null) continue;
                 // Upgrade objects from 0.4.12 which did not save the PNG path.
                 var material = CurrentBaseMaterial(doc, obj);
                 var geometry = obj.Geometry as Brep;

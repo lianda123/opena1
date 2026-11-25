@@ -15,6 +15,8 @@
     <Compile Include="DielineUV.GeometryCheck.cs" />
     <Compile Include="DielineUV.SideMaterials.cs" />
     <Compile Include="DielineUV.Finishes.cs" />
+    <Compile Include="DielineUV.PanelSides.cs" />
+    <Compile Include="DielineUV.TextureAtlas.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Textures/MDF.png" LogicalName="DielineUV.Textures.MDF.png" />
