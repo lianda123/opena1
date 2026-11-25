@@ -83,7 +83,7 @@ namespace DielineUV
 
         private static string TextureCache()
         {
-            var path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "DielineUV", "textures");
+            var path = Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.LocalApplicationData), "DielineUV", "textures");
             Directory.CreateDirectory(path);
             return path;
         }
