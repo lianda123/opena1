@@ -77,6 +77,7 @@ namespace DielineUV
                 Show(part.BoundSourceId);
                 foreach (var id in part.LayoutIds) Show(id);
                 foreach (var curve in part.Guides) curve.Dispose();
+                part.MappingMesh?.Dispose();
                 if (parts.Count == 0) Reviewing = false;
                 RhinoApp.WriteLine("已撤回「{0}」的绑定，已恢复原件和刀模，可重新选择。现有 {1} 件。", part.Label, parts.Count);
                 doc.Views.Redraw();

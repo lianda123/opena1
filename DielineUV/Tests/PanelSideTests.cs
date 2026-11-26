@@ -38,5 +38,7 @@ internal static class Program
         Require(!PanelSidePolicy.Split(new[] { 1.0, 1.0 }, 1, .001, out a, out b), "zero thickness accepted");
         Require(!PanelSidePolicy.Split(new[] { double.NaN, 2.0 }, 1, .001, out a, out b), "invalid plane accepted");
         Console.WriteLine("Panel side regression checks passed: " + assertions);
+        BendFitTests.Run();
+        TransparentPixelTests.Run();
     }
 }

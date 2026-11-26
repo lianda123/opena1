@@ -7,5 +7,9 @@
   <ItemGroup>
     <Compile Include="../DielineUV.PanelSides.cs" Link="PanelSides.cs" />
     <Compile Include="PanelSideTests.cs" />
+    <Compile Include="../DielineUV.StretchFit.cs" Link="StretchFit.cs" />
+    <Compile Include="BendFitTests.cs" />
+    <Compile Include="../DielineUV.TransparentPixels.cs" Link="TransparentPixels.cs" />
+    <Compile Include="TransparentPixelTests.cs" />
   </ItemGroup>
 </Project>

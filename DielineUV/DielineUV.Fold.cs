@@ -24,6 +24,8 @@ namespace DielineUV
             public Brep Flat;
             public Mesh OriginalMesh;
             public Mesh FlatMesh;
+            public Func<Point3d, Point3d> ProjectPoint;
+            public int[] BackFaces;
             public void Dispose()
             {
                 if (Flat != null) Flat.Dispose();

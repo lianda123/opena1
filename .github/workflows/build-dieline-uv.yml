@@ -22,7 +22,7 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Check panel-side regressions
+      - name: Check panel, bend and alpha regressions
         run: dotnet run --project DielineUV/Tests/PanelSideTests.csproj -c Release
       - name: Compile Rhino 7 and 8 plug-ins
         run: dotnet build DielineUV/DielineUV.csproj -c Release

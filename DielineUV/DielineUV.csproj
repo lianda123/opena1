@@ -17,6 +17,10 @@
     <Compile Include="DielineUV.Finishes.cs" />
     <Compile Include="DielineUV.PanelSides.cs" />
     <Compile Include="DielineUV.TextureAtlas.cs" />
+    <Compile Include="DielineUV.StretchFit.cs" />
+    <Compile Include="DielineUV.NeutralBend.cs" />
+    <Compile Include="DielineUV.TransparentPixels.cs" />
+    <Compile Include="DielineUV.Transparency.cs" />
   </ItemGroup>
   <ItemGroup>
     <EmbeddedResource Include="Textures/MDF.png" LogicalName="DielineUV.Textures.MDF.png" />

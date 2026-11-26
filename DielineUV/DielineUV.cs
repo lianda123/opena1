@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.14.0")]
-[assembly: AssemblyFileVersion("0.4.14.0")]
+[assembly: AssemblyVersion("0.4.15.0")]
+[assembly: AssemblyFileVersion("0.4.15.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -44,17 +44,18 @@ namespace DielineUV
         {
             try
             {
-                var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "调整现有贴图的单双面／背面／侧边材质", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.14", "选择操作", actions) as string;
+                var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "透明件：导入／更新 PNG", "调整现有贴图的单双面／背面／侧边材质", "展开折弯件并记录对应关系" };
+                var action = Dialogs.ShowListBox(Title + " 0.4.15", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
-                if (action == actions[2]) return EditProjectFinish(doc);
+                if (action == actions[2]) return ImportProject(doc, true);
+                if (action == actions[3]) return EditProjectFinish(doc);
                 return PrepareFold(doc);
             }
             catch (Exception error)
             {
-                RhinoApp.WriteLine("{0} 0.4.14：{1}", Title, error.Message);
+                RhinoApp.WriteLine("{0} 0.4.15：{1}", Title, error.Message);
                 return Result.Failure;
             }
         }
@@ -319,7 +320,8 @@ namespace DielineUV
         {
             var texturePath = finish.Atlas == null ? CacheTexture(image) : finish.Atlas.Image;
             var artworkPath = finish.Atlas == null ? texturePath : finish.Atlas.Artwork;
-            using (var material = new Material { DiffuseColor = System.Drawing.Color.White })
+            using (var material = new Material { DiffuseColor = System.Drawing.Color.White,
+                AlphaTransparency = finish.Atlas?.Alpha == true, Transparency = 0 })
             {
                 var renderMaterial = RenderMaterial.CreateBasicMaterial(material, doc);
                 // The document-aware SimulatedTexture constructors require Rhino 7.6.
@@ -343,6 +345,17 @@ namespace DielineUV
                     throw new InvalidOperationException("无法将图片添加到材质的颜色纹理。");
                 renderMaterial.SetChildSlotOn(slot, true, context);
                 renderMaterial.SetChildSlotAmount(slot, 100.0, context);
+                if (finish.Atlas?.Alpha == true)
+                {
+                    renderMaterial.BeginChange(context);
+                    try
+                    {
+                        if (!renderMaterial.SetParameter("alpha-transparency", true))
+                            throw new InvalidOperationException("Rhino 无法启用透明件图案的 Alpha 透明度。");
+                        renderMaterial.SetParameter("transparency", 0.0);
+                    }
+                    finally { renderMaterial.EndChange(); }
+                }
                 uint undo = doc.BeginUndoRecord("DielineUV");
                 var applied = new List<Change>();
                 try
@@ -370,11 +383,14 @@ namespace DielineUV
                         attributes.SetUserString(ArtworkChannelKey, artworkChannel.ToString(CultureInfo.InvariantCulture));
                         attributes.SetUserString(ArtworkImageKey, artworkPath);
                         attributes.SetUserString(AtlasImageKey, finish.Atlas == null ? null : texturePath);
+                        attributes.SetUserString(TransparentFinishKey, WriteTransparentFinish(finish));
                         attributes.SetUserString(PrintingModeKey, finish.WholeObject ? "whole" : change.SingleSided ? "single" : "double");
                         if (change.PrintFacesKey != null)
                             attributes.SetUserString(change.PrintFacesKey, WriteFaceIndices(change.AllPrintFaces));
                         if (change.SingleFacesStorageKey != null)
                             attributes.SetUserString(change.SingleFacesStorageKey, WriteFaceIndices(change.PrintFaces));
+                        if (change.BendReverseStorageKey != null)
+                            attributes.SetUserString(change.BendReverseStorageKey, change.BendReversed ? "1" : "0");
                         if (!finish.WholeObject)
                         {
                             attributes.SetUserString(SideSpecKey, EncodeFinishSpec(finish.Sides));
@@ -435,6 +451,8 @@ namespace DielineUV
             public string PrintFacesKey;
             public string SingleFacesStorageKey;
             public bool SingleSided;
+            public string BendReverseStorageKey;
+            public bool BendReversed;
             public bool Replaced;
         }
     }
@@ -475,5 +493,7 @@ namespace DielineUV
         [DataMember(Name = "uv_min")] public double[] UvMin;
         [DataMember(Name = "uv_max")] public double[] UvMax;
         [DataMember(Name = "print_faces", EmitDefaultValue = false)] public int[] PrintFaces;
+        [DataMember(Name = "back_faces", EmitDefaultValue = false)] public int[] BackFaces;
+        [DataMember(Name = "mapping_kind", EmitDefaultValue = false)] public string MappingKind;
     }
 }

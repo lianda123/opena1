@@ -16,11 +16,15 @@ namespace DielineUV
 {
     public sealed partial class DielineUVCommand
     {
-        private static SideFinish ChooseSideFinish()
+        private static SideFinish ChooseSideFinish(RhinoDoc doc, Bundle bundle, bool transparentOnly = false)
         {
-            var modes = new[] { "沿用此刀模框上次设置（以第一件为准）", "整个刀模框：双面同图", "整个刀模框：单面印刷", "整个刀模框：单面印刷并重选第一件印刷侧", "整件贴图（兼容原效果）" };
+            var first = doc.Objects.FindId(Guid.Parse(bundle.Parts[0].SourceId));
+            if (transparentOnly) return ChooseTransparentFinish(first);
+            var modes = new[] { "沿用此刀模框上次设置（以第一件为准）", "整个刀模框：双面同图", "整个刀模框：单面印刷", "整个刀模框：单面印刷并重选第一件印刷侧", "整件贴图（兼容原效果）", "透明件贴图（统一底色／透明度）" };
             var mode = Dialogs.ShowListBox(Title, "本次设置用于整个刀模框，只需确认一次", modes) as string;
             if (mode == null) return null;
+            if (mode == modes[5] || mode == modes[0] && ReadTransparentFinish(first?.Attributes.GetUserString(TransparentFinishKey)) != null)
+                return ChooseTransparentFinish(first);
             if (mode == modes[4]) return new SideFinish { WholeObject = true, Printing = "whole" };
             var sides = ChooseFinishSpec("选择侧面及其他非印刷面的材质", false);
             if (sides == null) return null;
@@ -42,6 +46,11 @@ namespace DielineUV
                 finish.Printing = finish.WholeObject ? "whole" : previous == "single" ? "single" : "double";
             }
             if (finish.WholeObject) return;
+            if (finish.Transparent)
+            {
+                finish.Sides = finish.Back = new FinishSpec { Kind = "color", Color = finish.Tint };
+                return;
+            }
             finish.Sides = ResolveFinish(finish.Sides, first.Attributes.GetUserString(SideSpecKey), CurrentBaseMaterial(doc, first));
             var previousBack = PreviousBackMaterial(doc, first);
             if (finish.Back.Kind == "same" || finish.Back.Kind == "current" &&
@@ -154,6 +163,40 @@ namespace DielineUV
         private static bool PreparePrintingFaces(RhinoDoc doc, Change change, RhinoObject obj, Part part,
             Brep brep, int[] candidates, Mesh mappingMesh, Canvas canvas, SideFinish finish)
         {
+            if (part.MappingKind == NeutralBendKind)
+            {
+                var curvedBack = part.BackFaces ?? new int[0];
+                if (curvedBack.Any(index => index < 0 || index >= brep.Faces.Count || candidates.Contains(index)))
+                    throw new InvalidDataException("折弯件的背面编号无效，请重新导出该项目模板。");
+                change.AllPrintFaces = candidates;
+                change.SingleSided = finish.Printing == "single" || finish.Printing == "reselect";
+                if (!change.SingleSided && brep.IsSolid && curvedBack.Length == 0)
+                    throw new InvalidDataException("折弯件「" + part.Label + "」未记录背面，请重新绑定并补选背面后使用双面图案。");
+                if (change.SingleSided)
+                {
+                    if (!finish.BendReversed.HasValue)
+                    {
+                        if (finish.Printing == "reselect" && curvedBack.Length > 0)
+                        {
+                            var picked = PickPrintingFaces(doc, obj, brep, candidates.Concat(curvedBack).ToArray(), part.Label);
+                            if (picked == null) return false;
+                            finish.BendReversed = curvedBack.Contains(picked[0]);
+                        }
+                        else finish.BendReversed = obj.Attributes.GetUserString(BendReverseKey + part.MappingId) == "1";
+                    }
+                    bool reverse = finish.BendReversed == true && curvedBack.Length > 0;
+                    change.PrintFaces = reverse ? curvedBack : candidates;
+                    change.BackFaces = reverse ? candidates : curvedBack;
+                    change.BendReverseStorageKey = BendReverseKey + part.MappingId;
+                    change.BendReversed = reverse;
+                }
+                else
+                {
+                    change.PrintFaces = candidates.Concat(curvedBack).Distinct().ToArray();
+                    change.BackFaces = new int[0];
+                }
+                return true;
+            }
             Vector3d layoutFront;
             bool flat = TryReadLayoutFrontNormal(mappingMesh, canvas, out layoutFront);
             if (flat) candidates = FlatPrintFaces(brep, layoutFront) ?? candidates;

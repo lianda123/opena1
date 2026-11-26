@@ -23,6 +23,7 @@ namespace DielineUV
         private const string SideSpecKey = "DielineUV.SideFinish";
         private const string BackSpecKey = "DielineUV.BackFinish";
         private const string AtlasImageKey = "DielineUV.AtlasImage";
+        private const string BendReverseKey = "DielineUV.BendReverse.";
         private const string FinishChannelKey = "DielineUV.FinishChannel";
         private static readonly Color BrownEdge = Color.FromArgb(128, 82, 47);
 
@@ -33,7 +34,12 @@ namespace DielineUV
             public FinishSpec Sides;
             public FinishSpec Back;
             public double? SingleSideSign;
+            public bool? BendReversed;
             public TextureAtlas Atlas;
+            public bool Transparent;
+            public Color Tint;
+            public double Transparency;
+            public string BackgroundMode = "auto";
         }
 
         private sealed class FinishSpec

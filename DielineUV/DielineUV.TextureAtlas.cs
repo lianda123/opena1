@@ -27,10 +27,12 @@ namespace DielineUV
             public string Image, Artwork;
             public AtlasRegion Print, Back, Side;
             public bool BackColor, SideColor;
+            public bool Alpha;
         }
 
         private static TextureAtlas CreateTextureAtlas(string image, SideFinish finish)
         {
+            if (finish.Transparent) return CreateTransparentAtlas(image, finish);
             using (var artwork = new Eto.Drawing.Bitmap(image))
             {
                 const int tile = 512, padding = 16;

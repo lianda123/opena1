@@ -33,6 +33,8 @@ namespace DielineUV
             public Mesh MappingMesh;
             public Point3d[] LayoutPoints;
             public int[] PrintFaces;
+            public int[] BackFaces;
+            public string MappingKind;
             public Guid[] LayoutIds;
             public Guid BoundSourceId;
         }
@@ -41,7 +43,7 @@ namespace DielineUV
         {
             var frame = SelectFrame(doc);
             if (frame == null) return Result.Cancel;
-            var options = new[] { "识别排版关联", "选择原件和刀模（自动对齐）", "手动绑定平板（三对定位点）" };
+            var options = new[] { "识别排版关联", "选择原件和刀模（自动对齐）", "手动绑定平板（三对定位点）", "折弯件：绑定已有中间层刀模（允许拉伸）" };
             var option = Dialogs.ShowListBox(Title, "选择当前外框内零件的匹配方式", options) as string;
             if (option == null) return Result.Cancel;
             double tolerance = Math.Max(doc.ModelAbsoluteTolerance * 4.0, 0.02);
@@ -52,12 +54,12 @@ namespace DielineUV
                 throw new InvalidOperationException("本外框内没有可用关联。请选排版件所在的外框，或使用“选择原件和刀模（自动对齐）”。");
             }
             var progress = option == options[0] ? null : new BindingProgress(doc, parts);
-            bool automatic = option == options[1];
+            int bindingMode = option == options[1] ? 0 : option == options[2] ? 1 : 2;
             try
             {
                 while (true)
                 {
-                    if (progress != null && !BindParts(doc, frame, tolerance, ref automatic, parts, progress)) return Result.Cancel;
+                    if (progress != null && !BindParts(doc, frame, tolerance, ref bindingMode, parts, progress)) return Result.Cancel;
                     progress?.RestoreVisibility();
                     using (var dialog = new SelectFolderDialog { Title = "选择项目贴图模板的保存位置（取消可返回继续绑定）" })
                     {
@@ -91,7 +93,7 @@ namespace DielineUV
             }
         }
 
-        private static Result ImportProject(RhinoDoc doc)
+        private static Result ImportProject(RhinoDoc doc, bool transparent = false)
         {
             string image = PickFile("选择你做好的整张 PNG 贴图", ".png");
             if (image == null) return Result.Cancel;
@@ -111,7 +113,7 @@ namespace DielineUV
 
             Bundle bundle = ReadBundle(manifest);
             ValidatePngCanvas(image, bundle.Canvas);
-            var finish = ChooseSideFinish();
+            var finish = ChooseSideFinish(doc, bundle, transparent);
             if (finish == null || !Apply(doc, Path.GetDirectoryName(manifest), bundle, image, finish))
                 return Result.Cancel;
             RhinoApp.WriteLine("已为当前项目的 {0} 个原件更新贴图。切换到渲染显示模式查看。", bundle.Parts.Length);
@@ -131,7 +133,7 @@ namespace DielineUV
                 if (image == null) return Result.Cancel;
             }
             ValidatePngCanvas(image, bundle.Canvas);
-            var finish = ChooseSideFinish();
+            var finish = ChooseSideFinish(doc, bundle);
             if (finish == null || !Apply(doc, Path.GetDirectoryName(manifest), bundle, image, finish)) return Result.Cancel;
             RhinoApp.WriteLine("已调整本项目 {0} 个零件的印刷方式及材质，保留现有 PNG 图案。", bundle.Parts.Length);
             return Result.Success;
@@ -353,19 +355,22 @@ namespace DielineUV
             finally { foreach (var curve in projected) curve.Dispose(); }
         }
 
-        private static bool BindParts(RhinoDoc doc, Canvas frame, double tolerance, ref bool automatic,
+        private static bool BindParts(RhinoDoc doc, Canvas frame, double tolerance, ref int bindingMode,
             List<ProjectPart> parts, BindingProgress progress)
         {
             while (true)
             {
+                bool automatic = bindingMode == 0;
+                bool bend = bindingMode == 2;
                 RhinoObject source;
                 using (var picker = CreateObjectPicker(
-                    string.Format("{0}｜已绑 {1} 件。选三维原件或回车导出", automatic ? "自动对齐" : "手动绑定", parts.Count),
+                    string.Format("{0}｜已绑 {1} 件。选三维原件或回车导出", bend ? "折弯刀模" : automatic ? "自动对齐" : "手动绑定", parts.Count),
                     PartTypes | ObjectType.PolysrfFilter))
                 {
                     picker.SetCustomGeometryFilter((obj, geometry, component) => !progress.IsBound(obj.Id));
                     int auto = picker.AddOption(new LocalizeStringPair("Automatic", "自动对齐"));
                     int manual = picker.AddOption(new LocalizeStringPair("Manual", "手动绑定"));
+                    int neutral = picker.AddOption(new LocalizeStringPair("Bend", "折弯刀模"));
                     int display = picker.AddOption(progress.HideLayout
                         ? new LocalizeStringPair("GreenLayout", "刀模标绿")
                         : new LocalizeStringPair("HideLayout", "隐藏刀模"));
@@ -383,7 +388,8 @@ namespace DielineUV
                     if (result == GetResult.Option)
                     {
                         int option = picker.Option().Index;
-                        if (option == auto || option == manual) automatic = option == auto;
+                        if (option == auto || option == manual || option == neutral)
+                            bindingMode = option == auto ? 0 : option == manual ? 1 : 2;
                         else if (option == display) progress.ToggleLayout();
                         else if (option == undo) progress.UndoLast();
                         else if (option == review) progress.ToggleReview();
@@ -407,6 +413,7 @@ namespace DielineUV
                 {
                     Transform registration = Transform.Unset;
                     bool manualThisPart = !automatic;
+                    bool bindBend = bend;
                     if (automatic)
                     {
                         Point3d[] markers;
@@ -414,11 +421,26 @@ namespace DielineUV
                         alignments.RemoveAll(transform => !InsideFrame(source.Geometry.GetBoundingBox(transform), frame, tolerance));
                         if (alignments.Count == 0)
                         {
-                            RhinoApp.WriteLine("无法自动对齐，已用当前原件和刀模转入手动绑定。");
-                            manualThisPart = true;
+                            bindBend = HasBentSkin(source.Geometry);
+                            manualThisPart = !bindBend;
+                            RhinoApp.WriteLine(bindBend ? "检测到折弯印刷曲面，转入已有刀模的拉伸绑定。" :
+                                "无法自动对齐，已用当前原件和刀模转入手动绑定。");
                         }
                         else if (!ChooseBoardAlignment(doc, alignments, markers, guides[0].GetBoundingBox(true).Center.Z, out registration))
                             continue;
+                    }
+                    if (bindBend)
+                    {
+                        ProjectPart curved;
+                        try { curved = BindNeutralBend(doc, source, guides, layoutIds, frame, tolerance); }
+                        catch (Exception error) when (error is InvalidDataException || error is ArgumentException || error is InvalidOperationException)
+                        { RhinoApp.WriteLine("当前折弯件未绑定：" + error.Message); continue; }
+                        if (curved == null) continue;
+                        parts.Add(curved);
+                        keepGuides = true;
+                        progress.Mark(curved);
+                        RhinoApp.WriteLine("已绑定折弯件「{0}」，累计 {1} 件。可切换自动／手动／折弯、撤回上一件或回车导出。", curved.Label, parts.Count);
+                        continue;
                     }
                     if (manualThisPart)
                     {
@@ -670,7 +692,8 @@ namespace DielineUV
                         if (mapId == Guid.Empty) throw new InvalidOperationException("无法保存贴图网格：" + part.Label);
                         entries.Add(new Part { Label = part.Label, SourceId = source.Id.ToString(),
                             MappingId = mapId.ToString(), UvMin = min, UvMax = max,
-                            PrintFaces = part.MappingMesh == null ? FlatPrintFaces(source.Geometry, part.ToLayout) : part.PrintFaces });
+                            PrintFaces = part.MappingMesh == null ? FlatPrintFaces(source.Geometry, part.ToLayout) : part.PrintFaces,
+                            BackFaces = part.BackFaces, MappingKind = part.MappingKind });
                     }
                 }
                 var bundle = new Bundle { Schema = ProjectSchema, Canvas = frame, Parts = entries.ToArray() };
