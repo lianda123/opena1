@@ -1,11 +1,11 @@
-刀模贴图助手 DielineUV 0.4.17
+刀模贴图助手 DielineUV 0.4.18
 
 Windows 安装
 1. 完整解压到固定目录。在 Rhino 输入 PlugInManager，点击“安装”。
 2. Rhino 7（含 7.1）安装 Rhino7/DielineUV.rhp。
    Rhino 8 默认 .NET 模式安装 Rhino8/DielineUV.rhp（Rhino 8.21 或更新版本）；
    Rhino 8 的 .NET Framework 模式安装 Rhino7 目录中的 .rhp。
-3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.17。
+3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.18。
    原有 manifest.json 和 mapping.3dm 可以继续使用。
 
 macOS 安装
@@ -108,7 +108,9 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
    也可在普通导入的印刷方式中选择“透明件贴图（统一底色／透明度）”。
 2. 一个窗口为整个刀模框统一设置：图案单／双面、底色和透明度 0～100%。
    两面无图区域和厚度侧边使用同一底色、同一透明度。
-   颜色图片保持原色，独立灰度透明遮罩控制可透视区域；调高透明度不会把颜色混白。
+   颜色图片保持原色，独立不透明度遮罩控制可透视区域；调高透明度不会把颜色混白。
+   遮罩白色保留表面、黑色透出背景；整件材质的玻璃透明度保持 0，避免连图案一起消失。
+   0% 时关闭透明遮罩，底材和图案均不透明；100% 时无图区域完全透明，实色图案仍保留。
    图案的实色区域保持不透明，不会随底材一起变透明；抗锯齿边缘保留覆盖度。
 3. 图片背景可选自动识别、透明背景 PNG、白底 PNG。
    自动模式优先使用 PNG 的透明背景，否则按白底处理。
@@ -125,7 +127,8 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
    用于直观预览透视效果，不模拟真实玻璃折射。旧项目无需重绑，重新导入 PNG 即可升级材质。
 
 适用范围与验证
-0.4.17 将透明件的颜色与透明遮罩分别写入 Rhino 材质，修复透明度增大时颜色混白的问题。
+0.4.18 修正 0.4.17 将整体透明度固定成 100% 及遮罩黑白方向错误的问题。
+应用前会读取 Rhino 实际显示材质，核对整体透明度与遮罩是否保存成功。
 保留 0.4.16 的字体修复、连续多刀模框导出，以及已有折弯绑定。
 保留 0.4.14 的内部贴图分区，不使用此前反复失败的逐面材质通道。
 单面与独立背面适用于带厚度的曲面实体、拉伸体及多重曲面。
@@ -136,4 +139,5 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
 嵌入板材图片和压缩包完整性。
 按用户要求未启动本机 Rhino 实机验证；自动检查不能代替实际选面及渲染验证。
 透明材质参考：https://docs.mcneel.com/rhino/7mac/help/en-us/commands/materials.htm
+Rhino 7 遮罩约定参考：https://github.com/mcneel/RhinoCycles/blob/rhino-7.0/Shaders/RhinoFullNxt.cs
 

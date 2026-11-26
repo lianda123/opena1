@@ -5,15 +5,19 @@ namespace DielineUV
     // Raster coverage, independent of Rhino/Eto. Alpha is opacity: 255 is opaque.
     internal static class TransparentPixels
     {
+        // Rhino's transparency texture is an opacity mask: white keeps the surface.
+        // The global transparency must stay zero or even white mask pixels turn into glass.
+        internal const double MaterialTransparency = 0.0;
+
         // Color textures are opaque RGB. Transparency goes only into a separate map.
         internal static int ColorPixel(int composite)
         {
             return unchecked((int)0xff000000) | (composite & 0x00ffffff);
         }
 
-        internal static int TransparencyPixel(int composite)
+        internal static int OpacityPixel(int composite)
         {
-            int amount = 255 - (int)((uint)composite >> 24);
+            int amount = (int)((uint)composite >> 24);
             return unchecked((int)0xff000000) | (amount << 16) | (amount << 8) | amount;
         }
 

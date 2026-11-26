@@ -89,7 +89,7 @@ namespace DielineUV
                 var atlas = new TextureAtlas { Width = artwork.Width + tile + 3 * padding,
                     Height = Math.Max(artwork.Height + 2 * padding, 2 * tile + 3 * padding),
                     Artwork = CacheTexture(image), Image = Path.Combine(TextureCache(), Guid.NewGuid().ToString("N") + ".png"),
-                    TransparencyImage = Path.Combine(TextureCache(), Guid.NewGuid().ToString("N") + "-transparency.png"),
+                    TransparencyImage = Path.Combine(TextureCache(), Guid.NewGuid().ToString("N") + "-opacity.png"),
                     Print = new AtlasRegion { X = padding, Y = padding, Width = artwork.Width, Height = artwork.Height },
                     Side = new AtlasRegion { X = artwork.Width + 2 * padding, Y = padding, Width = tile, Height = tile },
                     Back = new AtlasRegion { X = artwork.Width + 2 * padding, Y = tile + 2 * padding, Width = tile, Height = tile },
@@ -105,7 +105,7 @@ namespace DielineUV
                         int bottom = TransparentPixels.BasePixel(tint, finish.Transparency);
                         output.SetPixels(Enumerable.Repeat(Eto.Drawing.Color.FromArgb(TransparentPixels.ColorPixel(bottom)),
                             checked(atlas.Width * atlas.Height)));
-                        transparency.SetPixels(Enumerable.Repeat(Eto.Drawing.Color.FromArgb(TransparentPixels.TransparencyPixel(bottom)),
+                        transparency.SetPixels(Enumerable.Repeat(Eto.Drawing.Color.FromArgb(TransparentPixels.OpacityPixel(bottom)),
                             checked(atlas.Width * atlas.Height)));
                         for (int y = 0; y < artwork.Height; y++)
                             for (int x = 0; x < artwork.Width; x++)
@@ -114,7 +114,7 @@ namespace DielineUV
                                 output.SetPixel(atlas.Print.X + x, atlas.Print.Y + y,
                                     Eto.Drawing.Color.FromArgb(TransparentPixels.ColorPixel(pixel)));
                                 transparency.SetPixel(atlas.Print.X + x, atlas.Print.Y + y,
-                                    Eto.Drawing.Color.FromArgb(TransparentPixels.TransparencyPixel(pixel)));
+                                    Eto.Drawing.Color.FromArgb(TransparentPixels.OpacityPixel(pixel)));
                             }
                     }
                     bitmap.Save(atlas.Image, Eto.Drawing.ImageFormat.Png);
@@ -160,8 +160,10 @@ namespace DielineUV
                 material.BeginChange(context);
                 try
                 {
-                    // The gray map replaces transparency over UV space. RGB is not alpha-blended to white.
-                    if (!material.SetParameter("alpha-transparency", false) || !material.SetParameter("transparency", 1.0))
+                    // Rhino inverts this texture's luminance: white is opaque, black is transparent.
+                    // Global transparency is separate and would also hide solid printed pixels.
+                    if (!material.SetParameter("alpha-transparency", false) ||
+                        !material.SetParameter("transparency", TransparentPixels.MaterialTransparency))
                         throw new InvalidOperationException("Rhino 无法保存透明件材质设置。");
                     var slot = material.TextureChildSlotName(RenderMaterial.StandardChildSlots.Transparency);
                     if (!material.SetChild(texture, slot))
@@ -173,8 +175,24 @@ namespace DielineUV
                         throw new InvalidOperationException("Rhino 未启用透明件的透明遮罩。");
                 }
                 finally { material.EndChange(); }
+                ValidateTransparentMaterial(material);
             }
             finally { if (!attached) texture.Dispose(); }
+        }
+
+        private static void ValidateTransparentMaterial(RenderMaterial material, bool requireMask = true)
+        {
+            if (Math.Abs(Convert.ToDouble(material.GetParameter("transparency"), CultureInfo.InvariantCulture) -
+                TransparentPixels.MaterialTransparency) > .000001)
+                throw new InvalidOperationException("Rhino 未保存透明件的正确材质底值，已取消应用。");
+            using (var saved = material.SimulatedMaterial(RenderTexture.TextureGeneration.Allow))
+            {
+                if (saved == null || Math.Abs(saved.Transparency - TransparentPixels.MaterialTransparency) > .000001)
+                    throw new InvalidOperationException("Rhino 的显示材质仍为整件透明，已取消应用并保留原件。");
+                using (var mask = saved.GetTexture(TextureType.Transparency))
+                    if (requireMask && (mask == null || !mask.Enabled || string.IsNullOrWhiteSpace(mask.FileName) || !File.Exists(mask.FileName)))
+                        throw new InvalidOperationException("Rhino 未保存透明件的不透明度遮罩，已取消应用。");
+            }
         }
 
         private static RenderTexture CreateMappedTexture(RhinoDoc doc, string image, int channel, bool linear)
