@@ -40,5 +40,7 @@ internal static class Program
         Console.WriteLine("Panel side regression checks passed: " + assertions);
         BendFitTests.Run();
         TransparentPixelTests.Run();
+        MultiExportTests.Run();
     }
 }
+

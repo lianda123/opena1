@@ -1,11 +1,11 @@
-刀模贴图助手 DielineUV 0.4.15
+刀模贴图助手 DielineUV 0.4.16
 
 Windows 安装
 1. 完整解压到固定目录。在 Rhino 输入 PlugInManager，点击“安装”。
 2. Rhino 7（含 7.1）安装 Rhino7/DielineUV.rhp。
    Rhino 8 默认 .NET 模式安装 Rhino8/DielineUV.rhp（Rhino 8.21 或更新版本）；
    Rhino 8 的 .NET Framework 模式安装 Rhino7 目录中的 .rhp。
-3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.15。
+3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.16。
    原有 manifest.json 和 mapping.3dm 可以继续使用。
 
 macOS 安装
@@ -15,7 +15,7 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
 
 导出和绑定
 1. 打开包含三维原件和二维刀模的同一模型，使用毫米单位。运行 DielineUV，
-   选“导出当前项目模板”，选择包住二维刀模的闭合矩形外框。
+   选“导出刀模框模板（可连续导出）”，选择包住二维刀模的闭合矩形外框。
    外框大小按实际刀模决定，边平行世界 X、Y 轴；三维原件可以在外框之外。
 2. 可识别排版关联，或选择原件和刀模进行自动／手动绑定。
    自动模式：选原件，选对应的二维闭合轮廓及孔槽，回车确认。
@@ -30,6 +30,12 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
    自动返回绑定并保留全部已绑记录，可继续添加或撤回。
    真正退出本次绑定，在选原件提示处按 Esc。
    导出、退出或报错时均恢复本次临时隐藏的对象，不改变原材质或刀模颜色。
+5. 导出成功后可选“继续导出下一个刀模框”，重新选外框并绑定，数量不限制。
+   下一框会沿用保存位置，但重新建立本框的零件对应关系。
+   每框生成独立的 DielineUV_... 文件夹；外框已命名时会带上外框名称。
+   完整输出后才成为可用模板，报错不会覆盖已完成的项目。
+   点“完成导出”结束；以后再次运行命令仍可继续导出其他外框。
+   下一框取消绑定时，前面已导出的模板仍然有效。
 
 绘制和更新 PNG
 1. Photoshop 打开 template.png，或 Illustrator 打开 template.svg。
@@ -37,6 +43,9 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
    分辨率可以改变，长宽比应一致，关闭按内容裁切。
 2. DielineUV →“导入／更新 PNG 贴图”，选择 PNG 及对应 manifest.json。
    manifest.json 和 mapping.3dm 必须来自同一次导出并放在同一目录。
+   一个模型可以有多个项目文件夹。每张 PNG 选择所属刀模框的 manifest.json；
+   建议把画好的 PNG 放回该框文件夹，导入时可直接使用同目录的对应关系。
+   不同框可设置不同板材、侧边颜色、单双面或透明材质，按框分别导入／更新。
 3. 选择印刷方式：
    一个刀模框统一选择一次，所有零件自动沿用相同的单双面、背面和侧面设置。
    “沿用此刀模框上次设置”：以第一件为准，更新图案时统一沿用；首次按双面。
@@ -66,7 +75,7 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
 
 已有中间层刀模的折弯件
 1. 保留原三维实体和已有二维刀模，不必重新按外表面制作刀模。
-   DielineUV → 导出当前项目模板 → 选外框 →
+   DielineUV → 导出刀模框模板（可连续导出） → 选外框 →
    “折弯件：绑定已有中间层刀模（允许拉伸）”。
 2. 点选三维原件，再选择对应二维刀模的封闭外轮廓，回车。
    可以选多条 Make2D 线及孔槽，外轮廓需能连接成闭合线。
@@ -112,12 +121,14 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
    本功能控制颜色和 Alpha 透明显示，不是对光学折射效果的模拟。
 
 适用范围与验证
-0.4.15 增加已有中间层刀模的折弯绑定及透明件选项。
+0.4.16 修复校准图释放字体导致后续导出／窗口报 Eto.Drawing.Font 的问题，
+增加连续多刀模框导出与完整写出后发布模板。保留折弯绑定及透明件选项。
 保留 0.4.14 的内部贴图分区，不使用此前反复失败的逐面材质通道。
 单面与独立背面适用于带厚度的曲面实体、拉伸体及多重曲面。
 零厚度曲面没有独立实体背面，立体网格仍需使用“整件贴图”。
 拉伸体在应用分区贴图时会转换为同形的多重曲面，原位置和形状不变。
 构建检查覆盖 Rhino 7/8 编译、Rhino 7.0 SDK 引用、板厚分侧、中线长度、
-旋转镜像及伸缩拟合、透明像素规则、嵌入板材图片和压缩包完整性。
+旋转镜像及伸缩拟合、透明像素规则、多框文件隔离与失败恢复、嵌入板材图片和压缩包完整性。
 按用户要求未启动本机 Rhino 实机验证；自动检查不能代替实际选面及渲染验证。
 透明材质参考：https://docs.mcneel.com/rhino/7mac/help/en-us/commands/materials.htm
+

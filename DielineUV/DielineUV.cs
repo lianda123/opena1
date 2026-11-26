@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.15.0")]
-[assembly: AssemblyFileVersion("0.4.15.0")]
+[assembly: AssemblyVersion("0.4.16.0")]
+[assembly: AssemblyFileVersion("0.4.16.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -44,8 +44,8 @@ namespace DielineUV
         {
             try
             {
-                var actions = new[] { "导出当前项目模板", "导入／更新 PNG 贴图", "透明件：导入／更新 PNG", "调整现有贴图的单双面／背面／侧边材质", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.15", "选择操作", actions) as string;
+                var actions = new[] { "导出刀模框模板（可连续导出）", "导入／更新 PNG 贴图", "透明件：导入／更新 PNG", "调整现有贴图的单双面／背面／侧边材质", "展开折弯件并记录对应关系" };
+                var action = Dialogs.ShowListBox(Title + " 0.4.16", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -55,7 +55,7 @@ namespace DielineUV
             }
             catch (Exception error)
             {
-                RhinoApp.WriteLine("{0} 0.4.15：{1}", Title, error.Message);
+                RhinoApp.WriteLine("{0} 0.4.16：{1}", Title, error.Message);
                 return Result.Failure;
             }
         }
@@ -68,7 +68,7 @@ namespace DielineUV
             if (bundle == null || bundle.Schema != ProjectSchema || bundle.Canvas == null || !bundle.Canvas.HasWorldBounds ||
                 bundle.Parts == null || bundle.Parts.Length == 0 ||
                 bundle.Canvas.Width <= 0 || bundle.Canvas.Height <= 0)
-                throw new InvalidDataException("请选择通过“导出当前项目模板”生成、与这张 PNG 对应的 manifest.json。");
+                throw new InvalidDataException("请选择通过“导出刀模框模板（可连续导出）”生成、与这张 PNG 对应的 manifest.json。");
             return bundle;
         }
 
@@ -497,3 +497,4 @@ namespace DielineUV
         [DataMember(Name = "mapping_kind", EmitDefaultValue = false)] public string MappingKind;
     }
 }
+

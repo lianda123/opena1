@@ -41,6 +41,23 @@ namespace DielineUV
 
         private static Result ExportProject(RhinoDoc doc)
         {
+            string lastFolder = null;
+            int exported = 0;
+            while (true)
+            {
+                var result = ExportOneProject(doc, ref lastFolder);
+                if (result != Result.Success)
+                    return exported > 0 && result == Result.Cancel ? Result.Success : result;
+                exported++;
+                var actions = new[] { "继续导出下一个刀模框", "完成导出" };
+                var action = Dialogs.ShowListBox(Title,
+                    "已完成 " + exported + " 个刀模框。每个框有独立的模板、贴图和材质设置。", actions) as string;
+                if (action != actions[0]) return Result.Success;
+            }
+        }
+
+        private static Result ExportOneProject(RhinoDoc doc, ref string lastFolder)
+        {
             var frame = SelectFrame(doc);
             if (frame == null) return Result.Cancel;
             var options = new[] { "识别排版关联", "选择原件和刀模（自动对齐）", "手动绑定平板（三对定位点）", "折弯件：绑定已有中间层刀模（允许拉伸）" };
@@ -63,6 +80,7 @@ namespace DielineUV
                     progress?.RestoreVisibility();
                     using (var dialog = new SelectFolderDialog { Title = "选择项目贴图模板的保存位置（取消可返回继续绑定）" })
                     {
+                        if (!string.IsNullOrEmpty(lastFolder)) dialog.Directory = lastFolder;
                         if (dialog.ShowDialog(RhinoEtoApp.MainWindow) != DialogResult.Ok)
                         {
                             if (progress == null) return Result.Cancel;
@@ -70,10 +88,12 @@ namespace DielineUV
                             progress.Resume();
                             continue;
                         }
-                        string output = Path.Combine(dialog.Directory, "DielineUV_" + Guid.NewGuid().ToString("N").Substring(0, 8));
-                        Directory.CreateDirectory(output);
-                        WriteProject(parts, frame, output);
-                        RhinoApp.WriteLine("已为当前项目的 {0} 个零件生成贴图模板：{1}", parts.Count, output);
+                        lastFolder = dialog.Directory;
+                        var border = doc.Objects.FindId(frame.FrameObjectId);
+                        string label = border == null ? null : border.Attributes.Name;
+                        string output = ProjectExportFiles.Write(lastFolder, label,
+                            folder => WriteProject(parts, frame, folder));
+                        RhinoApp.WriteLine("已为本刀模框的 {0} 个零件生成独立贴图模板：{1}", parts.Count, output);
                         return Result.Success;
                     }
                 }
@@ -724,10 +744,12 @@ namespace DielineUV
         private static void WriteProjectCalibration(Canvas frame, string path)
         {
             int cell = Math.Max(32, (int)Math.Ceiling(Math.Max(frame.Width, frame.Height) / 20.0));
+            // Own this font: SystemFonts.Default may return a shared instance used by dialogs.
+            // Keep it alive until the graphics context and PNG have both finished.
+            using (var font = new Eto.Drawing.Font(Eto.Drawing.SystemFont.Default, Math.Max(10, cell / 8f)))
             using (var bitmap = new Eto.Drawing.Bitmap(frame.Width, frame.Height, Eto.Drawing.PixelFormat.Format32bppRgb))
             {
                 using (var graphics = new Eto.Drawing.Graphics(bitmap))
-                using (var font = Eto.Drawing.SystemFonts.Default(Math.Max(10, cell / 8f)))
                 {
                     graphics.Clear(Eto.Drawing.Colors.White);
                     int columns = (frame.Width + cell - 1) / cell;
@@ -796,3 +818,4 @@ namespace DielineUV
         }
     }
 }
+

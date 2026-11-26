@@ -90,7 +90,7 @@ namespace DielineUV
                         doc.Objects.Select(id);
                         doc.Views.Redraw();
                         RhinoApp.WriteLine("已记录 {0} 的折弯贴图关系。可移动、旋转或镜像这个展开件；请勿缩放、炸开或重建它。", label);
-                        RhinoApp.WriteLine("把展开件排入实际外框后，运行“导出当前项目模板”并选择“识别排版关联”。");
+                        RhinoApp.WriteLine("把展开件排入实际外框后，运行“导出刀模框模板（可连续导出）”并选择“识别排版关联”。");
                         RhinoApp.WriteLine("本次按所选印图表面展开；与按中性层生成的旧刀模可能尺寸不同，请以本次模板绘图。");
                         return Result.Success;
                     }
@@ -427,3 +427,4 @@ namespace DielineUV
         }
     }
 }
+

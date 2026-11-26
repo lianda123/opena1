@@ -11,5 +11,8 @@
     <Compile Include="BendFitTests.cs" />
     <Compile Include="../DielineUV.TransparentPixels.cs" Link="TransparentPixels.cs" />
     <Compile Include="TransparentPixelTests.cs" />
+    <Compile Include="../DielineUV.ProjectExportFiles.cs" Link="ProjectExportFiles.cs" />
+    <Compile Include="MultiExportTests.cs" />
   </ItemGroup>
 </Project>
+
