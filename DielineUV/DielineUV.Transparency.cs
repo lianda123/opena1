@@ -6,6 +6,7 @@ using System.Linq;
 using Eto.Forms;
 using Rhino;
 using Rhino.DocObjects;
+using Rhino.Render;
 using Rhino.UI;
 
 namespace DielineUV
@@ -51,7 +52,7 @@ namespace DielineUV
                 layout.AddRow(new Label { Text = "无图区域透明度 %" }, slider, number);
                 layout.AddSeparateRow(new Label { Text = "0 = 不透明；100 = 完全透明。图案实色区域不受此数值影响。" });
                 layout.AddRow(new Label { Text = "图片背景" }, background);
-                layout.AddSeparateRow(new Label { Text = "需要白色图案时，请使用透明背景 PNG。" });
+                layout.AddSeparateRow(new Label { Text = "白底图请选“白底 PNG”；需保留白色图案时，请使用真正透明背景的 PNG。" });
                 layout.AddSeparateRow(null, ok, cancel);
                 dialog.Content = layout;
                 return dialog.ShowModal(RhinoEtoApp.MainWindow);
@@ -82,42 +83,127 @@ namespace DielineUV
         {
             using (var artwork = new Eto.Drawing.Bitmap(image))
             {
+                bool white;
+                if (!ResolveTransparentBackground(artwork, finish, out white)) return null;
                 const int tile = 512, padding = 16;
                 var atlas = new TextureAtlas { Width = artwork.Width + tile + 3 * padding,
                     Height = Math.Max(artwork.Height + 2 * padding, 2 * tile + 3 * padding),
                     Artwork = CacheTexture(image), Image = Path.Combine(TextureCache(), Guid.NewGuid().ToString("N") + ".png"),
+                    TransparencyImage = Path.Combine(TextureCache(), Guid.NewGuid().ToString("N") + "-transparency.png"),
                     Print = new AtlasRegion { X = padding, Y = padding, Width = artwork.Width, Height = artwork.Height },
                     Side = new AtlasRegion { X = artwork.Width + 2 * padding, Y = padding, Width = tile, Height = tile },
                     Back = new AtlasRegion { X = artwork.Width + 2 * padding, Y = tile + 2 * padding, Width = tile, Height = tile },
-                    BackColor = true, SideColor = true, Alpha = true };
-                using (var bitmap = new Eto.Drawing.Bitmap(atlas.Width, atlas.Height, Eto.Drawing.PixelFormat.Format32bppRgba))
+                    BackColor = true, SideColor = true };
+                using (var bitmap = new Eto.Drawing.Bitmap(atlas.Width, atlas.Height, Eto.Drawing.PixelFormat.Format32bppRgb))
+                using (var mask = new Eto.Drawing.Bitmap(atlas.Width, atlas.Height, Eto.Drawing.PixelFormat.Format32bppRgb))
                 {
                     int tint = finish.Tint.ToArgb();
                     using (var input = artwork.Lock())
                     using (var output = bitmap.Lock())
+                    using (var transparency = mask.Lock())
                     {
-                        var bottom = Eto.Drawing.Color.FromArgb(TransparentPixels.BasePixel(tint, finish.Transparency));
-                        output.SetPixels(Enumerable.Repeat(bottom, checked(atlas.Width * atlas.Height)));
-                        bool white = finish.BackgroundMode == "white";
-                        if (finish.BackgroundMode == "auto")
-                        {
-                            white = true;
-                            for (int y = 0; y < artwork.Height && white; y++)
-                                for (int x = 0; x < artwork.Width; x++)
-                                    if (input.GetPixel(x, y).Ab < 250) { white = false; break; }
-                            RhinoApp.WriteLine(white ? "透明件：本张 PNG 按白色背景识别图案。" : "透明件：本张 PNG 按透明背景识别图案。");
-                        }
+                        int bottom = TransparentPixels.BasePixel(tint, finish.Transparency);
+                        output.SetPixels(Enumerable.Repeat(Eto.Drawing.Color.FromArgb(TransparentPixels.ColorPixel(bottom)),
+                            checked(atlas.Width * atlas.Height)));
+                        transparency.SetPixels(Enumerable.Repeat(Eto.Drawing.Color.FromArgb(TransparentPixels.TransparencyPixel(bottom)),
+                            checked(atlas.Width * atlas.Height)));
                         for (int y = 0; y < artwork.Height; y++)
                             for (int x = 0; x < artwork.Width; x++)
                             {
                                 int pixel = TransparentPixels.Composite(input.GetPixel(x, y).ToArgb(), tint, finish.Transparency, white);
-                                output.SetPixel(atlas.Print.X + x, atlas.Print.Y + y, Eto.Drawing.Color.FromArgb(pixel));
+                                output.SetPixel(atlas.Print.X + x, atlas.Print.Y + y,
+                                    Eto.Drawing.Color.FromArgb(TransparentPixels.ColorPixel(pixel)));
+                                transparency.SetPixel(atlas.Print.X + x, atlas.Print.Y + y,
+                                    Eto.Drawing.Color.FromArgb(TransparentPixels.TransparencyPixel(pixel)));
                             }
                     }
                     bitmap.Save(atlas.Image, Eto.Drawing.ImageFormat.Png);
+                    mask.Save(atlas.TransparencyImage, Eto.Drawing.ImageFormat.Png);
                 }
                 return atlas;
             }
         }
+
+        private static bool ResolveTransparentBackground(Eto.Drawing.Bitmap artwork, SideFinish finish, out bool white)
+        {
+            white = finish.BackgroundMode == "white";
+            if (white) return true;
+            bool hasAlpha = false, hasWhite = false;
+            using (var pixels = artwork.Lock())
+                for (int y = 0; y < artwork.Height && !hasAlpha; y++)
+                    for (int x = 0; x < artwork.Width; x++)
+                    {
+                        var pixel = pixels.GetPixel(x, y);
+                        if (pixel.Ab < 250) { hasAlpha = true; break; }
+                        if (Math.Min(pixel.Rb, Math.Min(pixel.Gb, pixel.Bb)) >= 250) hasWhite = true;
+                    }
+            if (finish.BackgroundMode == "auto") white = !hasAlpha;
+            else if (!hasAlpha && hasWhite)
+            {
+                var choices = new[] { "去除白底，白色区域使用透明底材", "保留白色，作为不透明图案", "取消" };
+                var choice = Dialogs.ShowListBox(Title,
+                    "这张 PNG 没有透明背景。若保留白底，白色区域不会随透明度变透明。", choices) as string;
+                if (choice == null || choice == choices[2]) return false;
+                if (choice == choices[0]) { white = true; finish.BackgroundMode = "white"; }
+            }
+            RhinoApp.WriteLine(white ? "透明件：白底区域使用透明底材。" : "透明件：使用 PNG 透明背景，保留白色图案。");
+            return true;
+        }
+
+        private static void AttachTransparencyMap(RhinoDoc doc, RenderMaterial material, string image, int channel)
+        {
+            var context = RenderContent.ChangeContexts.Program;
+            var texture = CreateMappedTexture(doc, image, channel, true);
+            bool attached = false;
+            try
+            {
+                material.BeginChange(context);
+                try
+                {
+                    // The gray map replaces transparency over UV space. RGB is not alpha-blended to white.
+                    if (!material.SetParameter("alpha-transparency", false) || !material.SetParameter("transparency", 1.0))
+                        throw new InvalidOperationException("Rhino 无法保存透明件材质设置。");
+                    var slot = material.TextureChildSlotName(RenderMaterial.StandardChildSlots.Transparency);
+                    if (!material.SetChild(texture, slot))
+                        throw new InvalidOperationException("无法将透明遮罩添加到材质的透明纹理。");
+                    attached = true;
+                    material.SetChildSlotOn(slot, true, context);
+                    material.SetChildSlotAmount(slot, 100.0, context);
+                    if (!material.ChildSlotOn(slot) || Math.Abs(material.ChildSlotAmount(slot) - 100) > .001)
+                        throw new InvalidOperationException("Rhino 未启用透明件的透明遮罩。");
+                }
+                finally { material.EndChange(); }
+            }
+            finally { if (!attached) texture.Dispose(); }
+        }
+
+        private static RenderTexture CreateMappedTexture(RhinoDoc doc, string image, int channel, bool linear)
+        {
+#pragma warning disable 612, 618
+            var bitmap = new SimulatedTexture { Filename = image };
+#pragma warning restore 612, 618
+            var texture = RenderTexture.NewBitmapTexture(bitmap, doc);
+            if (texture == null) throw new InvalidOperationException("无法建立图片纹理。");
+            try
+            {
+                var context = RenderContent.ChangeContexts.Program;
+                texture.BeginChange(context);
+                try
+                {
+                    texture.SetProjectionMode(TextureProjectionMode.MappingChannel, context);
+                    texture.SetMappingChannel(channel, context);
+                    if (!texture.SetParameter("use-alpha-channel", false))
+                        throw new InvalidOperationException("Rhino 无法保存透明件的颜色／遮罩设置。");
+                    if (linear && !texture.SetParameter("treat-as-linear", true))
+                        throw new InvalidOperationException("Rhino 无法保存透明遮罩的线性数据。");
+                }
+                finally { texture.EndChange(); }
+                if (texture.GetProjectionMode() != TextureProjectionMode.MappingChannel || texture.GetMappingChannel() != channel)
+                    throw new InvalidOperationException("Rhino 无法保存透明件的 UV 通道。");
+                return texture;
+            }
+            catch { texture.Dispose(); throw; }
+        }
     }
 }
+

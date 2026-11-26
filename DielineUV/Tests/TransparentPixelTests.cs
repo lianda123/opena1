@@ -26,6 +26,42 @@ internal static class TransparentPixelTests
         check((edge & 0x00ffffff) == (art & 0x00ffffff), "transparent edge picked up a tint halo");
         check(TransparentPixels.BasePixel(tint, 0) == tint, "zero transparency wrong");
         check(((uint)TransparentPixels.BasePixel(tint, 1) >> 24) == 0, "full transparency wrong");
+        int previousMask = -1;
+        for (int amount = 0; amount <= 100; amount++)
+        {
+            int blank = TransparentPixels.Composite(0, tint, amount / 100.0, false);
+            int color = TransparentPixels.ColorPixel(blank);
+            int mask = TransparentPixels.TransparencyPixel(blank);
+            int value = mask & 255;
+            check(color == tint, "increasing transparency faded the color map toward white");
+            check((uint)mask >> 24 == 255, "transparency map itself has alpha");
+            check(((mask >> 16) & 255) == value && ((mask >> 8) & 255) == value, "mask is not neutral gray");
+            check(value == 255 - (int)((uint)blank >> 24), "transparency mask polarity is reversed");
+            check(value >= previousMask, "higher transparency produced a more opaque mask");
+            previousMask = value;
+            int printed = TransparentPixels.Composite(art, tint, amount / 100.0, false);
+            check(TransparentPixels.ColorPixel(printed) == art, "opaque artwork faded in the color map");
+            check(TransparentPixels.TransparencyPixel(printed) == unchecked((int)0xff000000), "artwork gained transparency");
+            int whiteBackground = TransparentPixels.Composite(unchecked((int)0xffffffff), tint, amount / 100.0, true);
+            check(TransparentPixels.TransparencyPixel(whiteBackground) == mask, "white-background mask differs from transparent PNG");
+            int whiteInk = TransparentPixels.Composite(unchecked((int)0xffffffff), tint, amount / 100.0, false);
+            check(TransparentPixels.ColorPixel(whiteInk) == unchecked((int)0xffffffff) &&
+                TransparentPixels.TransparencyPixel(whiteInk) == unchecked((int)0xff000000), "white artwork was made transparent");
+        }
+        for (int coverage = 0; coverage <= 255; coverage++)
+        {
+            int pixel = TransparentPixels.Composite((art & 0x00ffffff) | (coverage << 24), tint, 1, false);
+            int mask = TransparentPixels.TransparencyPixel(pixel) & 255;
+            check(mask == 255 - coverage, "mask lost antialias coverage");
+            check((uint)TransparentPixels.ColorPixel(pixel) >> 24 == 255, "color texture must be fully opaque RGB");
+            if (coverage != 0)
+                check((TransparentPixels.ColorPixel(pixel) & 0x00ffffff) == (art & 0x00ffffff), "edge color gained a white halo");
+        }
+        int fullBlank = TransparentPixels.Composite(0, tint, 1, false);
+        check(TransparentPixels.TransparencyPixel(fullBlank) == unchecked((int)0xffffffff), "100 percent transparency must use a white mask");
+        int opaqueBlank = TransparentPixels.Composite(0, tint, 0, false);
+        check(TransparentPixels.TransparencyPixel(opaqueBlank) == unchecked((int)0xff000000), "0 percent transparency must use a black mask");
         Console.WriteLine("Transparent artwork regression checks passed: " + checks);
     }
 }
+

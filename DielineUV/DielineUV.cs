@@ -22,8 +22,8 @@ using Rhino.UI;
 
 [assembly: AssemblyTitle("DielineUV")]
 [assembly: AssemblyDescription("Apply artwork from a calibrated dieline to Rhino parts.")]
-[assembly: AssemblyVersion("0.4.16.0")]
-[assembly: AssemblyFileVersion("0.4.16.0")]
+[assembly: AssemblyVersion("0.4.17.0")]
+[assembly: AssemblyFileVersion("0.4.17.0")]
 [assembly: Guid("6f7493dc-de9b-42cf-b1e0-1bcf1e83d1a4")]
 #if LEGACY_BUILD
 [assembly: TargetFramework(".NETFramework,Version=v4.8")]
@@ -45,7 +45,7 @@ namespace DielineUV
             try
             {
                 var actions = new[] { "导出刀模框模板（可连续导出）", "导入／更新 PNG 贴图", "透明件：导入／更新 PNG", "调整现有贴图的单双面／背面／侧边材质", "展开折弯件并记录对应关系" };
-                var action = Dialogs.ShowListBox(Title + " 0.4.16", "选择操作", actions) as string;
+                var action = Dialogs.ShowListBox(Title + " 0.4.17", "选择操作", actions) as string;
                 if (action == null) return Result.Cancel;
                 if (action == actions[0]) return ExportProject(doc);
                 if (action == actions[1]) return ImportProject(doc);
@@ -55,7 +55,7 @@ namespace DielineUV
             }
             catch (Exception error)
             {
-                RhinoApp.WriteLine("{0} 0.4.16：{1}", Title, error.Message);
+                RhinoApp.WriteLine("{0} 0.4.17：{1}", Title, error.Message);
                 return Result.Failure;
             }
         }
@@ -255,7 +255,11 @@ namespace DielineUV
             try
             {
                 PrepareProjectFinish(doc, bundle, finish);
-                if (!finish.WholeObject) finish.Atlas = CreateTextureAtlas(image, finish);
+                if (!finish.WholeObject)
+                {
+                    finish.Atlas = CreateTextureAtlas(image, finish);
+                    if (finish.Atlas == null) return false;
+                }
                 if (!PrepareChanges(doc, mappingPath, bundle, artworkChannel, finish, changes)) return false;
                 ApplyPrepared(doc, changes, image, artworkChannel, finish);
                 return true;
@@ -320,15 +324,18 @@ namespace DielineUV
         {
             var texturePath = finish.Atlas == null ? CacheTexture(image) : finish.Atlas.Image;
             var artworkPath = finish.Atlas == null ? texturePath : finish.Atlas.Artwork;
+            bool transparent = !string.IsNullOrEmpty(finish.Atlas?.TransparencyImage);
             using (var material = new Material { DiffuseColor = System.Drawing.Color.White,
-                AlphaTransparency = finish.Atlas?.Alpha == true, Transparency = 0 })
+                AlphaTransparency = false, Transparency = transparent ? 1 : 0 })
             {
+                if (transparent) material.IndexOfRefraction = 1.0;
                 var renderMaterial = RenderMaterial.CreateBasicMaterial(material, doc);
                 // The document-aware SimulatedTexture constructors require Rhino 7.6.
 #pragma warning disable 612, 618
                 var bitmap = new SimulatedTexture { Filename = texturePath };
 #pragma warning restore 612, 618
-                var texture = RenderTexture.NewBitmapTexture(bitmap, doc);
+                var texture = transparent ? CreateMappedTexture(doc, texturePath, artworkChannel, false) :
+                    RenderTexture.NewBitmapTexture(bitmap, doc);
                 if (renderMaterial == null || texture == null)
                     throw new InvalidOperationException("无法建立图片材质。");
 
@@ -345,17 +352,7 @@ namespace DielineUV
                     throw new InvalidOperationException("无法将图片添加到材质的颜色纹理。");
                 renderMaterial.SetChildSlotOn(slot, true, context);
                 renderMaterial.SetChildSlotAmount(slot, 100.0, context);
-                if (finish.Atlas?.Alpha == true)
-                {
-                    renderMaterial.BeginChange(context);
-                    try
-                    {
-                        if (!renderMaterial.SetParameter("alpha-transparency", true))
-                            throw new InvalidOperationException("Rhino 无法启用透明件图案的 Alpha 透明度。");
-                        renderMaterial.SetParameter("transparency", 0.0);
-                    }
-                    finally { renderMaterial.EndChange(); }
-                }
+                if (transparent) AttachTransparencyMap(doc, renderMaterial, finish.Atlas.TransparencyImage, artworkChannel);
                 uint undo = doc.BeginUndoRecord("DielineUV");
                 var applied = new List<Change>();
                 try

@@ -5,6 +5,18 @@ namespace DielineUV
     // Raster coverage, independent of Rhino/Eto. Alpha is opacity: 255 is opaque.
     internal static class TransparentPixels
     {
+        // Color textures are opaque RGB. Transparency goes only into a separate map.
+        internal static int ColorPixel(int composite)
+        {
+            return unchecked((int)0xff000000) | (composite & 0x00ffffff);
+        }
+
+        internal static int TransparencyPixel(int composite)
+        {
+            int amount = 255 - (int)((uint)composite >> 24);
+            return unchecked((int)0xff000000) | (amount << 16) | (amount << 8) | amount;
+        }
+
         internal static int BasePixel(int tint, double transparency)
         {
             double amount = Math.Max(0, Math.Min(1, transparency));
@@ -30,3 +42,4 @@ namespace DielineUV
         }
     }
 }
+

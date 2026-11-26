@@ -24,10 +24,9 @@ namespace DielineUV
         private sealed class TextureAtlas
         {
             public int Width, Height;
-            public string Image, Artwork;
+            public string Image, Artwork, TransparencyImage;
             public AtlasRegion Print, Back, Side;
             public bool BackColor, SideColor;
-            public bool Alpha;
         }
 
         private static TextureAtlas CreateTextureAtlas(string image, SideFinish finish)
@@ -168,3 +167,4 @@ namespace DielineUV
         }
     }
 }
+
