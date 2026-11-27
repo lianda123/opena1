@@ -156,10 +156,12 @@ namespace DielineUV
             string stem = "material_" + index.ToString("D4", CultureInfo.InvariantCulture);
             string relative = "textures/" + stem + ".png";
             string opacityRelative = null;
+            byte[] embeddedImage;
             if (maskPath == null && !sourceAlpha)
             {
                 byte[] original = File.ReadAllBytes(colorPath);
-                if (original.Length > 8 && original[0] == 137 && original[1] == 80 && original[2] == 78 && original[3] == 71)
+                if (original.Length > 26 && original[0] == 137 && original[1] == 80 && original[2] == 78 && original[3] == 71 &&
+                    (original[25] == 2 || original[25] == 0))
                 {
                     // Opaque atlases can be copied byte-for-byte, avoiding large bitmap allocations.
                     File.WriteAllBytes(Path.Combine(output, relative), original);
@@ -181,7 +183,24 @@ namespace DielineUV
                             alpha == null ? (int?)null : alpha.GetPixel(x, y).ToArgb(), sourceAlpha);
                         target.SetPixel(x, y, Eto.Drawing.Color.FromArgb(pixel));
                     }
-                rgba.Save(Path.Combine(output, relative), Eto.Drawing.ImageFormat.Png);
+                using (var png = new MemoryStream())
+                {
+                    rgba.Save(png, Eto.Drawing.ImageFormat.Png);
+                    embeddedImage = png.ToArray();
+                }
+                // OBJ readers may multiply map_Kd alpha by map_d. Its color PNG must be RGB.
+                // GLB instead uses the single RGBA image embedded above.
+                using (var rgb = new Eto.Drawing.Bitmap(color.Width, color.Height, Eto.Drawing.PixelFormat.Format32bppRgb))
+                {
+                    using (var source = rgba.Lock())
+                    using (var target = rgb.Lock())
+                        for (int y = 0; y < color.Height; y++) for (int x = 0; x < color.Width; x++)
+                        {
+                            var p = source.GetPixel(x, y);
+                            target.SetPixel(x, y, Eto.Drawing.Color.FromArgb(p.Rb, p.Gb, p.Bb));
+                        }
+                    rgb.Save(Path.Combine(output, relative), Eto.Drawing.ImageFormat.Png);
+                }
                 if (mask != null || sourceAlpha)
                 {
                     opacityRelative = "textures/" + stem + "_opacity.png";
@@ -199,7 +218,7 @@ namespace DielineUV
                 }
             }
             return new PortableMaterial { Name = stem, ColorPath = relative, OpacityPath = opacityRelative,
-                Image = File.ReadAllBytes(Path.Combine(output, relative)), Alpha = opacityRelative != null };
+                Image = embeddedImage, Alpha = opacityRelative != null };
         }
 
         private static PortablePart PortablePartFromMesh(RhinoObject source, Mesh mesh, int material, int sequence)
