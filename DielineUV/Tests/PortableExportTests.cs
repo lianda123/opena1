@@ -125,9 +125,124 @@ internal static class PortableExportTests
             Check(PortableModel.TexturePixel(ink, null, false) == ink, "opaque PNG changed");
             Check(((uint)PortableModel.TexturePixel(unchecked((int)0x80397bbd), unchecked((int)0xff808080), true) >> 24) == 64,
                 "source alpha and opacity mask not combined");
+            UntexturedAndMixed();
         }
         finally { CultureInfo.CurrentCulture = oldCulture; }
         Console.WriteLine("Portable UV export regression checks passed: " + checks);
+    }
+
+    private static void UntexturedAndMixed()
+    {
+        var materials = new[] {
+            new PortableMaterial { Name = "solid brown", BaseColor = new double[] { .2, .1, .05, 1 } },
+            new PortableMaterial { Name = "mapped one", ColorPath = "textures/mapped_one.png", Image = Png },
+            new PortableMaterial { Name = "solid translucent", BaseColor = new double[] { .1, .3, .5, .6 } },
+            new PortableMaterial { Name = "mapped two", ColorPath = "textures/mapped_two.png", Image = Png }
+        };
+        var parts = Enumerable.Range(0, 4).Select(i => new PortablePart {
+            Name = "mixed part " + i, SourceId = "mixed-source-" + i, Material = i,
+            Positions = new double[] { 1000*i,0,0, 1000*i+100,0,0, 1000*i,100,0 },
+            Normals = new double[] { 0,0,1,0,0,1,0,0,1 },
+            Uv = i % 2 == 0 ? null : new double[] { .1,.2,.8,.2,.1,.9 }, Triangles = new[] { 0,1,2 }
+        }).ToArray();
+        byte[] mixed;
+        using (var stream = new MemoryStream())
+        {
+            PortableModel.WriteGlb(stream, parts, materials, .001);
+            mixed = stream.ToArray();
+            using (var json = GlbJson(mixed))
+            {
+                var root = json.RootElement;
+                Check(root.GetProperty("nodes").GetArrayLength() == 4, "mixed export omitted untextured parts");
+                Check(root.GetProperty("images").GetArrayLength() == 2 && root.GetProperty("textures").GetArrayLength() == 2, "solid material allocated a fake image");
+                for (int i = 0; i < 4; i++)
+                {
+                    var primitive = root.GetProperty("meshes")[i].GetProperty("primitives")[0];
+                    var mat = root.GetProperty("materials")[i];
+                    var pbr = mat.GetProperty("pbrMetallicRoughness");
+                    Check(primitive.GetProperty("material").GetInt32() == i, "mixed material assigned to wrong part");
+                    Check(root.GetProperty("nodes")[i].GetProperty("extras").GetProperty("source_id").GetString() == parts[i].SourceId, "mixed source identity lost");
+                    Check(primitive.GetProperty("attributes").TryGetProperty("TEXCOORD_0", out _) == (i % 2 == 1), "solid part requires a fabricated UV");
+                    Check(pbr.TryGetProperty("baseColorTexture", out var texture) == (i % 2 == 1), "solid part inherited the previous texture");
+                    if (i % 2 == 1) Check(texture.GetProperty("index").GetInt32() == i / 2, "mixed GLB texture index used material index");
+                    for (int c = 0; c < 4; c++)
+                        Check(Math.Abs(pbr.GetProperty("baseColorFactor")[c].GetDouble() - materials[i].BaseColor[c]) < 1e-12, "current material color/opacity changed");
+                }
+                Check(root.GetProperty("materials")[2].GetProperty("alphaMode").GetString() == "BLEND", "solid transparency discarded");
+                Check(root.GetProperty("materials")[0].GetProperty("alphaMode").GetString() == "OPAQUE", "solid brown became transparent");
+            }
+        }
+        var onlyParts = new[] { parts[0], parts[2] };
+        onlyParts[1].Material = 1;
+        var onlyMaterials = new[] { materials[0], materials[2] };
+        byte[] untextured;
+        using (var stream = new MemoryStream())
+        {
+            PortableModel.WriteGlb(stream, onlyParts, onlyMaterials, .001);
+            untextured = stream.ToArray();
+            using (var json = GlbJson(untextured))
+            {
+                var root = json.RootElement;
+                Check(root.GetProperty("nodes").GetArrayLength() == 2, "untextured-only objects omitted");
+                foreach (string field in new[] { "images", "textures", "samplers" })
+                    Check(!root.TryGetProperty(field, out _), "empty or missing image reference in solid-only GLB");
+                foreach (var mesh in root.GetProperty("meshes").EnumerateArray())
+                    Check(!mesh.GetProperty("primitives")[0].GetProperty("attributes").TryGetProperty("TEXCOORD_0", out _), "solid-only GLB requires UVs");
+            }
+        }
+        parts[2].Material = 2;
+        var fixtureFolder = Path.Combine("DielineUV", "Tests", "artifacts");
+        if (Directory.Exists(Path.Combine("DielineUV", "Tests")))
+        {
+            Directory.CreateDirectory(fixtureFolder);
+            File.WriteAllBytes(Path.Combine(fixtureFolder, "portable-mixed-fixture.glb"), mixed);
+            File.WriteAllBytes(Path.Combine(fixtureFolder, "portable-untextured-fixture.glb"), untextured);
+        }
+        string token = "DielineUV-mixed-" + Guid.NewGuid().ToString("N"), folder = Path.Combine(Path.GetTempPath(), token);
+        Directory.CreateDirectory(folder);
+        try
+        {
+            PortableModel.WriteObj(folder, parts, materials, .001);
+            var obj = File.ReadAllLines(Path.Combine(folder, "model.obj"));
+            Check(obj.Count(l => l.StartsWith("o ")) == 4, "OBJ mixed export omitted parts");
+            Check(obj.Count(l => l.StartsWith("v ")) == 12 && obj.Count(l => l.StartsWith("vt ")) == 6, "mixed OBJ UV count assumes every part is textured");
+            Check(obj.Contains("f 1//1 2//2 3//3"), "solid OBJ triangle incorrectly references UVs");
+            Check(obj.Contains("f 4/1/4 5/2/5 6/3/6"), "first mapped OBJ UV indices affected by solid vertices");
+            Check(obj.Contains("f 7//7 8//8 9//9"), "second solid OBJ triangle indices changed");
+            Check(obj.Contains("f 10/4/10 11/5/11 12/6/12"), "second mapped OBJ UV index offset incorrect");
+            var mtl = File.ReadAllLines(Path.Combine(folder, "model.mtl"));
+            Check(mtl.Count(l => l.StartsWith("map_Kd ")) == 2, "solid MTL links to a missing PNG");
+            Check(mtl.Contains("Kd 0.2 0.1 0.05") && mtl.Contains("d 0.6"), "solid MTL color/opacity discarded or wrong locale");
+            parts[2].Material = 1;
+            PortableModel.WriteObj(folder, onlyParts, onlyMaterials, .001);
+            obj = File.ReadAllLines(Path.Combine(folder, "model.obj"));
+            mtl = File.ReadAllLines(Path.Combine(folder, "model.mtl"));
+            Check(obj.Count(l => l.StartsWith("o ")) == 2 && !obj.Any(l => l.StartsWith("vt ")), "solid-only OBJ needs UVs or omitted geometry");
+            Check(!mtl.Any(l => l.StartsWith("map_")), "solid-only MTL contains dangling image paths");
+        }
+        finally
+        {
+            parts[2].Material = 2;
+            if (Path.GetFileName(folder) != token || Path.GetDirectoryName(folder) != Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar))
+                throw new Exception("Unsafe temporary output directory");
+            Directory.Delete(folder, true);
+        }
+        var savedUv = parts[1].Uv; parts[1].Uv = null;
+        bool rejected = false; try { PortableModel.Validate(parts, materials, .001); } catch (InvalidDataException) { rejected = true; }
+        Check(rejected, "textured part without UV accepted after adding solid export"); parts[1].Uv = savedUv;
+        materials[0].BaseColor[3] = 1.01;
+        rejected = false; try { PortableModel.Validate(parts, materials, .001); } catch (InvalidDataException) { rejected = true; }
+        Check(rejected, "invalid solid opacity accepted"); materials[0].BaseColor[3] = 1;
+        materials[0].ColorPath = "textures/missing.png";
+        rejected = false; try { PortableModel.Validate(parts, materials, .001); } catch (InvalidDataException) { rejected = true; }
+        Check(rejected, "untextured material retained a missing texture reference"); materials[0].ColorPath = null;
+        Check(PortableModel.LinearColor(0) == 0 && PortableModel.LinearColor(1) == 1, "material black/white color transfer");
+        Check(Math.Abs(PortableModel.LinearColor(.5) - .21404114048223255) < 1e-12, "material sRGB color was not converted to glTF linear factor");
+    }
+
+    private static JsonDocument GlbJson(byte[] bytes)
+    {
+        return JsonDocument.Parse(Encoding.UTF8.GetString(bytes, 20, BitConverter.ToInt32(bytes, 12)));
     }
 
     private static float[] Floats(JsonElement root, byte[] bytes, int accessorIndex, int size)
@@ -138,4 +253,3 @@ internal static class PortableExportTests
         return Enumerable.Range(0, accessor.GetProperty("count").GetInt32() * size).Select(i => BitConverter.ToSingle(bytes, start + 4 * i)).ToArray();
     }
 }
-

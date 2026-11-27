@@ -1,11 +1,11 @@
-刀模贴图助手 DielineUV 0.4.19
+刀模贴图助手 DielineUV 0.4.20
 
 Windows 安装
 1. 完整解压到固定目录。在 Rhino 输入 PlugInManager，点击“安装”。
 2. Rhino 7（含 7.1）安装 Rhino7/DielineUV.rhp。
    Rhino 8 默认 .NET 模式安装 Rhino8/DielineUV.rhp（Rhino 8.21 或更新版本）；
    Rhino 8 的 .NET Framework 模式安装 Rhino7 目录中的 .rhp。
-3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.19。
+3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.20。
    原有 manifest.json 和 mapping.3dm 可以继续使用。
 
 macOS 安装
@@ -14,10 +14,13 @@ macOS 安装
 https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
 
 
-通用模型导出（本版新增）
+通用模型导出
 1. 保持原模型中已正确显示的贴图。运行 DielineUV，选择
    “导出通用模型（GLB／OBJ，烘焙 UV）”。已有绑定和 PNG 可以继续用。
-2. 选择导出全部已贴图零件，或点选所需的已贴图零件；再选保存位置。
+2. 选择导出范围，再选保存位置。四种范围为：
+   “导出全部已贴图零件”；“选择需要导出的已贴图零件”；
+   “导出全部零件（包含未贴图零件）”；“仅导出未贴图零件”。
+   后两项不要求未贴图零件先绑定刀模或导入 PNG。
    每次生成新的“DielineUV_通用模型_...”文件夹，不覆盖以前的输出。
 3. 优先在目标软件导入 model.glb。该文件内含独立零件、标准网格 UV、材质及 PNG，
    不依赖 Rhino 的第 32 通道或本机 AppData 图片路径。
@@ -31,8 +34,11 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
 7. 通用导出只读取当前模型，不修改原件、绑定、材质或原始刀模。
    原始刀模模板的导出功能仍用于二维绘图。普通 Rhino“导出”旧实体不会自动经过此流程，
    跨软件传递时请使用本节的新菜单及其生成的 GLB 或 OBJ。
-8. 如已编辑原件形状而未更新映射，或颜色与透明遮罩通道不一致，将中止导出并提示。
-   本功能导出插件已贴图的网格化零件，不包含其他辅助线稿或任意第三方程序材质。
+8. 已贴图零件仍按插件 UV 导出；如已编辑原件形状而未更新映射，或颜色与透明遮罩
+   通道不一致，将中止导出并提示。未贴图零件按当前对象或图层材质的基本颜色和
+   透明度导出，不需要图片和 UV，也不会套用其他零件的图案。
+   三维零件范围为曲面、多重曲面、拉伸体和网格；二维刀模线框等曲线不参与导出。
+   未经插件贴图的对象使用基本颜色材质，不烘焙第三方着色器或其他程序材质效果。
 
 导出和绑定
 1. 打开包含三维原件和二维刀模的同一模型，使用毫米单位。运行 DielineUV，
@@ -148,6 +154,8 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
    用于直观预览透视效果，不模拟真实玻璃折射。旧项目无需重绑，重新导入 PNG 即可升级材质。
 
 适用范围与验证
+0.4.20 增加导出全部零件（含未贴图）及仅导出未贴图零件两种范围。
+未贴图零件保留独立对象、基本材质颜色和透明度；混合导出不改变已贴图零件的 UV。
 0.4.19 增加带标准逐顶点 UV 的 GLB / OBJ 导出、相对材质路径与自包含图片。
 通用导出的坐标方向、单位、UV 接缝、纹理引用和透明像素均有回归检查；GLB 还通过 Khronos 校验。
 0.4.18 修正 0.4.17 将整体透明度固定成 100% 及遮罩黑白方向错误的问题。
@@ -163,4 +171,3 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
 按用户要求未启动本机 Rhino 实机验证；自动检查不能代替实际选面及渲染验证。
 透明材质参考：https://docs.mcneel.com/rhino/7mac/help/en-us/commands/materials.htm
 Rhino 7 遮罩约定参考：https://github.com/mcneel/RhinoCycles/blob/rhino-7.0/Shaders/RhinoFullNxt.cs
-

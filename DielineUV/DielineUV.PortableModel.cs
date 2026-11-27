@@ -21,6 +21,8 @@ namespace DielineUV
         public string Name, ColorPath, OpacityPath;
         public byte[] Image;
         public bool Alpha;
+        public double[] BaseColor = new double[] { 1, 1, 1, 1 };
+        public bool HasTexture { get { return Image != null; } }
     }
 
     // Standard mesh coordinates and per-vertex UVs only. No Rhino mapping channels.
@@ -30,24 +32,36 @@ namespace DielineUV
         {
             if (parts == null || parts.Count == 0 || materials == null || materials.Count == 0 || !Finite(meters) || meters <= 0)
                 throw new InvalidDataException("缺少模型、材质或有效单位。");
+            foreach (var material in materials)
+            {
+                if (material == null || material.BaseColor == null || material.BaseColor.Length != 4 ||
+                    material.BaseColor.Any(v => !Finite(v) || v < 0 || v > 1))
+                    throw new InvalidDataException("材质颜色或透明度无效。");
+                if (material.HasTexture ? material.Image.Length < 8 || material.Image[0] != 137 || material.Image[1] != 80 ||
+                    !SafeRelative(material.ColorPath) || material.OpacityPath != null && !SafeRelative(material.OpacityPath) :
+                    material.ColorPath != null || material.OpacityPath != null)
+                    throw new InvalidDataException("缺少 PNG 材质或材质路径不是相对路径。");
+            }
             foreach (var p in parts)
             {
                 if (p.Positions == null || p.Positions.Length == 0 || p.Positions.Length % 3 != 0 ||
-                    p.Normals == null || p.Normals.Length != p.Positions.Length || p.Uv == null ||
-                    p.Uv.Length != p.Positions.Length / 3 * 2 || p.Triangles == null || p.Triangles.Length == 0 ||
+                    p.Normals == null || p.Normals.Length != p.Positions.Length ||
+                    p.Uv != null && p.Uv.Length != p.Positions.Length / 3 * 2 || p.Triangles == null || p.Triangles.Length == 0 ||
                     p.Triangles.Length % 3 != 0 || p.Material < 0 || p.Material >= materials.Count)
                     throw new InvalidDataException("零件的坐标、法线或 UV 不完整：" + p.Name);
-                if (p.Positions.Any(v => !Finite(v)) || p.Normals.Any(v => !Finite(v)) || p.Uv.Any(v => !Finite(v)) ||
+                if (materials[p.Material].HasTexture && p.Uv == null)
+                    throw new InvalidDataException("已贴图零件缺少 UV：" + p.Name);
+                if (p.Positions.Any(v => !Finite(v)) || p.Normals.Any(v => !Finite(v)) || p.Uv != null && p.Uv.Any(v => !Finite(v)) ||
                     p.Triangles.Any(i => i < 0 || i >= p.Positions.Length / 3))
                     throw new InvalidDataException("零件包含无效坐标或索引：" + p.Name);
             }
-            foreach (var material in materials)
-                if (material.Image == null || material.Image.Length < 8 || material.Image[0] != 137 || material.Image[1] != 80 ||
-                    !SafeRelative(material.ColorPath) || material.OpacityPath != null && !SafeRelative(material.OpacityPath))
-                    throw new InvalidDataException("缺少 PNG 材质或材质路径不是相对路径。");
         }
 
         internal static bool Finite(double v) { return !double.IsNaN(v) && !double.IsInfinity(v); }
+        internal static double LinearColor(double srgb)
+        {
+            return srgb <= .04045 ? srgb / 12.92 : Math.Pow((srgb + .055) / 1.055, 2.4);
+        }
         internal static int TexturePixel(int color, int? opacityMask, bool useSourceAlpha)
         {
             int alpha = useSourceAlpha ? (int)((uint)color >> 24) : 255;
@@ -72,24 +86,32 @@ namespace DielineUV
             {
                 obj.WriteLine("# DielineUV: baked UVs; Y up; positions in meters; OBJ UV origin is bottom-left.");
                 obj.WriteLine("mtllib model.mtl");
-                int offset = 1;
+                int offset = 1, uvOffset = 1;
                 for (int pi = 0; pi < parts.Count; pi++)
                 {
                     var p = parts[pi];
+                    bool textured = materials[p.Material].HasTexture;
                     obj.WriteLine("o part_" + pi.ToString("D4", CultureInfo.InvariantCulture) + "_" + Token(p.SourceId));
                     obj.WriteLine("usemtl material_" + p.Material.ToString("D4", CultureInfo.InvariantCulture));
                     for (int i = 0; i < p.Positions.Length; i += 3)
                         obj.WriteLine("v " + N(p.Positions[i] * meters) + " " + N(p.Positions[i + 2] * meters) + " " + N(-p.Positions[i + 1] * meters));
-                    for (int i = 0; i < p.Uv.Length; i += 2) obj.WriteLine("vt " + N(p.Uv[i]) + " " + N(p.Uv[i + 1]));
+                    if (textured)
+                        for (int i = 0; i < p.Uv.Length; i += 2) obj.WriteLine("vt " + N(p.Uv[i]) + " " + N(p.Uv[i + 1]));
                     for (int i = 0; i < p.Normals.Length; i += 3)
                         obj.WriteLine("vn " + N(p.Normals[i]) + " " + N(p.Normals[i + 2]) + " " + N(-p.Normals[i + 1]));
                     for (int i = 0; i < p.Triangles.Length; i += 3)
                     {
                         obj.Write("f");
-                        for (int j = 0; j < 3; j++) { string k = (offset + p.Triangles[i + j]).ToString(CultureInfo.InvariantCulture); obj.Write(" " + k + "/" + k + "/" + k); }
+                        for (int j = 0; j < 3; j++)
+                        {
+                            string k = (offset + p.Triangles[i + j]).ToString(CultureInfo.InvariantCulture);
+                            string t = textured ? (uvOffset + p.Triangles[i + j]).ToString(CultureInfo.InvariantCulture) : "";
+                            obj.Write(" " + k + "/" + t + "/" + k);
+                        }
                         obj.WriteLine();
                     }
                     offset = checked(offset + p.Positions.Length / 3);
+                    if (textured) uvOffset = checked(uvOffset + p.Uv.Length / 2);
                 }
             }
             using (var mtl = new StreamWriter(Path.Combine(folder, "model.mtl"), false, new UTF8Encoding(false)))
@@ -97,8 +119,10 @@ namespace DielineUV
                 {
                     var m = materials[i];
                     mtl.WriteLine("newmtl material_" + i.ToString("D4", CultureInfo.InvariantCulture));
-                    mtl.WriteLine("Ka 0 0 0\nKd 1 1 1\nKs 0 0 0\nNs 0\nd 1\nillum 2");
-                    mtl.WriteLine("map_Kd " + m.ColorPath);
+                    mtl.WriteLine("Ka 0 0 0");
+                    mtl.WriteLine("Kd " + string.Join(" ", m.BaseColor.Take(3).Select(N)));
+                    mtl.WriteLine("Ks 0 0 0\nNs 0\nd " + N(m.BaseColor[3]) + "\nillum 2");
+                    if (m.HasTexture) mtl.WriteLine("map_Kd " + m.ColorPath);
                     if (m.OpacityPath != null) mtl.WriteLine("map_d " + m.OpacityPath);
                     mtl.WriteLine();
                 }
@@ -132,34 +156,47 @@ namespace DielineUV
                     start = (int)binary.Position;
                     for (int i = 0; i < p.Normals.Length; i += 3) { writer.Write((float)p.Normals[i]); writer.Write((float)p.Normals[i + 2]); writer.Write((float)-p.Normals[i + 1]); }
                     int normal = Accessor(views, accessors, start, (int)binary.Position - start, count, "VEC3", 5126, 34962, null, null);
-                    start = (int)binary.Position;
-                    for (int i = 0; i < p.Uv.Length; i += 2)
+                    var attributes = O("POSITION", pos, "NORMAL", normal);
+                    if (materials[p.Material].HasTexture)
                     {
-                        writer.Write((float)p.Uv[i]); writer.Write((float)(1 - p.Uv[i + 1])); // glTF origin is top-left; PNG bytes stay unchanged.
+                        start = (int)binary.Position;
+                        for (int i = 0; i < p.Uv.Length; i += 2)
+                        {
+                            writer.Write((float)p.Uv[i]); writer.Write((float)(1 - p.Uv[i + 1])); // glTF origin is top-left; PNG bytes stay unchanged.
+                        }
+                        attributes["TEXCOORD_0"] = Accessor(views, accessors, start, (int)binary.Position - start, count, "VEC2", 5126, 34962, null, null);
                     }
-                    int uv = Accessor(views, accessors, start, (int)binary.Position - start, count, "VEC2", 5126, 34962, null, null);
                     start = (int)binary.Position;
                     foreach (int index in p.Triangles) writer.Write((uint)index);
                     int indices = Accessor(views, accessors, start, (int)binary.Position - start, p.Triangles.Length, "SCALAR", 5125, 34963, null, null);
-                    meshes.Add(O("name", p.Name, "primitives", new[] { O("attributes", O("POSITION", pos, "NORMAL", normal, "TEXCOORD_0", uv), "indices", indices, "material", p.Material, "mode", 4) }));
+                    meshes.Add(O("name", p.Name, "primitives", new[] { O("attributes", attributes, "indices", indices, "material", p.Material, "mode", 4) }));
                     nodes.Add(O("name", p.Name, "mesh", meshes.Count - 1, "extras", O("source_id", p.SourceId)));
                 }
+                var gltfMaterials = new List<object>();
                 foreach (var material in materials)
                 {
-                    Align(writer, 0); int start = (int)binary.Position; writer.Write(material.Image);
-                    views.Add(O("buffer", 0, "byteOffset", start, "byteLength", material.Image.Length));
-                    images.Add(O("bufferView", views.Count - 1, "mimeType", "image/png", "name", material.Name));
+                    var pbr = O("baseColorFactor", material.BaseColor, "metallicFactor", 0, "roughnessFactor", .85);
+                    if (material.HasTexture)
+                    {
+                        pbr["baseColorTexture"] = O("index", images.Count, "texCoord", 0);
+                        Align(writer, 0); int start = (int)binary.Position; writer.Write(material.Image);
+                        views.Add(O("buffer", 0, "byteOffset", start, "byteLength", material.Image.Length));
+                        images.Add(O("bufferView", views.Count - 1, "mimeType", "image/png", "name", material.Name));
+                    }
+                    gltfMaterials.Add(O("name", material.Name, "pbrMetallicRoughness", pbr,
+                        "alphaMode", material.Alpha || material.BaseColor[3] < 1 ? "BLEND" : "OPAQUE", "doubleSided", true));
                 }
                 int dataLength = (int)binary.Length;
-                var gltfMaterials = materials.Select((m, i) => O("name", m.Name,
-                    "pbrMetallicRoughness", O("baseColorFactor", new[] { 1, 1, 1, 1 }, "baseColorTexture", O("index", i, "texCoord", 0), "metallicFactor", 0, "roughnessFactor", .85),
-                    "alphaMode", m.Alpha ? "BLEND" : "OPAQUE", "doubleSided", true)).ToArray();
-                var document = O("asset", O("version", "2.0", "generator", "DielineUV 0.4.19"), "scene", 0,
+                var document = O("asset", O("version", "2.0", "generator", "DielineUV 0.4.20"), "scene", 0,
                     "scenes", new[] { O("nodes", Enumerable.Range(0, parts.Count).ToArray()) }, "nodes", nodes, "meshes", meshes,
-                    "materials", gltfMaterials, "images", images,
-                    "textures", materials.Select((m, i) => O("sampler", 0, "source", i)).ToArray(),
-                    "samplers", new[] { O("magFilter", 9729, "minFilter", 9987, "wrapS", 10497, "wrapT", 10497) },
+                    "materials", gltfMaterials,
                     "buffers", new[] { O("byteLength", dataLength) }, "bufferViews", views, "accessors", accessors);
+                if (images.Count > 0)
+                {
+                    document["images"] = images;
+                    document["textures"] = Enumerable.Range(0, images.Count).Select(i => O("sampler", 0, "source", i)).ToArray();
+                    document["samplers"] = new[] { O("magFilter", 9729, "minFilter", 9987, "wrapS", 10497, "wrapT", 10497) };
+                }
                 byte[] json = Encoding.UTF8.GetBytes(Json(document));
                 int jsonLength = checked((json.Length + 3) & ~3), binLength = checked((dataLength + 3) & ~3);
                 using (var glb = new BinaryWriter(output, Encoding.UTF8, true))
@@ -207,4 +244,3 @@ namespace DielineUV
         }
     }
 }
-
