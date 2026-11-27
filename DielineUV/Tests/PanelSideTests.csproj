@@ -13,6 +13,8 @@
     <Compile Include="TransparentPixelTests.cs" />
     <Compile Include="../DielineUV.ProjectExportFiles.cs" Link="ProjectExportFiles.cs" />
     <Compile Include="MultiExportTests.cs" />
+    <Compile Include="../DielineUV.PortableModel.cs" Link="PortableModel.cs" />
+    <Compile Include="PortableExportTests.cs" />
   </ItemGroup>
 </Project>
 

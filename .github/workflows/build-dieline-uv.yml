@@ -22,8 +22,15 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Check panel, bend, alpha and multi-frame export regressions
+      - name: Check panel, bend, alpha, frame and portable UV export regressions
         run: dotnet run --project DielineUV/Tests/PanelSideTests.csproj -c Release
+      - name: Validate exported GLB with Khronos validator
+        shell: powershell
+        run: |
+          $taskValidator = Join-Path $env:RUNNER_TEMP 'dieline-gltf-validator'
+          npm install --prefix $taskValidator --ignore-scripts --no-package-lock gltf-validator@2.0.0-dev.3.10
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node DielineUV/Tests/validate-glb.cjs (Join-Path $taskValidator 'node_modules/gltf-validator')
       - name: Compile Rhino 7 and 8 plug-ins
         run: dotnet build DielineUV/DielineUV.csproj -c Release
       - name: Verify Rhino 7 plug-in references the Rhino 7.0 SDK

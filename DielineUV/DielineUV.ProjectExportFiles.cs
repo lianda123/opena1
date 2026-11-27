@@ -9,6 +9,12 @@ namespace DielineUV
         // Each export owns a new sibling directory. A failed export never becomes a template.
         public static string Write(string parent, string frameName, Action<string> writeFiles)
         {
+            return Write(parent, frameName, writeFiles,
+                new[] { "mapping.3dm", "template.svg", "template.png", "calibration.png", "manifest.json" });
+        }
+
+        public static string Write(string parent, string frameName, Action<string> writeFiles, string[] requiredFiles)
+        {
             if (writeFiles == null) throw new ArgumentNullException(nameof(writeFiles));
             string root = new DirectoryInfo(Path.GetFullPath(parent)).FullName;
             int rootLength = Path.GetPathRoot(root).Length;
@@ -32,7 +38,7 @@ namespace DielineUV
             try
             {
                 writeFiles(staging);
-                foreach (string required in new[] { "mapping.3dm", "template.svg", "template.png", "calibration.png", "manifest.json" })
+                foreach (string required in requiredFiles)
                 {
                     var file = new FileInfo(Path.Combine(staging, required));
                     if (!file.Exists || file.Length == 0)

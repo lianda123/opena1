@@ -1,17 +1,38 @@
-刀模贴图助手 DielineUV 0.4.18
+刀模贴图助手 DielineUV 0.4.19
 
 Windows 安装
 1. 完整解压到固定目录。在 Rhino 输入 PlugInManager，点击“安装”。
 2. Rhino 7（含 7.1）安装 Rhino7/DielineUV.rhp。
    Rhino 8 默认 .NET 模式安装 Rhino8/DielineUV.rhp（Rhino 8.21 或更新版本）；
    Rhino 8 的 .NET Framework 模式安装 Rhino7 目录中的 .rhp。
-3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.18。
+3. 升级后完全退出并重启 Rhino。输入 DielineUV，标题应显示 0.4.19。
    原有 manifest.json 和 mapping.3dm 可以继续使用。
 
 macOS 安装
 双击 Mac 中相应主版本的 .macrhi，或拖到相应 Rhino 的 Dock 图标，重启 Rhino。
 两版本同机使用时，将 Rhino 8 插件包放在 Rhino 8 专用插件目录，避免覆盖共享安装。
 https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
+
+
+通用模型导出（本版新增）
+1. 保持原模型中已正确显示的贴图。运行 DielineUV，选择
+   “导出通用模型（GLB／OBJ，烘焙 UV）”。已有绑定和 PNG 可以继续用。
+2. 选择导出全部已贴图零件，或点选所需的已贴图零件；再选保存位置。
+   每次生成新的“DielineUV_通用模型_...”文件夹，不覆盖以前的输出。
+3. 优先在目标软件导入 model.glb。该文件内含独立零件、标准网格 UV、材质及 PNG，
+   不依赖 Rhino 的第 32 通道或本机 AppData 图片路径。
+4. 不支持 GLB 的软件使用 model.obj。必须保留同目录的 model.mtl 与 textures 文件夹，
+   不要只复制 OBJ。OBJ 与 GLB 均以米为单位、Y 轴向上，导入时按此设置。
+5. 颜色、背面、侧边沿用实际使用的合成图集；不要替换成原始刀模 PNG。
+   透明件的遮罩会合入 GLB 的 Alpha，OBJ 则同时输出 map_d 图片。
+   具体透明显示及灯光、反射效果由目标软件决定。
+6. 每个零件独立保存，原件编号写入 GLB 节点 extras.source_id 和 parts.json。
+   该数据也可用于网页装配对应关系。
+7. 通用导出只读取当前模型，不修改原件、绑定、材质或原始刀模。
+   原始刀模模板的导出功能仍用于二维绘图。普通 Rhino“导出”旧实体不会自动经过此流程，
+   跨软件传递时请使用本节的新菜单及其生成的 GLB 或 OBJ。
+8. 如已编辑原件形状而未更新映射，或颜色与透明遮罩通道不一致，将中止导出并提示。
+   本功能导出插件已贴图的网格化零件，不包含其他辅助线稿或任意第三方程序材质。
 
 导出和绑定
 1. 打开包含三维原件和二维刀模的同一模型，使用毫米单位。运行 DielineUV，
@@ -127,6 +148,8 @@ https://developer.rhino3d.com/en/guides/rhinocommon/plugin-installers-mac/
    用于直观预览透视效果，不模拟真实玻璃折射。旧项目无需重绑，重新导入 PNG 即可升级材质。
 
 适用范围与验证
+0.4.19 增加带标准逐顶点 UV 的 GLB / OBJ 导出、相对材质路径与自包含图片。
+通用导出的坐标方向、单位、UV 接缝、纹理引用和透明像素均有回归检查；GLB 还通过 Khronos 校验。
 0.4.18 修正 0.4.17 将整体透明度固定成 100% 及遮罩黑白方向错误的问题。
 应用前会读取 Rhino 实际显示材质，核对整体透明度与遮罩是否保存成功。
 保留 0.4.16 的字体修复、连续多刀模框导出，以及已有折弯绑定。

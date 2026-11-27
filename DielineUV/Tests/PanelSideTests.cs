@@ -41,6 +41,7 @@ internal static class Program
         BendFitTests.Run();
         TransparentPixelTests.Run();
         MultiExportTests.Run();
+        PortableExportTests.Run();
     }
 }
 

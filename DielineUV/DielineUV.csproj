@@ -10,6 +10,8 @@
     <Compile Include="DielineUV.cs" />
     <Compile Include="DielineUV.Project.cs" />
     <Compile Include="DielineUV.ProjectExportFiles.cs" />
+    <Compile Include="DielineUV.PortableModel.cs" />
+    <Compile Include="DielineUV.PortableExport.cs" />
     <Compile Include="DielineUV.BindingProgress.cs" />
     <Compile Include="DielineUV.Fold.cs" />
     <Compile Include="DielineUV.Alignment.cs" />
